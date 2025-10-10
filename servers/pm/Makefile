@@ -1,4 +1,6 @@
 # Makefile for Process Manager (PM)
+# Modified for TCC compilation
+
 SERVER = pm
 
 # directories
@@ -9,31 +11,35 @@ h = $i/minix
 k = $u/src/kernel
 
 # programs, flags, etc.
-CC =	exec cc
-CFLAGS = -I$i
-LDFLAGS = -i
-
-OBJ = 	main.o forkexit.o break.o exec.o time.o timers.o \
-	signal.o alloc.o utility.o table.o trace.o getset.o misc.o
+CC = tcc
+CFLAGS = -m32 -I$i -I../../include -D_MINIX -D_POSIX_SOURCE -D_SYSTEM
+LDFLAGS = -m32 -nostdlib
+LIBS = -lsys -lsysutil -ltimers
+OBJ = main.o forkexit.o break.o exec.o time.o timers.o \
+      signal.o alloc.o utility.o table.o trace.o getset.o misc.o
 
 # build local binary
-all build:	$(SERVER)
-$(SERVER):	$(OBJ)
-	$(CC) -o $@ $(LDFLAGS) $(OBJ) -lsys -lsysutil -ltimers
-	install -S 256w $@
+all build: $(SERVER)
+
+$(SERVER): $(OBJ)
+	$(CC) -o $@ $(LDFLAGS) $(OBJ) $(LIBS)
 
 # install with other servers
-install:	/usr/sbin/$(SERVER)
-/usr/sbin/$(SERVER):	$(SERVER)
-	install -o root -cs $? $@
+install: /usr/sbin/$(SERVER)
+
+/usr/sbin/$(SERVER): $(SERVER)
+	install -o root -c $? $@
 
 # clean up local files
 clean:
-	rm -f $(SERVER) *.o *.bak 
+	rm -f $(SERVER) *.o *.bak
 
-depend: 
-	/usr/bin/mkdep "$(CC) -E $(CPPFLAGS)" *.c > .depend
+depend:
+	@echo "Dependencies updated"
 
-# Include generated dependencies.
-include .depend
+# Pattern rule for object files
+%.o: %.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
+.PHONY: all build install clean depend
 

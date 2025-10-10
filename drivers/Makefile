@@ -1,6 +1,11 @@
 # Makefile for all device drivers.
-#
+# Modified for TCC compilation
+
 MAKE = exec make -$(MAKEFLAGS)
+CC = tcc
+EXTRA_OPTS = -m32 -D_MINIX -D_SYSTEM
+
+export CC EXTRA_OPTS
 
 usage:
 	@echo "" >&2
@@ -9,11 +14,12 @@ usage:
 	@echo "	make build    # Compile all device drivers locally" >&2
 	@echo "	make image    # Compile drivers in boot image" >&2
 	@echo "	make clean    # Remove local compiler results" >&2
-	@echo "	make install  # Install drivers to /etc/drivers/" >&2
+	@echo "	make install  # Install drivers to /sbin/" >&2
 	@echo "	                (requires root privileges)" >&2
 	@echo "" >&2
 
 build: all
+
 all install depend clean:
 	cd ./libdriver && $(MAKE) $@
 	cd ./libpci && $(MAKE) $@
@@ -29,3 +35,6 @@ image:
 	cd ./memory && $(MAKE) build
 	cd ./at_wini && $(MAKE) build
 	cd ./log && $(MAKE) build
+
+.PHONY: usage build all install depend clean image
+

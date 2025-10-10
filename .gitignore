@@ -1,0 +1,49 @@
+# Build artifacts
+*.o
+*.a
+*.bak
+*~
+.depend
+
+# Generated binaries
+kernel/kernel
+kernel/system.a
+servers/pm/pm
+servers/fs/fs
+servers/rs/rs
+servers/rs/service
+servers/init/init
+drivers/tty/tty
+drivers/memory/memory
+drivers/at_wini/at_wini
+drivers/log/log
+drivers/libdriver/libdriver.a
+drivers/libpci/libpci.a
+drivers/tty/keymaps/*.map
+drivers/tty/keymaps/genmap
+
+# Boot directory
+boot/
+
+# Local header installation
+usr/
+
+# QEMU/Bochs files
+*.img
+*.qcow2
+bochs.log
+
+# Build logs
+build.log
+kernel.log
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+Versteck/
+
+# OS specific
+.DS_Store
+Thumbs.db

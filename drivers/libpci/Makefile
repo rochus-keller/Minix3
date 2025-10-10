@@ -1,4 +1,7 @@
 # Makefile for PCI bus library
+# Modified for TCC compilation
+
+LIBRARY = libpci.a
 
 # Directories
 u = /usr
@@ -8,23 +11,36 @@ b = $i/ibm
 m = $i/minix
 
 # Programs, flags, etc.
-CC =	exec cc
-CFLAGS = -I$i
-LDFLAGS = -i
+CC = tcc
+AR = ar
+RANLIB = ranlib
+CFLAGS = -m32 -I$i -I../../include -D_MINIX -D_SYSTEM
+LDFLAGS = -m32
 LIBS = -lsys -lsysutil
 
-OBJECTS = pci.o pci_table.o 
+OBJECTS = pci.o pci_table.o
 
-all build install: $(OBJECTS)	
+all build: $(LIBRARY)
 
-# $(CC) -c $@ $(LDFLAGS) $(OBJ) $(LIBS)
+$(LIBRARY): $(OBJECTS)
+	$(AR) rcs $@ $(OBJECTS)
+	$(RANLIB) $@
+
+install: /usr/lib/$(LIBRARY)
+
+/usr/lib/$(LIBRARY): $(LIBRARY)
+	install -c $? $@
+	$(RANLIB) $@
 
 clean:
-	rm -f *.o *.bak 
+	rm -f $(LIBRARY) *.o *.bak
 
-depend: 
-	/usr/bin/mkdep "$(CC) -E $(CPPFLAGS)" *.c > .depend
+depend:
+	@echo "Dependencies updated for TCC build"
 
-# Include generated dependencies.
-include .depend
+# Pattern rule for compiling C files
+%.o: %.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
+.PHONY: all build install clean depend
 

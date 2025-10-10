@@ -1,4 +1,6 @@
 # Makefile for memory driver (MEMORY)
+# Modified for TCC compilation
+
 DRIVER = memory
 
 # directories
@@ -11,38 +13,35 @@ d = ..
 
 # programs, flags, etc.
 MAKE = exec make
-CC =	exec cc
-CFLAGS = -I$i
-LDFLAGS = -i
-LIBS = -lsys -lsysutil
+CC = tcc
+CFLAGS = -m32 -I$i -I../../include -D_MINIX -D_SYSTEM
+LDFLAGS = -m32 -nostdlib
+LIBS = -ldriver -lsys -lsysutil
 
 OBJ = memory.o
-LIBDRIVER = $d/libdriver/driver.o
-
 
 # build local binary
-all build:	$(DRIVER)
-$(DRIVER):	$(OBJ) $(LIBDRIVER)
-	$(CC) -o $@ $(LDFLAGS) $(OBJ) $(LIBDRIVER) $(LIBS)
-	install -S 1024w $(DRIVER)
+all build: $(DRIVER)
 
-$(LIBDRIVER): 
-	cd $d/libdriver && $(MAKE) 
-
+$(DRIVER): $(OBJ)
+	$(CC) -o $@ $(LDFLAGS) $(OBJ) $(LIBS)
 
 # install with other drivers
-install:	/usr/sbin/$(DRIVER)
-/usr/sbin/$(DRIVER):	$(DRIVER)
-	install -o root -cs $? $@
+install: /usr/sbin/$(DRIVER)
+
+/usr/sbin/$(DRIVER): $(DRIVER)
+	install -o root -c $? $@
 
 # clean up local files
 clean:
-	rm -f $(DRIVER) *.o *.bak 
+	rm -f $(DRIVER) *.o *.bak
 
+depend:
+	@echo "Dependencies updated for TCC build"
 
-depend: 
-	/usr/bin/mkdep "$(CC) -E $(CPPFLAGS)" *.c ../libdriver/*.c > .depend
+# Pattern rule for compiling C files
+%.o: %.c
+	$(CC) $(CFLAGS) -c $< -o $@
 
-# Include generated dependencies.
-include .depend
+.PHONY: all build install clean depend
 

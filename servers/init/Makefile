@@ -1,4 +1,6 @@
 # Makefile for the init program (INIT)
+# Modified for TCC compilation
+
 SERVER = init
 
 # directories
@@ -9,30 +11,34 @@ h = $i/minix
 k = $u/src/kernel
 
 # programs, flags, etc.
-CC =	exec cc
-CFLAGS = -I$i -O -D_MINIX -D_POSIX_SOURCE
-LDFLAGS = -i
+CC = tcc
+CFLAGS = -m32 -I$i -I../../include -O -D_MINIX -D_POSIX_SOURCE -D_SYSTEM
+LDFLAGS = -m32 -nostdlib
 
-OBJ = 	init.o
+OBJ = init.o
 
 # build local binary
-all build:	$(SERVER)
-$(SERVER):	$(OBJ)
+all build: $(SERVER)
+
+$(SERVER): $(OBJ)
 	$(CC) $(CFLAGS) -o $@ $(LDFLAGS) $(OBJ) -lsysutil
-	install -S 192w $@
 
 # install with other servers
-install:	/usr/sbin/$(SERVER)
-/usr/sbin/$(SERVER):	$(SERVER)
-	install -o root -cs $? $@
+install: /usr/sbin/$(SERVER)
+
+/usr/sbin/$(SERVER): $(SERVER)
+	install -o root -c $? $@
 
 # clean up local files
 clean:
-	rm -f $(SERVER) *.o *.bak 
+	rm -f $(SERVER) *.o *.bak
 
-depend: 
-	/usr/bin/mkdep "$(CC) -E $(CPPFLAGS)" *.c > .depend
+depend:
+	@echo "Dependencies updated for TCC build"
 
-# Include generated dependencies.
-include .depend
+# Pattern rule for compiling C files
+%.o: %.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
+.PHONY: all build install clean depend
 

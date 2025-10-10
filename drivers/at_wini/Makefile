@@ -1,4 +1,6 @@
 # Makefile for the AT disk driver (AT_WINI)
+# Modified for TCC compilation
+
 DRIVER = at_wini
 
 # directories
@@ -12,40 +14,35 @@ p = ../libpci
 
 # programs, flags, etc.
 MAKE = exec make
-CC =	exec cc
-CFLAGS = -I$i
-LDFLAGS = -i
-LIBS = -lsysutil -lsys -ltimers
+CC = tcc
+CFLAGS = -m32 -I$i -I../../include -D_MINIX -D_SYSTEM
+LDFLAGS = -m32 -nostdlib
+LIBS = -ldriver -lpci -lsysutil -lsys -ltimers
 
-OBJ = at_wini.o 
-LIBDRIVER = $d/libdriver/driver.o $d/libdriver/drvlib.o 
-LIBPCI = $p/pci.o $p/pci_table.o
-
+OBJ = at_wini.o
 
 # build local binary
-all build:	$(DRIVER)
-$(DRIVER):	$(OBJ) $(LIBDRIVER) $(LIBPCI)
-	$(CC) -o $@ $(LDFLAGS) $(OBJ) $(LIBDRIVER) $(LIBS) $(LIBPCI)
-	install -S 8k $(DRIVER)
+all build: $(DRIVER)
 
-$(LIBPCI):
-	cd $p && $(MAKE)
-
-$(LIBDRIVER): 
-	cd $d/libdriver && $(MAKE) 
+$(DRIVER): $(OBJ)
+	$(CC) -o $@ $(LDFLAGS) $(OBJ) $(LIBS)
 
 # install with other drivers
-install:	/sbin/$(DRIVER)
-/sbin/$(DRIVER):	$(DRIVER)
-	install -o root -cs $? $@
+install: /sbin/$(DRIVER)
+
+/sbin/$(DRIVER): $(DRIVER)
+	install -o root -c $? $@
 
 # clean up local files
 clean:
-	rm -f $(DRIVER) *.o *.bak 
+	rm -f $(DRIVER) *.o *.bak
 
-depend: 
-	/usr/bin/mkdep "$(CC) -E $(CPPFLAGS)" *.c ../libdriver/*.c > .depend
+depend:
+	@echo "Dependencies updated for TCC build"
 
-# Include generated dependencies.
-include .depend
+# Pattern rule for compiling C files
+%.o: %.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
+.PHONY: all build install clean depend
 

@@ -1,26 +1,33 @@
 # Generate binary keymaps.
+# Modified for TCC compilation
 
-LK =	/usr/lib/keymaps
+LK = /usr/lib/keymaps
 
-.SUFFIXES:	.src .map
+CC = tcc
+CFLAGS = -m32 -I../../../include
+
+.SUFFIXES: .src .map
 
 .src.map:
-	$(CC) -DKEYSRC=\"$<\" genmap.c
-	./a.out > $@
-	@rm -f a.out
+	$(CC) $(CFLAGS) -DKEYSRC=\"$<\" genmap.c -o genmap
+	./genmap > $@
+	@rm -f genmap
 
-all:	\
+all: \
 	us-std.map \
 
-install:	\
+install: \
 	$(LK) \
 	$(LK)/us-std.map \
 
 clean:
-	rm -f a.out *.map
+	rm -f genmap *.map
 
 $(LK):
 	install -d $@
 
-$(LK)/us-std.map:	us-std.map
+$(LK)/us-std.map: us-std.map
 	install -c $? $@
+
+.PHONY: all install clean
+
