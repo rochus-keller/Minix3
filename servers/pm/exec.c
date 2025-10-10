@@ -242,7 +242,12 @@ vir_bytes *pc;			/* program entry point (initial PC) */
 
   /* Check magic number, cpu type, and flags. */
   if (BADMAG(hdr)) return(ENOEXEC);
+#if (CHIP == INTEL && _WORD_SIZE == 2)
+  if (hdr.a_cpu != A_I8086) return(ENOEXEC);
+#endif
+#if (CHIP == INTEL && _WORD_SIZE == 4)
   if (hdr.a_cpu != A_I80386) return(ENOEXEC);
+#endif
   if ((hdr.a_flags & ~(A_NSYM | A_EXEC | A_SEP)) != 0) return(ENOEXEC);
 
   *ft = ( (hdr.a_flags & A_SEP) ? SEPARATE : 0);    /* separate I & D or not */
@@ -269,7 +274,11 @@ vir_bytes *pc;			/* program entry point (initial PC) */
   if (dc >= totc) return(ENOEXEC);	/* stack must be at least 1 click */
   dvir = (*ft == SEPARATE ? 0 : tc);
   s_vir = dvir + (totc - sc);
+#if (CHIP == INTEL && _WORD_SIZE == 2)
+  m = size_ok(*ft, tc, dc, sc, dvir, s_vir);
+#else
   m = (dvir + dc > s_vir) ? ENOMEM : OK;
+#endif
   ct = hdr.a_hdrlen & BYTE;		/* header length */
   if (ct > A_MINHDR) lseek(fd, (off_t) ct, SEEK_SET); /* skip unused hdr */
   return(m);
@@ -349,6 +358,13 @@ phys_bytes tot_bytes;		/* total memory to allocate, including gap */
   rmp->mp_seg[S].mem_phys = rmp->mp_seg[D].mem_phys + data_clicks + gap_clicks;
   rmp->mp_seg[S].mem_vir = rmp->mp_seg[D].mem_vir + data_clicks + gap_clicks;
   rmp->mp_seg[S].mem_len = stack_clicks;
+
+#if (CHIP == M68000)
+  rmp->mp_seg[T].mem_vir = 0;
+  rmp->mp_seg[D].mem_vir = rmp->mp_seg[T].mem_len;
+  rmp->mp_seg[S].mem_vir = rmp->mp_seg[D].mem_vir 
+  	+ rmp->mp_seg[D].mem_len + gap_clicks;
+#endif
 
   sys_newmap(who, rmp->mp_seg);   /* report new map to the kernel */
 

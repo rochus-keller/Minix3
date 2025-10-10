@@ -249,6 +249,16 @@ PRIVATE void pm_init()
   if (sendrec(FS_PROC_NR, &mess) != OK || mess.m_type != OK)
 	panic(__FILE__,"can't sync up with FS", NO_NUM);
 
+#if ENABLE_BOOTDEV
+  /* Possibly we must correct the memory chunks for the boot device. */
+  if (kinfo.bootdev_size > 0) {
+      mem_map[T].mem_phys = kinfo.bootdev_base >> CLICK_SHIFT;
+      mem_map[T].mem_len = 0;
+      mem_map[D].mem_len = (kinfo.bootdev_size+CLICK_SIZE-1) >> CLICK_SHIFT;
+      patch_mem_chunks(mem_chunks, mem_map);
+  }
+#endif /* ENABLE_BOOTDEV */
+
   /* Initialize tables to all physical memory and print memory information. */
   printf("Physical memory:");
   mem_init(mem_chunks, &free_clicks);
@@ -275,6 +285,16 @@ int queue;				/* store mem chunks here */
   return nice_val;
 }
 
+#if _WORD_SIZE == 2
+/* In real mode only 1M can be addressed, and in 16-bit protected we can go
+ * no further than we can count in clicks.  (The 286 is further limited by
+ * its 24 bit address bus, but we can assume in that case that no more than
+ * 16M memory is reported by the BIOS.)
+ */
+#define MAX_REAL	0x00100000L
+#define MAX_16BIT	(0xFFF0L << CLICK_SHIFT)
+#endif
+
 /*===========================================================================*
  *				get_mem_chunks				     *
  *===========================================================================*/
@@ -290,6 +310,12 @@ struct memory *mem_chunks;			/* store mem chunks here */
   char *s, *end;			/* use to parse boot variable */ 
   int i, done = 0;
   struct memory *memp;
+#if _WORD_SIZE == 2
+  unsigned long max_address;
+  struct machine machine;
+  if (OK != (i=sys_getmachine(&machine)))
+	panic(__FILE__, "sys_getmachine failed", i);
+#endif
 
   /* Initialize everything to zero. */
   for (i = 0; i < NR_MEMS; i++) {
@@ -320,6 +346,10 @@ struct memory *mem_chunks;			/* store mem chunks here */
 	    else done = 1;
 	}
 	limit = base + size;	
+#if _WORD_SIZE == 2
+	max_address = machine.protected ? MAX_16BIT : MAX_REAL;
+	if (limit > max_address) limit = max_address;
+#endif
 	base = (base + CLICK_SIZE-1) & ~(long)(CLICK_SIZE-1);
 	limit &= ~(long)(CLICK_SIZE-1);
 	if (limit <= base) continue;
@@ -349,3 +379,4 @@ struct mem_map *map_ptr;			/* memory to remove */
 	}
   }
 }
+

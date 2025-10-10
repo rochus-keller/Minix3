@@ -36,11 +36,24 @@ PRIVATE struct hole {
 
 PRIVATE struct hole *hole_head;	/* pointer to first hole */
 PRIVATE struct hole *free_slots;/* ptr to list of unused table slots */
+#if ENABLE_SWAP
+PRIVATE int swap_fd = -1;	/* file descriptor of open swap file/device */
+PRIVATE u32_t swap_offset;	/* offset to start of swap area on swap file */
+PRIVATE phys_clicks swap_base;	/* memory offset chosen as swap base */
+PRIVATE phys_clicks swap_maxsize;/* maximum amount of swap "memory" possible */
+PRIVATE struct mproc *in_queue;	/* queue of processes wanting to swap in */
+PRIVATE struct mproc *outswap = &mproc[0]; 	 /* outswap candidate? */
+#else /* ! ENABLE_SWAP */
 #define swap_base ((phys_clicks) -1)
+#endif /* ENABLE_SWAP */
 
 FORWARD _PROTOTYPE( void del_slot, (struct hole *prev_ptr, struct hole *hp) );
 FORWARD _PROTOTYPE( void merge, (struct hole *hp)			    );
+#if ENABLE_SWAP
+FORWARD _PROTOTYPE( int swap_out, (void)				    );
+#else
 #define swap_out()	(0)
+#endif
 
 /*===========================================================================*
  *				alloc_mem				     *
@@ -216,6 +229,197 @@ phys_clicks *free;		/* memory size summaries */
   	if (chunks[i].size > 0) {
 		free_mem(chunks[i].base, chunks[i].size);
 		*free += chunks[i].size;
+#if ENABLE_SWAP
+		if (swap_base < chunks[i].base + chunks[i].size) 
+			swap_base = chunks[i].base + chunks[i].size;
+#endif
+	}
+  }
+
+#if ENABLE_SWAP
+  /* The swap area is represented as a hole above and separate of regular
+   * memory.  A hole at the size of the swap file is allocated on "swapon".
+   */
+  swap_base++;				/* make separate */
+  swap_maxsize = 0 - swap_base;		/* maximum we can possibly use */
+#endif
+}
+
+#if ENABLE_SWAP
+/*===========================================================================*
+ *				swap_on					     *
+ *===========================================================================*/
+PUBLIC int swap_on(file, offset, size)
+char *file;				/* file to swap on */
+u32_t offset, size;			/* area on swap file to use */
+{
+/* Turn swapping on. */
+
+  if (swap_fd != -1) return(EBUSY);	/* already have swap? */
+
+  tell_fs(CHDIR, who, FALSE, 0);	/* be like the caller for open() */
+  if ((swap_fd = open(file, O_RDWR)) < 0) return(-errno);
+  swap_offset = offset;
+  size >>= CLICK_SHIFT;
+  if (size > swap_maxsize) size = swap_maxsize;
+  if (size > 0) free_mem(swap_base, (phys_clicks) size);
+  return(OK);
+}
+
+/*===========================================================================*
+ *				swap_off				     *
+ *===========================================================================*/
+PUBLIC int swap_off()
+{
+/* Turn swapping off. */
+  struct mproc *rmp;
+  struct hole *hp, *prev_ptr;
+
+  if (swap_fd == -1) return(OK);	/* can't turn off what isn't on */
+
+  /* Put all swapped out processes on the inswap queue and swap in. */
+  for (rmp = &mproc[0]; rmp < &mproc[NR_PROCS]; rmp++) {
+	if (rmp->mp_flags & ONSWAP) swap_inqueue(rmp);
+  }
+  swap_in();
+
+  /* All in memory? */
+  for (rmp = &mproc[0]; rmp < &mproc[NR_PROCS]; rmp++) {
+	if (rmp->mp_flags & ONSWAP) return(ENOMEM);
+  }
+
+  /* Yes.  Remove the swap hole and close the swap file descriptor. */
+  for (hp = hole_head; hp != NIL_HOLE; prev_ptr = hp, hp = hp->h_next) {
+	if (hp->h_base >= swap_base) {
+		del_slot(prev_ptr, hp);
+		hp = hole_head;
+	}
+  }
+  close(swap_fd);
+  swap_fd = -1;
+  return(OK);
+}
+
+/*===========================================================================*
+ *				swap_inqueue				     *
+ *===========================================================================*/
+PUBLIC void swap_inqueue(rmp)
+register struct mproc *rmp;		/* process to add to the queue */
+{
+/* Put a swapped out process on the queue of processes to be swapped in.  This
+ * happens when such a process gets a signal, or if a reply message must be
+ * sent, like when a process doing a wait() has a child that exits.
+ */
+  struct mproc **pmp;
+
+  if (rmp->mp_flags & SWAPIN) return;	/* already queued */
+
+  
+  for (pmp = &in_queue; *pmp != NULL; pmp = &(*pmp)->mp_swapq) {}
+  *pmp = rmp;
+  rmp->mp_swapq = NULL;
+  rmp->mp_flags |= SWAPIN;
+}
+
+/*===========================================================================*
+ *				swap_in					     *
+ *===========================================================================*/
+PUBLIC void swap_in()
+{
+/* Try to swap in a process on the inswap queue.  We want to send it a message,
+ * interrupt it, or something.
+ */
+  struct mproc **pmp, *rmp;
+  phys_clicks old_base, new_base, size;
+  off_t off;
+  int proc_nr;
+
+  pmp = &in_queue;
+  while ((rmp = *pmp) != NULL) {
+	proc_nr = (rmp - mproc);
+	size = rmp->mp_seg[S].mem_vir + rmp->mp_seg[S].mem_len
+		- rmp->mp_seg[D].mem_vir;
+
+	if (!(rmp->mp_flags & SWAPIN)) {
+		/* Guess it got killed.  (Queue is cleaned here.) */
+		*pmp = rmp->mp_swapq;
+		continue;
+	} else
+	if ((new_base = alloc_mem(size)) == NO_MEM) {
+		/* No memory for this one, try the next. */
+		pmp = &rmp->mp_swapq;
+	} else {
+		/* We've found memory.  Update map and swap in. */
+		old_base = rmp->mp_seg[D].mem_phys;
+		rmp->mp_seg[D].mem_phys = new_base;
+		rmp->mp_seg[S].mem_phys = rmp->mp_seg[D].mem_phys + 
+			(rmp->mp_seg[S].mem_vir - rmp->mp_seg[D].mem_vir);
+		sys_newmap(proc_nr, rmp->mp_seg);
+		off = swap_offset + ((off_t) (old_base-swap_base)<<CLICK_SHIFT);
+		lseek(swap_fd, off, SEEK_SET);
+		rw_seg(0, swap_fd, proc_nr, D, (phys_bytes)size << CLICK_SHIFT);
+		free_mem(old_base, size);
+		rmp->mp_flags &= ~(ONSWAP|SWAPIN);
+		*pmp = rmp->mp_swapq;
+		check_pending(rmp);	/* a signal may have waked this one */
 	}
   }
 }
+
+/*===========================================================================*
+ *				swap_out				     *
+ *===========================================================================*/
+PRIVATE int swap_out()
+{
+/* Try to find a process that can be swapped out.  Candidates are those blocked
+ * on a system call that PM handles, like wait(), pause() or sigsuspend().
+ */
+  struct mproc *rmp;
+  struct hole *hp, *prev_ptr;
+  phys_clicks old_base, new_base, size;
+  off_t off;
+  int proc_nr;
+
+  rmp = outswap;
+  do {
+	if (++rmp == &mproc[NR_PROCS]) rmp = &mproc[0];
+
+	/* A candidate? */
+	if (!(rmp->mp_flags & (PAUSED | WAITING | SIGSUSPENDED))) continue;
+
+	/* Already on swap or otherwise to be avoided? */
+	if (rmp->mp_flags & (DONT_SWAP | TRACED | REPLY | ONSWAP)) continue;
+
+	/* Got one, find a swap hole and swap it out. */
+	proc_nr = (rmp - mproc);
+	size = rmp->mp_seg[S].mem_vir + rmp->mp_seg[S].mem_len
+		- rmp->mp_seg[D].mem_vir;
+
+	prev_ptr = NIL_HOLE;
+	for (hp = hole_head; hp != NIL_HOLE; prev_ptr = hp, hp = hp->h_next) {
+		if (hp->h_base >= swap_base && hp->h_len >= size) break;
+	}
+	if (hp == NIL_HOLE) continue;	/* oops, not enough swapspace */
+	new_base = hp->h_base;
+	hp->h_base += size;
+	hp->h_len -= size;
+	if (hp->h_len == 0) del_slot(prev_ptr, hp);
+
+	off = swap_offset + ((off_t) (new_base - swap_base) << CLICK_SHIFT);
+	lseek(swap_fd, off, SEEK_SET);
+	rw_seg(1, swap_fd, proc_nr, D, (phys_bytes)size << CLICK_SHIFT);
+	old_base = rmp->mp_seg[D].mem_phys;
+	rmp->mp_seg[D].mem_phys = new_base;
+	rmp->mp_seg[S].mem_phys = rmp->mp_seg[D].mem_phys + 
+		(rmp->mp_seg[S].mem_vir - rmp->mp_seg[D].mem_vir);
+	sys_newmap(proc_nr, rmp->mp_seg);
+	free_mem(old_base, size);
+	rmp->mp_flags |= ONSWAP;
+
+	outswap = rmp;		/* next time start here */
+	return(TRUE);
+  } while (rmp != outswap);
+
+  return(FALSE);	/* no candidate found */
+}
+#endif /* SWAP */

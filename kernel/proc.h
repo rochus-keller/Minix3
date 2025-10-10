@@ -16,8 +16,15 @@
  
 struct proc {
   struct stackframe_s p_reg;	/* process' registers saved in stack frame */
+
+#if (CHIP == INTEL)
   reg_t p_ldt_sel;		/* selector in gdt with ldt base and limit */
   struct segdesc_s p_ldt[2+NR_REMOTE_SEGS]; /* CS, DS and remote segments */
+#endif 
+
+#if (CHIP == M68000)
+/* M68000 specific registers and FPU details go here. */
+#endif 
 
   proc_nr_t p_nr;		/* number of this process (for fast access) */
   struct priv *p_priv;		/* system privileges structure */
@@ -43,6 +50,10 @@ struct proc {
   sigset_t p_pending;		/* bit map for pending kernel signals */
 
   char p_name[P_NAME_LEN];	/* name of the process, including \0 */
+
+#if DEBUG_SCHED_CHECK
+  int p_ready, p_found;
+#endif
 };
 
 /* Bits for the runtime flags. A process is runnable iff p_rts_flags == 0. */

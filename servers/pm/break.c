@@ -12,7 +12,7 @@
  * The entry points into this file are:
  *   do_brk:	  BRK/SBRK system calls to grow or shrink the data segment
  *   adjust:	  see if a proposed segment adjustment is allowed
- *   size_ok:	  see if the segment sizes are feasible
+ *   size_ok:	  see if the segment sizes are feasible (i86 only)
  */
 
 #include "pm.h"
@@ -113,8 +113,13 @@ vir_bytes sp;			/* new value of sp */
 
   /* Do the new data and stack segment sizes fit in the address space? */
   ft = (rmp->mp_flags & SEPARATE);
+#if (CHIP == INTEL && _WORD_SIZE == 2)
+  r = size_ok(ft, rmp->mp_seg[T].mem_len, rmp->mp_seg[D].mem_len, 
+       rmp->mp_seg[S].mem_len, rmp->mp_seg[D].mem_vir, rmp->mp_seg[S].mem_vir);
+#else
   r = (rmp->mp_seg[D].mem_vir + rmp->mp_seg[D].mem_len > 
           rmp->mp_seg[S].mem_vir) ? ENOMEM : OK;
+#endif
   if (r == OK) {
 	if (changed) sys_newmap((int)(rmp - mproc), rmp->mp_seg);
 	return(OK);
@@ -129,3 +134,42 @@ vir_bytes sp;			/* new value of sp */
   }
   return(ENOMEM);
 }
+
+#if (CHIP == INTEL && _WORD_SIZE == 2)
+/*===========================================================================*
+ *				size_ok  				     *
+ *===========================================================================*/
+PUBLIC int size_ok(file_type, tc, dc, sc, dvir, s_vir)
+int file_type;			/* SEPARATE or 0 */
+vir_clicks tc;			/* text size in clicks */
+vir_clicks dc;			/* data size in clicks */
+vir_clicks sc;			/* stack size in clicks */
+vir_clicks dvir;		/* virtual address for start of data seg */
+vir_clicks s_vir;		/* virtual address for start of stack seg */
+{
+/* Check to see if the sizes are feasible and enough segmentation registers
+ * exist.  On a machine with eight 8K pages, text, data, stack sizes of
+ * (32K, 16K, 16K) will fit, but (33K, 17K, 13K) will not, even though the
+ * former is bigger (64K) than the latter (63K).  Even on the 8088 this test
+ * is needed, since the data and stack may not exceed 4096 clicks.
+ * Note this is not used for 32-bit Intel Minix, the test is done in-line.
+ */
+
+  int pt, pd, ps;		/* segment sizes in pages */
+
+  pt = ( (tc << CLICK_SHIFT) + PAGE_SIZE - 1)/PAGE_SIZE;
+  pd = ( (dc << CLICK_SHIFT) + PAGE_SIZE - 1)/PAGE_SIZE;
+  ps = ( (sc << CLICK_SHIFT) + PAGE_SIZE - 1)/PAGE_SIZE;
+
+  if (file_type == SEPARATE) {
+	if (pt > MAX_PAGES || pd + ps > MAX_PAGES) return(ENOMEM);
+  } else {
+	if (pt + pd + ps > MAX_PAGES) return(ENOMEM);
+  }
+
+  if (dvir + dc > s_vir) return(ENOMEM);
+
+  return(OK);
+}
+#endif
+

@@ -18,7 +18,9 @@ all install depend clean:
 	cd ./pm && $(MAKE) $@
 	cd ./fs && $(MAKE) $@
 	cd ./rs && $(MAKE) $@
+	cd ./is && $(MAKE) $@
 	cd ./init && $(MAKE) $@
+	cd ./inet && $(MAKE) $@
 
 image:
 	cd ./pm && $(MAKE) EXTRA_OPTS=$(EXTRA_OPTS) build

@@ -39,12 +39,27 @@
 #include <sys/ioc_disk.h>
 #include "driver.h"
 
+#if (CHIP == INTEL)
+
+#if USE_EXTRA_DMA_BUF && DMA_BUF_SIZE < 2048
+/* A bit extra scratch for the Adaptec driver. */
+#define BUF_EXTRA	(2048 - DMA_BUF_SIZE)
+#else
 #define BUF_EXTRA	0
+#endif
 
 /* Claim space for variables. */
 PRIVATE u8_t buffer[(unsigned) 2 * DMA_BUF_SIZE + BUF_EXTRA];
 u8_t *tmp_buf;			/* the DMA buffer eventually */
 phys_bytes tmp_phys;		/* phys address of DMA buffer */
+
+#else /* CHIP != INTEL */
+
+/* Claim space for variables. */
+u8_t tmp_buf[DMA_BUF_SIZE];	/* the DMA buffer */
+phys_bytes tmp_phys;		/* phys address of DMA buffer */
+
+#endif /* CHIP != INTEL */
 
 FORWARD _PROTOTYPE( void init_buffer, (void) );
 FORWARD _PROTOTYPE( int do_rdwt, (struct driver *dr, message *mp) );
@@ -131,6 +146,7 @@ PRIVATE void init_buffer()
  * 'tmp_phys', the normal address is 'tmp_buf'.
  */
 
+#if (CHIP == INTEL)
   unsigned left;
 
   tmp_buf = buffer;
@@ -141,6 +157,7 @@ PRIVATE void init_buffer()
 	tmp_buf += left;
 	tmp_phys += left;
   }
+#endif /* CHIP == INTEL */
 }
 
 /*===========================================================================*

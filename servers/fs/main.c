@@ -348,6 +348,11 @@ PRIVATE void load_ram(void)
   	}
   }
 
+#if ENABLE_CACHE2
+  /* The RAM disk is a second level block cache while not otherwise used. */
+  init_cache2(ram_size);
+#endif
+
   /* See if we must load the RAM disk image, otherwise return. */
   if (root_dev != DEV_RAM)
   	return;

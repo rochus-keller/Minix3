@@ -256,6 +256,12 @@ sigset_t sig_map;
 		id = 0; break;	/* broadcast to process group */
 	    case SIGKILL:
 		id = -1; break;	/* broadcast to all except INIT */
+#if DEAD_CODE
+	    case SIGALRM:
+		if ((rmp->mp_flags & ALARM_ON) == 0) continue;
+		rmp->mp_flags &= ~ALARM_ON;
+		/* fall through */
+#endif
 	    default:
 		id = proc_id;
 		break;
@@ -407,6 +413,14 @@ int signo;			/* signal to send to process (1 to _NSIG) */
 	sigaddset(&rmp->mp_sigpending, signo);
 	return;
   }
+#if ENABLE_SWAP
+  if (rmp->mp_flags & ONSWAP) {
+	/* Process is swapped out, leave signal pending. */
+	sigaddset(&rmp->mp_sigpending, signo);
+	swap_inqueue(rmp);
+	return;
+  }
+#endif
   sigflags = rmp->mp_sigact[signo].sa_flags;
   if (sigismember(&rmp->mp_catch, signo)) {
 	if (rmp->mp_flags & SIGSUSPENDED)
@@ -461,6 +475,14 @@ doterminate:
 
   rmp->mp_sigstatus = (char) signo;
   if (sigismember(&core_sset, signo)) {
+#if ENABLE_SWAP
+	if (rmp->mp_flags & ONSWAP) {
+		/* Process is swapped out, leave signal pending. */
+		sigaddset(&rmp->mp_sigpending, signo);
+		swap_inqueue(rmp);
+		return;
+	}
+#endif
 	/* Switch to the user's FS environment and dump core. */
 	tell_fs(CHDIR, slot, FALSE, 0);
 	dump_core(rmp);

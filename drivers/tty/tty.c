@@ -59,10 +59,15 @@
 #include "../drivers.h"
 #include "../drivers.h"
 #include <termios.h>
+#if ENABLE_SRCCOMPAT || ENABLE_BINCOMPAT
+#include <sgtty.h>
+#endif
 #include <sys/ioc_tty.h>
 #include <signal.h>
 #include <minix/callnr.h>
+#if (CHIP == INTEL)
 #include <minix/keymap.h>
+#endif
 #include "tty.h"
 
 #include <sys/time.h>
@@ -116,6 +121,17 @@ FORWARD _PROTOTYPE( void dev_ioctl, (tty_t *tp)				);
 FORWARD _PROTOTYPE( void setattr, (tty_t *tp)				);
 FORWARD _PROTOTYPE( void tty_icancel, (tty_t *tp)			);
 FORWARD _PROTOTYPE( void tty_init, (void)				);
+#if ENABLE_SRCCOMPAT || ENABLE_BINCOMPAT
+FORWARD _PROTOTYPE( int compat_getp, (tty_t *tp, struct sgttyb *sg)	);
+FORWARD _PROTOTYPE( int compat_getc, (tty_t *tp, struct tchars *sg)	);
+FORWARD _PROTOTYPE( int compat_setp, (tty_t *tp, struct sgttyb *sg)	);
+FORWARD _PROTOTYPE( int compat_setc, (tty_t *tp, struct tchars *sg)	);
+FORWARD _PROTOTYPE( int tspd2sgspd, (speed_t tspd)			);
+FORWARD _PROTOTYPE( speed_t sgspd2tspd, (int sgspd)			);
+#if ENABLE_BINCOMPAT
+FORWARD _PROTOTYPE( void do_ioctl_compat, (tty_t *tp, message *m_ptr)	);
+#endif
+#endif
 
 /* Default attributes. */
 PRIVATE struct termios termios_defaults = {
@@ -488,6 +504,10 @@ message *m_ptr;			/* pointer to message sent to task */
   int r;
   union {
 	int i;
+#if ENABLE_SRCCOMPAT
+	struct sgttyb sg;
+	struct tchars tc;
+#endif
   } param;
   size_t size;
 
@@ -513,6 +533,18 @@ message *m_ptr;			/* pointer to message sent to task */
         size = sizeof(struct winsize);
         break;
 
+#if ENABLE_SRCCOMPAT
+    case TIOCGETP:      /* BSD-style get terminal properties */
+    case TIOCSETP:	/* BSD-style set terminal properties */
+	size = sizeof(struct sgttyb);
+	break;
+
+    case TIOCGETC:      /* BSD-style get terminal special characters */ 
+    case TIOCSETC:	/* BSD-style get terminal special characters */ 
+	size = sizeof(struct tchars);
+	break;
+#endif
+#if (MACHINE == IBM_PC)
     case KIOCSMAP:	/* load keymap (Minix extension) */
         size = sizeof(keymap_t);
         break;
@@ -521,6 +553,7 @@ message *m_ptr;			/* pointer to message sent to task */
         size = sizeof(u8_t [8192]);
         break;
 
+#endif
     case TCDRAIN:	/* Posix tcdrain function -- no parameter */
     default:		size = 0;
   }
@@ -606,6 +639,37 @@ message *m_ptr;			/* pointer to message sent to task */
 	/* SIGWINCH... */
 	break;
 
+#if ENABLE_SRCCOMPAT
+    case TIOCGETP:
+	compat_getp(tp, &param.sg);
+	r = sys_vircopy(SELF, D, (vir_bytes) &param.sg,
+		m_ptr->PROC_NR, D, (vir_bytes) m_ptr->ADDRESS,
+		(vir_bytes) size);
+	break;
+
+    case TIOCSETP:
+	r = sys_vircopy( m_ptr->PROC_NR, D, (vir_bytes) m_ptr->ADDRESS,
+		SELF, D, (vir_bytes) &param.sg, (vir_bytes) size);
+	if (r != OK) break;
+	compat_setp(tp, &param.sg);
+	break;
+
+    case TIOCGETC:
+	compat_getc(tp, &param.tc);
+	r = sys_vircopy(SELF, D, (vir_bytes) &param.tc,
+		m_ptr->PROC_NR, D, (vir_bytes) m_ptr->ADDRESS, 
+		(vir_bytes) size);
+	break;
+
+    case TIOCSETC:
+	r = sys_vircopy( m_ptr->PROC_NR, D, (vir_bytes) m_ptr->ADDRESS,
+		SELF, D, (vir_bytes) &param.tc, (vir_bytes) size);
+	if (r != OK) break;
+	compat_setc(tp, &param.tc);
+	break;
+#endif
+
+#if (MACHINE == IBM_PC)
     case KIOCSMAP:
 	/* Load a new keymap (only /dev/console). */
 	if (isconsole(tp)) r = kbd_loadmap(m_ptr);
@@ -615,6 +679,13 @@ message *m_ptr;			/* pointer to message sent to task */
 	/* Load a font into an EGA or VGA card (hs@hck.hr) */
 	if (isconsole(tp)) r = con_loadfont(m_ptr);
 	break;
+#endif
+
+#if (MACHINE == ATARI)
+    case VDU_LOADFONT:
+	r = vdu_loadfont(m_ptr);
+	break;
+#endif
 
 /* These Posix functions are allowed to fail if _POSIX_JOB_CONTROL is 
  * not defined.
@@ -622,7 +693,12 @@ message *m_ptr;			/* pointer to message sent to task */
     case TIOCGPGRP:     
     case TIOCSPGRP:	
     default:
+#if ENABLE_BINCOMPAT
+	do_ioctl_compat(tp, m_ptr);
+	return;
+#else
 	r = ENOTTY;
+#endif
   }
 
   /* Send the reply. */
@@ -1443,6 +1519,15 @@ PRIVATE void tty_init()
 		tp->tty_minor = s - (NR_CONS+NR_RS_LINES) + TTYPX_MINOR;
   	}
   }
+
+#if DEAD_CODE
+  /* Install signal handler to ignore SIGTERM. */
+  sigact.sa_handler = SIG_IGN;
+  sigact.sa_mask = ~0;			/* block all other signals */
+  sigact.sa_flags = 0;			/* default behaviour */
+  if (sigaction(SIGTERM, &sigact, NULL) != OK) 
+      report("TTY","warning, sigaction() failed", errno);
+#endif
 }
 
 /*===========================================================================*
@@ -1553,3 +1638,342 @@ register message *m_ptr;	/* pointer to message sent to the task */
 
         return;
 }
+
+#if ENABLE_SRCCOMPAT || ENABLE_BINCOMPAT
+/*===========================================================================*
+ *				compat_getp				     *
+ *===========================================================================*/
+PRIVATE int compat_getp(tp, sg)
+tty_t *tp;
+struct sgttyb *sg;
+{
+/* Translate an old TIOCGETP to the termios equivalent. */
+  int flgs;
+
+  sg->sg_erase = tp->tty_termios.c_cc[VERASE];
+  sg->sg_kill = tp->tty_termios.c_cc[VKILL];
+  sg->sg_ospeed = tspd2sgspd(cfgetospeed(&tp->tty_termios));
+  sg->sg_ispeed = tspd2sgspd(cfgetispeed(&tp->tty_termios));
+
+  flgs = 0;
+
+  /* XTABS	- if OPOST and XTABS */
+  if ((tp->tty_termios.c_oflag & (OPOST|XTABS)) == (OPOST|XTABS))
+	flgs |= 0006000;
+
+  /* BITS5..BITS8  - map directly to CS5..CS8 */
+  flgs |= (tp->tty_termios.c_cflag & CSIZE) << (8-2);
+
+  /* EVENP	- if PARENB and not PARODD */
+  if ((tp->tty_termios.c_cflag & (PARENB|PARODD)) == PARENB)
+	flgs |= 0000200;
+
+  /* ODDP	- if PARENB and PARODD */
+  if ((tp->tty_termios.c_cflag & (PARENB|PARODD)) == (PARENB|PARODD))
+	flgs |= 0000100;
+
+  /* RAW	- if not ICANON and not ISIG */
+  if (!(tp->tty_termios.c_lflag & (ICANON|ISIG)))
+	flgs |= 0000040;
+
+  /* CRMOD	- if ICRNL */
+  if (tp->tty_termios.c_iflag & ICRNL)
+	flgs |= 0000020;
+
+  /* ECHO	- if ECHO */
+  if (tp->tty_termios.c_lflag & ECHO)
+	flgs |= 0000010;
+
+  /* CBREAK	- if not ICANON and ISIG */
+  if ((tp->tty_termios.c_lflag & (ICANON|ISIG)) == ISIG)
+	flgs |= 0000002;
+
+  sg->sg_flags = flgs;
+  return(OK);
+}
+
+/*===========================================================================*
+ *				compat_getc				     *
+ *===========================================================================*/
+PRIVATE int compat_getc(tp, tc)
+tty_t *tp;
+struct tchars *tc;
+{
+/* Translate an old TIOCGETC to the termios equivalent. */
+
+  tc->t_intrc = tp->tty_termios.c_cc[VINTR];
+  tc->t_quitc = tp->tty_termios.c_cc[VQUIT];
+  tc->t_startc = tp->tty_termios.c_cc[VSTART];
+  tc->t_stopc = tp->tty_termios.c_cc[VSTOP];
+  tc->t_brkc = tp->tty_termios.c_cc[VEOL];
+  tc->t_eofc = tp->tty_termios.c_cc[VEOF];
+  return(OK);
+}
+
+/*===========================================================================*
+ *				compat_setp				     *
+ *===========================================================================*/
+PRIVATE int compat_setp(tp, sg)
+tty_t *tp;
+struct sgttyb *sg;
+{
+/* Translate an old TIOCSETP to the termios equivalent. */
+  struct termios termios;
+  int flags;
+
+  termios = tp->tty_termios;
+
+  termios.c_cc[VERASE] = sg->sg_erase;
+  termios.c_cc[VKILL] = sg->sg_kill;
+  cfsetispeed(&termios, sgspd2tspd(sg->sg_ispeed & BYTE));
+  cfsetospeed(&termios, sgspd2tspd(sg->sg_ospeed & BYTE));
+  flags = sg->sg_flags;
+
+  /* Input flags */
+
+  /* BRKINT	- not changed */
+  /* ICRNL	- set if CRMOD is set and not RAW */
+  /*		  (CRMOD also controls output) */
+  termios.c_iflag &= ~ICRNL;
+  if ((flags & 0000020) && !(flags & 0000040))
+	termios.c_iflag |= ICRNL;
+
+  /* IGNBRK	- not changed */
+  /* IGNCR	- forced off (ignoring cr's is not supported) */
+  termios.c_iflag &= ~IGNCR;
+
+  /* IGNPAR	- not changed */
+  /* INLCR	- forced off (mapping nl's to cr's is not supported) */
+  termios.c_iflag &= ~INLCR;
+
+  /* INPCK	- not changed */
+  /* ISTRIP	- not changed */
+  /* IXOFF	- not changed */
+  /* IXON	- forced on if not RAW */
+  termios.c_iflag &= ~IXON;
+  if (!(flags & 0000040))
+	termios.c_iflag |= IXON;
+
+  /* PARMRK	- not changed */
+
+  /* Output flags */
+
+  /* OPOST	- forced on if not RAW */
+  termios.c_oflag &= ~OPOST;
+  if (!(flags & 0000040))
+	termios.c_oflag |= OPOST;
+
+  /* ONLCR	- forced on if CRMOD */
+  termios.c_oflag &= ~ONLCR;
+  if (flags & 0000020)
+	termios.c_oflag |= ONLCR;
+
+  /* XTABS	- forced on if XTABS */
+  termios.c_oflag &= ~XTABS;
+  if (flags & 0006000)
+	termios.c_oflag |= XTABS;
+
+  /* CLOCAL	- not changed */
+  /* CREAD	- forced on (receiver is always enabled) */
+  termios.c_cflag |= CREAD;
+
+  /* CSIZE	- CS5-CS8 correspond directly to BITS5-BITS8 */
+  termios.c_cflag = (termios.c_cflag & ~CSIZE) | ((flags & 0001400) >> (8-2));
+
+  /* CSTOPB	- not changed */
+  /* HUPCL	- not changed */
+  /* PARENB	- set if EVENP or ODDP is set */
+  termios.c_cflag &= ~PARENB;
+  if (flags & (0000200|0000100))
+	termios.c_cflag |= PARENB;
+
+  /* PARODD	- set if ODDP is set */
+  termios.c_cflag &= ~PARODD;
+  if (flags & 0000100)
+	termios.c_cflag |= PARODD;
+
+  /* Local flags */
+
+  /* ECHO		- set if ECHO is set */
+  termios.c_lflag &= ~ECHO;
+  if (flags & 0000010)
+	termios.c_lflag |= ECHO;
+
+  /* ECHOE	- not changed */
+  /* ECHOK	- not changed */
+  /* ECHONL	- not changed */
+  /* ICANON	- set if neither CBREAK nor RAW */
+  termios.c_lflag &= ~ICANON;
+  if (!(flags & (0000002|0000040)))
+	termios.c_lflag |= ICANON;
+
+  /* IEXTEN	- set if not RAW */
+  /* ISIG	- set if not RAW */
+  termios.c_lflag &= ~(IEXTEN|ISIG);
+  if (!(flags & 0000040))
+	termios.c_lflag |= (IEXTEN|ISIG);
+
+  /* NOFLSH	- not changed */
+  /* TOSTOP	- not changed */
+
+  tp->tty_termios = termios;
+  setattr(tp);
+  return(OK);
+}
+
+/*===========================================================================*
+ *				compat_setc				     *
+ *===========================================================================*/
+PRIVATE int compat_setc(tp, tc)
+tty_t *tp;
+struct tchars *tc;
+{
+/* Translate an old TIOCSETC to the termios equivalent. */
+  struct termios termios;
+
+  termios = tp->tty_termios;
+
+  termios.c_cc[VINTR] = tc->t_intrc;
+  termios.c_cc[VQUIT] = tc->t_quitc;
+  termios.c_cc[VSTART] = tc->t_startc;
+  termios.c_cc[VSTOP] = tc->t_stopc;
+  termios.c_cc[VEOL] = tc->t_brkc;
+  termios.c_cc[VEOF] = tc->t_eofc;
+
+  tp->tty_termios = termios;
+  setattr(tp);
+  return(OK);
+}
+
+/* Table of termios line speed to sgtty line speed translations.   All termios
+ * speeds are present even if sgtty didn't know about them.  (Now it does.)
+ */
+PRIVATE struct s2s {
+  speed_t	tspd;
+  u8_t		sgspd;
+} ts2sgs[] = {
+  { B0,		  0 },
+  { B50,	 50 },
+  { B75,	 75 },
+  { B110,	  1 },
+  { B134,	134 },
+  { B200,	  2 },
+  { B300,	  3 },
+  { B600,	  6 },
+  { B1200,	 12 },
+  { B1800,	 18 },
+  { B2400,	 24 },
+  { B4800,	 48 },
+  { B9600,	 96 },
+  { B19200,	192 },
+  { B38400,	195 },
+  { B57600,	194 },
+  { B115200,	193 },
+};
+
+/*===========================================================================*
+ *				tspd2sgspd				     *
+ *===========================================================================*/
+PRIVATE int tspd2sgspd(tspd)
+speed_t tspd;
+{
+/* Translate a termios speed to sgtty speed. */
+  struct s2s *s;
+
+  for (s = ts2sgs; s < ts2sgs + sizeof(ts2sgs)/sizeof(ts2sgs[0]); s++) {
+	if (s->tspd == tspd) return(s->sgspd);
+  }
+  return 96;
+}
+
+/*===========================================================================*
+ *				sgspd2tspd				     *
+ *===========================================================================*/
+PRIVATE speed_t sgspd2tspd(sgspd)
+int sgspd;
+{
+/* Translate a sgtty speed to termios speed. */
+  struct s2s *s;
+
+  for (s = ts2sgs; s < ts2sgs + sizeof(ts2sgs)/sizeof(ts2sgs[0]); s++) {
+	if (s->sgspd == sgspd) return(s->tspd);
+  }
+  return B9600;
+}
+
+#if ENABLE_BINCOMPAT
+/*===========================================================================*
+ *				do_ioctl_compat				     *
+ *===========================================================================*/
+PRIVATE void do_ioctl_compat(tp, m_ptr)
+tty_t *tp;
+message *m_ptr;
+{
+/* Handle the old sgtty ioctl's that packed the sgtty or tchars struct into
+ * the Minix message.  Efficient then, troublesome now.
+ */
+  int minor, proc, func, result, r;
+  long flags, erki, spek;
+  u8_t erase, kill, intr, quit, xon, xoff, brk, eof, ispeed, ospeed;
+  struct sgttyb sg;
+  struct tchars tc;
+  message reply_mess;
+
+  minor = m_ptr->TTY_LINE;
+  proc = m_ptr->PROC_NR;
+  func = m_ptr->REQUEST;
+  spek = m_ptr->m2_l1;
+  flags = m_ptr->m2_l2;
+
+  switch(func)
+  {
+    case (('t'<<8) | 8):	/* TIOCGETP */
+	r = compat_getp(tp, &sg);
+	erase = sg.sg_erase;
+	kill = sg.sg_kill;
+	ispeed = sg.sg_ispeed;
+	ospeed = sg.sg_ospeed;
+	flags = sg.sg_flags;
+	erki = ((long)ospeed<<24) | ((long)ispeed<<16) | ((long)erase<<8) |kill;
+	break;
+    case (('t'<<8) | 18):	/* TIOCGETC */
+	r = compat_getc(tp, &tc);
+	intr = tc.t_intrc;
+	quit = tc.t_quitc;
+	xon = tc.t_startc;
+	xoff = tc.t_stopc;
+	brk = tc.t_brkc;
+	eof = tc.t_eofc;
+	erki = ((long)intr<<24) | ((long)quit<<16) | ((long)xon<<8) | xoff;
+	flags = (eof << 8) | brk;
+	break;
+    case (('t'<<8) | 17):	/* TIOCSETC */
+	tc.t_stopc = (spek >> 0) & 0xFF;
+	tc.t_startc = (spek >> 8) & 0xFF;
+	tc.t_quitc = (spek >> 16) & 0xFF;
+	tc.t_intrc = (spek >> 24) & 0xFF;
+	tc.t_brkc = (flags >> 0) & 0xFF;
+	tc.t_eofc = (flags >> 8) & 0xFF;
+	r = compat_setc(tp, &tc);
+	break;
+    case (('t'<<8) | 9):	/* TIOCSETP */
+	sg.sg_erase = (spek >> 8) & 0xFF;
+	sg.sg_kill = (spek >> 0) & 0xFF;
+	sg.sg_ispeed = (spek >> 16) & 0xFF;
+	sg.sg_ospeed = (spek >> 24) & 0xFF;
+	sg.sg_flags = flags;
+	r = compat_setp(tp, &sg);
+	break;
+    default:
+	r = ENOTTY;
+  }
+  reply_mess.m_type = TASK_REPLY;
+  reply_mess.REP_PROC_NR = m_ptr->PROC_NR;
+  reply_mess.REP_STATUS = r;
+  reply_mess.m2_l1 = erki;
+  reply_mess.m2_l2 = flags;
+  send(m_ptr->m_source, &reply_mess);
+}
+#endif /* ENABLE_BINCOMPAT */
+#endif /* ENABLE_SRCCOMPAT || ENABLE_BINCOMPAT */
+

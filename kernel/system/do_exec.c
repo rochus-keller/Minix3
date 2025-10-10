@@ -28,8 +28,17 @@ register message *m_ptr;	/* pointer to request message */
   rp = proc_addr(m_ptr->PR_PROC_NR);
   sp = (reg_t) m_ptr->PR_STACK_PTR;
   rp->p_reg.sp = sp;		/* set the stack pointer */
+#if (CHIP == M68000)
+  rp->p_splow = sp;		/* set the stack pointer low water */
+#ifdef FPP
+  /* Initialize fpp for this process */
+  fpp_new_state(rp);
+#endif
+#endif
+#if (CHIP == INTEL)		/* wipe extra LDT entries */
   phys_memset(vir2phys(&rp->p_ldt[EXTRA_LDT_INDEX]), 0,
 	(LDT_SIZE - EXTRA_LDT_INDEX) * sizeof(rp->p_ldt[0]));
+#endif
   rp->p_reg.pc = (reg_t) m_ptr->PR_IP_PTR;	/* set pc */
   rp->p_rts_flags &= ~RECEIVING;	/* PM does not reply to EXEC call */
   if (rp->p_rts_flags == 0) lock_enqueue(rp);
@@ -47,3 +56,4 @@ register message *m_ptr;	/* pointer to request message */
   return(OK);
 }
 #endif /* USE_EXEC */
+

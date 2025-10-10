@@ -139,6 +139,11 @@ _PROTOTYPE( int tty_devnop, (struct tty *tp, int try)			);
 _PROTOTYPE( int select_try, (struct tty *tp, int ops)			);
 _PROTOTYPE( int select_retry, (struct tty *tp)				);
 
+/* rs232.c */
+_PROTOTYPE( void rs_init, (struct tty *tp)				);
+_PROTOTYPE( void rs_interrupt, (message *m)				);
+
+#if (CHIP == INTEL)
 /* console.c */
 _PROTOTYPE( void kputc, (int c)						);
 _PROTOTYPE( void cons_stop, (void)					);
@@ -157,6 +162,15 @@ _PROTOTYPE( void do_panic_dumps, (message *m)				);
 _PROTOTYPE( void do_fkey_ctl, (message *m)				);
 _PROTOTYPE( void kbd_interrupt, (message *m)				);
 
+/* pty.c */
+_PROTOTYPE( void do_pty, (struct tty *tp, message *m_ptr)		);
+_PROTOTYPE( void pty_init, (struct tty *tp)				);
+_PROTOTYPE( void select_retry_pty, (struct tty *tp)			);
+_PROTOTYPE( int pty_status, (message *m_ptr)				);
+
 /* vidcopy.s */
 _PROTOTYPE( void vid_vid_copy, (unsigned src, unsigned dst, unsigned count));
 _PROTOTYPE( void mem_vid_copy, (u16_t *src, unsigned dst, unsigned count));
+
+#endif /* (CHIP == INTEL) */
+

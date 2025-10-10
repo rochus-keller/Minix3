@@ -17,7 +17,22 @@
 #define ICW4_PC_SLAVE   0x09	/* not SFNM, buffered, normal EOI, 8086 */
 #define ICW4_PC_MASTER  0x0D	/* not SFNM, buffered, normal EOI, 8086 */
 
+#if _WORD_SIZE == 2
+typedef _PROTOTYPE( void (*vecaddr_t), (void) );
+
+FORWARD _PROTOTYPE( void set_vec, (int vec_nr, vecaddr_t addr) );
+
+PRIVATE vecaddr_t int_vec[] = {
+  int00, int01, int02, int03, int04, int05, int06, int07,
+};
+
+PRIVATE vecaddr_t irq_vec[] = {
+  hwint00, hwint01, hwint02, hwint03, hwint04, hwint05, hwint06, hwint07,
+  hwint08, hwint09, hwint10, hwint11, hwint12, hwint13, hwint14, hwint15,
+};
+#else
 #define set_vec(nr, addr)	((void)0)
+#endif
 
 /*===========================================================================*
  *				intr_init				     *
@@ -34,6 +49,7 @@ int mine;
 
   intr_disable();
 
+  if (machine.protected) {
       /* The AT and newer PS/2 have two interrupt controllers, one master,
        * one slaved at IRQ 2.  (We don't have to deal with the PC that
        * has just one controller, because it must run in real mode.)
@@ -54,7 +70,20 @@ int mine;
       /* Copy the BIOS vectors from the BIOS to the Minix location, so we
        * can still make BIOS calls without reprogramming the i8259s.
        */
+#if IRQ0_VECTOR != BIOS_IRQ0_VEC
       phys_copy(BIOS_VECTOR(0) * 4L, VECTOR(0) * 4L, 8 * 4L);
+#endif
+#if IRQ8_VECTOR != BIOS_IRQ8_VEC
+      phys_copy(BIOS_VECTOR(8) * 4L, VECTOR(8) * 4L, 8 * 4L);
+#endif
+  } else {
+      /* Use the BIOS interrupt vectors in real mode.  We only reprogram the
+       * exceptions here, the interrupt vectors are reprogrammed on demand.
+       * SYS_VECTOR is the Minix system call for message passing.
+       */
+      for (i = 0; i < 8; i++) set_vec(i, int_vec[i]);
+      set_vec(SYS_VECTOR, s_call);
+  }
 }
 
 /*===========================================================================*
@@ -141,3 +170,24 @@ irq_hook_t *hook;
    * if all active ID bits are cleared, and restart a process.
    */
 }
+
+#if _WORD_SIZE == 2
+/*===========================================================================*
+ *				set_vec                                      *
+ *===========================================================================*/
+PRIVATE void set_vec(vec_nr, addr)
+int vec_nr;			/* which vector */
+vecaddr_t addr;			/* where to start */
+{
+/* Set up a real mode interrupt vector. */
+
+  u16_t vec[2];
+
+  /* Build the vector in the array 'vec'. */
+  vec[0] = (u16_t) addr;
+  vec[1] = (u16_t) physb_to_hclick(code_base);
+
+  /* Copy the vector into place. */
+  phys_copy(vir2phys(vec), vec_nr * 4L, 4L);
+}
+#endif /* _WORD_SIZE == 2 */

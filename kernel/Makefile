@@ -15,7 +15,7 @@ LDFLAGS = -i
 
 HEAD =	mpx.o
 OBJS =	start.o protect.o klib.o table.o main.o proc.o \
-	i8259.o exception.o system.o clock.o utility.o
+	i8259.o exception.o system.o clock.o utility.o debug.o
 SYSTEM = system.a
 LIBS = -ltimers 
 
