@@ -20,7 +20,18 @@ all install depend clean:
 	cd ./tty && $(MAKE) $@
 	cd ./memory && $(MAKE) $@
 	cd ./at_wini && $(MAKE) $@
+	cd ./floppy && $(MAKE) $@
+	cd ./printer && $(MAKE) $@
+	cd ./rtl8139 && $(MAKE) $@
+	cd ./fxp && $(MAKE) $@
+	cd ./dpeth && $(MAKE) $@
 	cd ./log && $(MAKE) $@
+	cd ./bios_wini && $(MAKE) $@
+	cd ./cmos && $(MAKE) $@
+	cd ./random && $(MAKE) $@
+	cd ./dp8390 && $(MAKE) $@
+	cd ./sb16 && $(MAKE) $@
+	cd ./lance && $(MAKE) $@
 
 image:
 	cd ./libdriver && $(MAKE) build
@@ -28,4 +39,6 @@ image:
 	cd ./tty && $(MAKE) build
 	cd ./memory && $(MAKE) build
 	cd ./at_wini && $(MAKE) build
+	cd ./floppy && $(MAKE) build
+	cd ./bios_wini && $(MAKE) build
 	cd ./log && $(MAKE) build

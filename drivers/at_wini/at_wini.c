@@ -83,6 +83,35 @@
 #define   CTL_RESET		0x04	/* reset controller */
 #define   CTL_INTDISABLE	0x02	/* disable interrupts */
 
+#if ENABLE_ATAPI
+#define   ERROR_SENSE           0xF0    /* sense key mask */
+#define     SENSE_NONE          0x00    /* no sense key */
+#define     SENSE_RECERR        0x10    /* recovered error */
+#define     SENSE_NOTRDY        0x20    /* not ready */
+#define     SENSE_MEDERR        0x30    /* medium error */
+#define     SENSE_HRDERR        0x40    /* hardware error */
+#define     SENSE_ILRQST        0x50    /* illegal request */
+#define     SENSE_UATTN         0x60    /* unit attention */
+#define     SENSE_DPROT         0x70    /* data protect */
+#define     SENSE_ABRT          0xb0    /* aborted command */
+#define     SENSE_MISCOM        0xe0    /* miscompare */
+#define   ERROR_MCR             0x08    /* media change requested */
+#define   ERROR_ABRT            0x04    /* aborted command */
+#define   ERROR_EOM             0x02    /* end of media detected */
+#define   ERROR_ILI             0x01    /* illegal length indication */
+#define REG_FEAT            1   /* features */
+#define   FEAT_OVERLAP          0x02    /* overlap */
+#define   FEAT_DMA              0x01    /* dma */
+#define REG_IRR             2   /* interrupt reason register */
+#define   IRR_REL               0x04    /* release */
+#define   IRR_IO                0x02    /* direction for xfer */
+#define   IRR_COD               0x01    /* command or data */
+#define REG_SAMTAG          3
+#define REG_CNT_LO          4   /* low byte of cylinder number */
+#define REG_CNT_HI          5   /* high byte of cylinder number */
+#define REG_DRIVE           6   /* drive select */
+#endif
+
 #define REG_STATUS          7   /* status */
 #define   STATUS_BSY            0x80    /* controller busy */
 #define   STATUS_DRDY           0x40    /* drive ready */
@@ -91,6 +120,15 @@
 #define   STATUS_DRQ            0x08    /* data transfer request */
 #define   STATUS_CORR           0x04    /* correctable error occurred */
 #define   STATUS_CHECK          0x01    /* check error */
+
+#ifdef ENABLE_ATAPI
+#define   ATAPI_PACKETCMD       0xA0    /* packet command */
+#define   ATAPI_IDENTIFY        0xA1    /* identify drive */
+#define   SCSI_READ10           0x28    /* read from disk */
+#define   SCSI_SENSE            0x03    /* sense request */
+
+#define CD_SECTOR_SIZE		2048	/* sector size of a CD-ROM */
+#endif /* ATAPI */
 
 /* Interrupt request lines. */
 #define NO_IRQ		 0	/* no IRQ set yet */
@@ -119,7 +157,11 @@ struct command {
 /* Miscellaneous. */
 #define MAX_DRIVES         8
 #define COMPAT_DRIVES      4
+#if _WORD_SIZE > 2
 #define MAX_SECS	 256	/* controller can transfer this many sectors */
+#else
+#define MAX_SECS	 127	/* but not to a 16 bit process */
+#endif
 #define MAX_ERRORS         4	/* how often to try rd/wt before quitting */
 #define NR_MINORS       (MAX_DRIVES * DEV_PER_DRIVE)
 #define SUB_PER_DRIVE	(NR_PARTITIONS * NR_PARTITIONS)
@@ -132,7 +174,11 @@ struct command {
 #define INITIALIZED	0x01	/* drive is initialized */
 #define DEAF		0x02	/* controller must be reset */
 #define SMART		0x04	/* drive supports ATA commands */
+#if ENABLE_ATAPI
+#define ATAPI		0x08	/* it is an ATAPI device */
+#else
 #define ATAPI		   0	/* don't bother with ATAPI; optimise out */
+#endif
 #define IDENTIFIED	0x10	/* w_identify done successfully */
 #define IGNORING	0x20	/* w_identify failed once */
 
@@ -212,6 +258,14 @@ FORWARD _PROTOTYPE( void w_intr_wait, (void) 				);
 FORWARD _PROTOTYPE( int at_intr_wait, (void) 				);
 FORWARD _PROTOTYPE( int w_waitfor, (int mask, int value) 		);
 FORWARD _PROTOTYPE( void w_geometry, (struct partition *entry) 		);
+#if ENABLE_ATAPI
+FORWARD _PROTOTYPE( int atapi_sendpacket, (u8_t *packet, unsigned cnt) 	);
+FORWARD _PROTOTYPE( int atapi_intr_wait, (void) 			);
+FORWARD _PROTOTYPE( int atapi_open, (void) 				);
+FORWARD _PROTOTYPE( void atapi_close, (void) 				);
+FORWARD _PROTOTYPE( int atapi_transfer, (int proc_nr, int opcode,
+			off_t position, iovec_t *iov, unsigned nr_req) 	);
+#endif
 
 /* Entry points to this driver. */
 PRIVATE struct driver w_dtab = {
@@ -440,6 +494,9 @@ message *m_ptr;
   if (!(wn->state & IDENTIFIED) || (wn->state & DEAF)) {
 	/* Try to identify the device. */
 	if (w_identify() != OK) {
+#if VERBOSE
+  		printf("%s: probe failed\n", w_name());
+#endif
 		if (wn->state & DEAF) w_reset();
 		wn->state = IGNORING;
 		return(ENXIO);
@@ -453,7 +510,21 @@ message *m_ptr;
   		wn->state |= IGNORING;
 	  	return(ENXIO);
 	  }
+
+#if VERBOSE
+	  printf("%s: AT driver detected ", w_name());
+	  if (wn->state & (SMART|ATAPI)) {
+		printf("%.40s\n", w_id_string);
+	  } else {
+		printf("%ux%ux%u\n", wn->pcylinders, wn->pheads, wn->psectors);
+	  }
+#endif
   }
+
+#if ENABLE_ATAPI
+   if ((wn->state & ATAPI) && (m_ptr->COUNT & W_BIT))
+	return(EACCES);
+#endif
 
    /* If it's not an ATAPI device, then don't open with RO_BIT. */
    if (!(wn->state & ATAPI) && (m_ptr->COUNT & RO_BIT)) return EACCES;
@@ -462,10 +533,14 @@ message *m_ptr;
    * or being opened after being closed.
    */
   if (wn->open_ct == 0) {
+#if ENABLE_ATAPI
+	if (wn->state & ATAPI) {
+		int r;
+		if ((r = atapi_open()) != OK) return(r);
+	}
+#endif
 
 	/* Partition the disk. */
-	memset(wn->part, sizeof(wn->part), 0);
-	memset(wn->subpart, sizeof(wn->subpart), 0);
 	partition(&w_dtab, w_drive * DEV_PER_DRIVE, P_PRIMARY, wn->state & ATAPI);
   }
   wn->open_ct++;
@@ -574,6 +649,21 @@ PRIVATE int w_identify()
 			wn->lcylinders /= 2;
 		}
 	}
+#if ENABLE_ATAPI
+  } else
+  if (cmd.command = ATAPI_IDENTIFY, com_simple(&cmd) == OK) {
+	/* An ATAPI device. */
+	wn->state |= ATAPI;
+
+	/* Device information. */
+	if ((s=sys_insw(wn->base_cmd + REG_DATA, SELF, tmp_buf, 512)) != OK)
+		panic(w_name(),"Call to sys_insw() failed", s);
+
+	/* Why are the strings byte swapped??? */
+	for (i = 0; i < 40; i++) w_id_string[i] = id_byte(27)[i^1];
+
+	size = 0;	/* Size set later. */
+#endif
   } else {
 	/* Not an ATA device; no translations, no special features.  Don't
 	 * touch it unless the BIOS knows about it.
@@ -626,7 +716,12 @@ PRIVATE int w_io_test(void)
 	int r, save_dev;
 	int save_timeout, save_errors, save_wakeup;
 	iovec_t iov;
+#ifdef CD_SECTOR_SIZE
+	static char buf[CD_SECTOR_SIZE];
+#else
 	static char buf[SECTOR_SIZE];
+#endif
+
 	iov.iov_addr = (vir_bytes) buf;
 	iov.iov_size = sizeof(buf);
 	save_dev = w_device;
@@ -759,6 +854,14 @@ unsigned nr_req;		/* length of request vector */
   unsigned long block;
   unsigned long dv_size = cv64ul(w_dv->dv_size);
   unsigned cylinder, head, sector, nbytes;
+
+#if ENABLE_ATAPI
+  if (w_wn->state & ATAPI) {
+	return atapi_transfer(proc_nr, opcode, position, iov, nr_req);
+  }
+#endif
+
+  
 
   /* Check disk address. */
   if ((position & SECTOR_MASK) != 0) return(EINVAL);
@@ -922,6 +1025,9 @@ message *m_ptr;
   if (w_prepare(m_ptr->DEVICE) == NIL_DEV)
   	return(ENXIO);
   w_wn->open_ct--;
+#if ENABLE_ATAPI
+  if (w_wn->open_ct == 0 && (w_wn->state & ATAPI)) atapi_close();
+#endif
   return(OK);
 }
 
@@ -1119,6 +1225,262 @@ struct partition *entry;
   }
 }
 
+#if ENABLE_ATAPI
+/*===========================================================================*
+ *				atapi_open				     *
+ *===========================================================================*/
+PRIVATE int atapi_open()
+{
+/* Should load and lock the device and obtain its size.  For now just set the
+ * size of the device to something big.  What is really needed is a generic
+ * SCSI layer that does all this stuff for ATAPI and SCSI devices (kjb). (XXX)
+ */
+  w_wn->part[0].dv_size = mul64u(800L*1024, 1024);
+  return(OK);
+}
+
+/*===========================================================================*
+ *				atapi_close				     *
+ *===========================================================================*/
+PRIVATE void atapi_close()
+{
+/* Should unlock the device.  For now do nothing.  (XXX) */
+}
+
+void sense_request(void)
+{
+	int r, i;
+	static u8_t sense[100], packet[ATAPI_PACKETSIZE];
+
+	packet[0] = SCSI_SENSE;
+	packet[1] = 0;
+	packet[2] = 0;
+	packet[3] = 0;
+	packet[4] = SENSE_PACKETSIZE;
+	packet[5] = 0;
+	packet[7] = 0;
+	packet[8] = 0;
+	packet[9] = 0;
+	packet[10] = 0;
+	packet[11] = 0;
+
+	for(i = 0; i < SENSE_PACKETSIZE; i++) sense[i] = 0xff;
+	r = atapi_sendpacket(packet, SENSE_PACKETSIZE);
+	if (r != OK) { printf("request sense command failed\n"); return; }
+	if (atapi_intr_wait() <= 0) { printf("WARNING: request response failed\n"); }
+
+	if (sys_insw(w_wn->base_cmd + REG_DATA, SELF, (void *) sense, SENSE_PACKETSIZE) != OK)
+		printf("WARNING: sense reading failed\n");
+
+	printf("sense data:");
+	for(i = 0; i < SENSE_PACKETSIZE; i++) printf(" %02x", sense[i]);
+	printf("\n");
+}
+
+/*===========================================================================*
+ *				atapi_transfer				     *
+ *===========================================================================*/
+PRIVATE int atapi_transfer(proc_nr, opcode, position, iov, nr_req)
+int proc_nr;			/* process doing the request */
+int opcode;			/* DEV_GATHER or DEV_SCATTER */
+off_t position;			/* offset on device to read or write */
+iovec_t *iov;			/* pointer to read or write request vector */
+unsigned nr_req;		/* length of request vector */
+{
+  struct wini *wn = w_wn;
+  iovec_t *iop, *iov_end = iov + nr_req;
+  int r, s, errors, fresh;
+  u64_t pos;
+  unsigned long block;
+  unsigned long dv_size = cv64ul(w_dv->dv_size);
+  unsigned nbytes, nblocks, count, before, chunk;
+  static u8_t packet[ATAPI_PACKETSIZE];
+
+  errors = fresh = 0;
+
+  while (nr_req > 0 && !fresh) {
+	/* The Minix block size is smaller than the CD block size, so we
+	 * may have to read extra before or after the good data.
+	 */
+	pos = add64ul(w_dv->dv_base, position);
+	block = div64u(pos, CD_SECTOR_SIZE);
+	before = rem64u(pos, CD_SECTOR_SIZE);
+
+	/* How many bytes to transfer? */
+	nbytes = count = 0;
+	for (iop = iov; iop < iov_end; iop++) {
+		nbytes += iop->iov_size;
+		if ((before + nbytes) % CD_SECTOR_SIZE == 0) count = nbytes;
+	}
+
+	/* Does one of the memory chunks end nicely on a CD sector multiple? */
+	if (count != 0) nbytes = count;
+
+	/* Data comes in as words, so we have to enforce even byte counts. */
+	if ((before | nbytes) & 1) return(EINVAL);
+
+	/* Which block on disk and how close to EOF? */
+	if (position >= dv_size) return(OK);		/* At EOF */
+	if (position + nbytes > dv_size) nbytes = dv_size - position;
+
+	nblocks = (before + nbytes + CD_SECTOR_SIZE - 1) / CD_SECTOR_SIZE;
+	if (ATAPI_DEBUG) {
+		printf("block=%lu, before=%u, nbytes=%u, nblocks=%u\n",
+			block, before, nbytes, nblocks);
+	}
+
+	/* First check to see if a reinitialization is needed. */
+	if (!(wn->state & INITIALIZED) && w_specify() != OK) return(EIO);
+
+	/* Build an ATAPI command packet. */
+	packet[0] = SCSI_READ10;
+	packet[1] = 0;
+	packet[2] = (block >> 24) & 0xFF;
+	packet[3] = (block >> 16) & 0xFF;
+	packet[4] = (block >>  8) & 0xFF;
+	packet[5] = (block >>  0) & 0xFF;
+	packet[7] = (nblocks >> 8) & 0xFF;
+	packet[8] = (nblocks >> 0) & 0xFF;
+	packet[9] = 0;
+	packet[10] = 0;
+	packet[11] = 0;
+
+	/* Tell the controller to execute the packet command. */
+	r = atapi_sendpacket(packet, nblocks * CD_SECTOR_SIZE);
+	if (r != OK) goto err;
+
+	/* Read chunks of data. */
+	while ((r = atapi_intr_wait()) > 0) {
+		count = r;
+
+		if (ATAPI_DEBUG) {
+			printf("before=%u, nbytes=%u, count=%u\n",
+				before, nbytes, count);
+		}
+
+		while (before > 0 && count > 0) {	/* Discard before. */
+			chunk = before;
+			if (chunk > count) chunk = count;
+			if (chunk > DMA_BUF_SIZE) chunk = DMA_BUF_SIZE;
+	if ((s=sys_insw(wn->base_cmd + REG_DATA, SELF, tmp_buf, chunk)) != OK)
+		panic(w_name(),"Call to sys_insw() failed", s);
+			before -= chunk;
+			count -= chunk;
+		}
+
+		while (nbytes > 0 && count > 0) {	/* Requested data. */
+			chunk = nbytes;
+			if (chunk > count) chunk = count;
+			if (chunk > iov->iov_size) chunk = iov->iov_size;
+	if ((s=sys_insw(wn->base_cmd + REG_DATA, proc_nr, (void *) iov->iov_addr, chunk)) != OK)
+		panic(w_name(),"Call to sys_insw() failed", s);
+			position += chunk;
+			nbytes -= chunk;
+			count -= chunk;
+			iov->iov_addr += chunk;
+			fresh = 0;
+			if ((iov->iov_size -= chunk) == 0) {
+				iov++;
+				nr_req--;
+				fresh = 1;	/* new element is optional */
+			}
+		}
+
+		while (count > 0) {		/* Excess data. */
+			chunk = count;
+			if (chunk > DMA_BUF_SIZE) chunk = DMA_BUF_SIZE;
+	if ((s=sys_insw(wn->base_cmd + REG_DATA, SELF, tmp_buf, chunk)) != OK)
+		panic(w_name(),"Call to sys_insw() failed", s);
+			count -= chunk;
+		}
+	}
+
+	if (r < 0) {
+  err:		/* Don't retry if too many errors. */
+		if (atapi_debug) sense_request();
+		if (++errors == max_errors) {
+			w_command = CMD_IDLE;
+			if (atapi_debug) printf("giving up (%d)\n", errors);
+			return(EIO);
+		}
+		if (atapi_debug) printf("retry (%d)\n", errors);
+	}
+  }
+
+  w_command = CMD_IDLE;
+  return(OK);
+}
+
+/*===========================================================================*
+ *				atapi_sendpacket			     *
+ *===========================================================================*/
+PRIVATE int atapi_sendpacket(packet, cnt)
+u8_t *packet;
+unsigned cnt;
+{
+/* Send an Atapi Packet Command */
+  struct wini *wn = w_wn;
+  pvb_pair_t outbyte[6];		/* vector for sys_voutb() */
+  int s;
+
+  if (wn->state & IGNORING) return ERR;
+
+  /* Select Master/Slave drive */
+  if ((s=sys_outb(wn->base_cmd + REG_DRIVE, wn->ldhpref)) != OK)
+  	panic(w_name(),"Couldn't select master/ slave drive",s);
+
+  if (!w_waitfor(STATUS_BSY | STATUS_DRQ, 0)) {
+	printf("%s: atapi_sendpacket: drive not ready\n", w_name());
+	return(ERR);
+  }
+
+  /* Schedule a wakeup call, some controllers are flaky. This is done with
+   * a synchronous alarm. If a timeout occurs a SYN_ALARM message is sent
+   * from HARDWARE, so that w_intr_wait() can call w_timeout() in case the
+   * controller was not able to execute the command. Leftover timeouts are
+   * simply ignored by the main loop. 
+   */
+  sys_setalarm(wakeup_ticks, 0);
+
+#if _WORD_SIZE > 2
+  if (cnt > 0xFFFE) cnt = 0xFFFE;	/* Max data per interrupt. */
+#endif
+
+  w_command = ATAPI_PACKETCMD;
+  pv_set(outbyte[0], wn->base_cmd + REG_FEAT, 0);
+  pv_set(outbyte[1], wn->base_cmd + REG_IRR, 0);
+  pv_set(outbyte[2], wn->base_cmd + REG_SAMTAG, 0);
+  pv_set(outbyte[3], wn->base_cmd + REG_CNT_LO, (cnt >> 0) & 0xFF);
+  pv_set(outbyte[4], wn->base_cmd + REG_CNT_HI, (cnt >> 8) & 0xFF);
+  pv_set(outbyte[5], wn->base_cmd + REG_COMMAND, w_command);
+  if (atapi_debug) printf("cmd: %x  ", w_command);
+  if ((s=sys_voutb(outbyte,6)) != OK)
+  	panic(w_name(),"Couldn't write registers with sys_voutb()",s);
+
+  if (!w_waitfor(STATUS_BSY | STATUS_DRQ, STATUS_DRQ)) {
+	printf("%s: timeout (BSY|DRQ -> DRQ)\n", w_name());
+	return(ERR);
+  }
+  wn->w_status |= STATUS_ADMBSY;		/* Command not at all done yet. */
+
+  /* Send the command packet to the device. */
+  if ((s=sys_outsw(wn->base_cmd + REG_DATA, SELF, packet, ATAPI_PACKETSIZE)) != OK)
+	panic(w_name(),"sys_outsw() failed", s);
+
+ {
+ int p;
+ if (atapi_debug) {
+ 	printf("sent command:");
+	 for(p = 0; p < ATAPI_PACKETSIZE; p++) { printf(" %02x", packet[p]); }
+	 printf("\n");
+	}
+ }
+  return(OK);
+}
+
+
+#endif /* ENABLE_ATAPI */
+
 /*===========================================================================*
  *				w_other					     *
  *===========================================================================*/
@@ -1242,3 +1604,86 @@ char *strerr(int e)
 
 	return str;
 }
+
+#if ENABLE_ATAPI
+
+/*===========================================================================*
+ *				atapi_intr_wait				     *
+ *===========================================================================*/
+PRIVATE int atapi_intr_wait()
+{
+/* Wait for an interrupt and study the results.  Returns a number of bytes
+ * that need to be transferred, or an error code.
+ */
+  struct wini *wn = w_wn;
+  pvb_pair_t inbyte[4];		/* vector for sys_vinb() */
+  int s;			/* status for sys_vinb() */
+  int e;
+  int len;
+  int irr;
+  int r;
+  int phase;
+
+  w_intr_wait();
+
+  /* Request series of device I/O. */
+  inbyte[0].port = wn->base_cmd + REG_ERROR;
+  inbyte[1].port = wn->base_cmd + REG_CNT_LO;
+  inbyte[2].port = wn->base_cmd + REG_CNT_HI;
+  inbyte[3].port = wn->base_cmd + REG_IRR;
+  if ((s=sys_vinb(inbyte, 4)) != OK)
+  	panic(w_name(),"ATAPI failed sys_vinb()", s);
+  e = inbyte[0].value;
+  len = inbyte[1].value;
+  len |= inbyte[2].value << 8;
+  irr = inbyte[3].value;
+
+#if ATAPI_DEBUG
+	printf("wn %p  S=%x=%s E=%02x=%s L=%04x I=%02x\n", wn, wn->w_status, strstatus(wn->w_status), e, strerr(e), len, irr);
+#endif
+  if (wn->w_status & (STATUS_BSY | STATUS_CHECK)) {
+	if (atapi_debug) {
+		printf("atapi fail:  S=%x=%s E=%02x=%s L=%04x I=%02x\n", wn->w_status, strstatus(wn->w_status), e, strerr(e), len, irr);
+	}
+  	return ERR;
+  }
+
+  phase = (wn->w_status & STATUS_DRQ) | (irr & (IRR_COD | IRR_IO));
+
+  switch (phase) {
+  case IRR_COD | IRR_IO:
+	if (ATAPI_DEBUG) printf("ACD: Phase Command Complete\n");
+	r = OK;
+	break;
+  case 0:
+	if (ATAPI_DEBUG) printf("ACD: Phase Command Aborted\n");
+	r = ERR;
+	break;
+  case STATUS_DRQ | IRR_COD:
+	if (ATAPI_DEBUG) printf("ACD: Phase Command Out\n");
+	r = ERR;
+	break;
+  case STATUS_DRQ:
+	if (ATAPI_DEBUG) printf("ACD: Phase Data Out %d\n", len);
+	r = len;
+	break;
+  case STATUS_DRQ | IRR_IO:
+	if (ATAPI_DEBUG) printf("ACD: Phase Data In %d\n", len);
+	r = len;
+	break;
+  default:
+	if (ATAPI_DEBUG) printf("ACD: Phase Unknown\n");
+	r = ERR;
+	break;
+  }
+
+#if 0
+  /* retry if the media changed */
+  XXX while (phase == (IRR_IO | IRR_COD) && (wn->w_status & STATUS_CHECK)
+	&& (e & ERROR_SENSE) == SENSE_UATTN && --try > 0);
+#endif
+
+  wn->w_status |= STATUS_ADMBSY;	/* Assume not done yet. */
+  return(r);
+}
+#endif /* ENABLE_ATAPI */

@@ -34,8 +34,10 @@
 #include <signal.h>
 #include <unistd.h>
 #include <sys/sigcontext.h>
+#if (CHIP == INTEL)
 #include <ibm/memory.h>
 #include "protect.h"
+#endif
 
 /* Declaration of the call vector that defines the mapping of kernel calls 
  * to handler functions. The vector is initialized in sys_init() with map(), 
@@ -290,7 +292,9 @@ vir_bytes bytes;		/* # of bytes to be copied */
 /* Calculate the physical memory address for a given virtual address. */
   vir_clicks vc;		/* the virtual address in clicks */
   phys_bytes pa;		/* intermediate variables as phys_bytes */
+#if (CHIP == INTEL)
   phys_bytes seg_base;
+#endif
 
   /* If 'seg' is D it could really be S and vice versa.  T really means T.
    * If the virtual address falls in the gap,  it causes a problem. On the
@@ -304,8 +308,13 @@ vir_bytes bytes;		/* # of bytes to be copied */
   if (vir_addr + bytes <= vir_addr) return 0;	/* overflow */
   vc = (vir_addr + bytes - 1) >> CLICK_SHIFT;	/* last click of data */
 
+#if (CHIP == INTEL) || (CHIP == M68000)
   if (seg != T)
 	seg = (vc < rp->p_memmap[D].mem_vir + rp->p_memmap[D].mem_len ? D : S);
+#else
+  if (seg != T)
+       seg = (vc < rp->p_memmap[S].mem_vir ? D : S);
+#endif
 
   if ((vir_addr>>CLICK_SHIFT) >= rp->p_memmap[seg].mem_vir + 
   	rp->p_memmap[seg].mem_len) return( (phys_bytes) 0 );
@@ -313,11 +322,20 @@ vir_bytes bytes;		/* # of bytes to be copied */
   if (vc >= rp->p_memmap[seg].mem_vir + 
   	rp->p_memmap[seg].mem_len) return( (phys_bytes) 0 );
 
+#if (CHIP == INTEL)
   seg_base = (phys_bytes) rp->p_memmap[seg].mem_phys;
   seg_base = seg_base << CLICK_SHIFT;	/* segment origin in bytes */
+#endif
   pa = (phys_bytes) vir_addr;
+#if (CHIP != M68000)
   pa -= rp->p_memmap[seg].mem_vir << CLICK_SHIFT;
   return(seg_base + pa);
+#endif
+#if (CHIP == M68000)
+  pa -= (phys_bytes)rp->p_memmap[seg].mem_vir << CLICK_SHIFT;
+  pa += (phys_bytes)rp->p_memmap[seg].mem_phys << CLICK_SHIFT;
+  return(pa);
+#endif
 }
 
 /*===========================================================================*

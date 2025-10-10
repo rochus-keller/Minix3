@@ -19,6 +19,14 @@ _PROTOTYPE( void rw_block, (struct buf *bp, int rw_flag)		);
 _PROTOTYPE( void rw_scattered, (Dev_t dev,
 			struct buf **bufq, int bufqsize, int rw_flag)	);
 
+#if ENABLE_CACHE2
+/* cache2.c */
+_PROTOTYPE( void init_cache2, (unsigned long size)			);
+_PROTOTYPE( int get_block2, (struct buf *bp, int only_search)		);
+_PROTOTYPE( void put_block2, (struct buf *bp)				);
+_PROTOTYPE( void invalidate2, (Dev_t device)				);
+#endif
+
 /* device.c */
 _PROTOTYPE( int dev_open, (Dev_t dev, int proc, int flags)		);
 _PROTOTYPE( void dev_close, (Dev_t dev)					);

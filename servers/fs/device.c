@@ -266,6 +266,28 @@ PUBLIC int do_ioctl()
 	&& (rip->i_mode & I_TYPE) != I_BLOCK_SPECIAL) return(ENOTTY);
   dev = (dev_t) rip->i_zone[0];
 
+#if ENABLE_BINCOMPAT
+  if ((m_in.TTY_REQUEST >> 8) == 't') {
+	/* Obsolete sgtty ioctl, message contains more than is sane. */
+	struct dmap *dp;
+	message dev_mess;
+
+	dp = &dmap[(dev >> MAJOR) & BYTE];
+
+	dev_mess = m;	/* Copy full message with all the weird bits. */
+	dev_mess.m_type   = DEV_IOCTL;
+	dev_mess.PROC_NR  = who;
+	dev_mess.TTY_LINE = (dev >> MINOR) & BYTE;	
+
+	/* Call the task. */
+	(*dp->dmap_io)(dp->dmap_driver, &dev_mess);
+
+	m_out.TTY_SPEK = dev_mess.TTY_SPEK;	/* erase and kill */
+	m_out.TTY_FLAGS = dev_mess.TTY_FLAGS;	/* flags */
+	return(dev_mess.REP_STATUS);
+  }
+#endif
+
   return(dev_io(DEV_IOCTL, dev, who, m_in.ADDRESS, 0L, 
   	m_in.REQUEST, f->filp_flags));
 }

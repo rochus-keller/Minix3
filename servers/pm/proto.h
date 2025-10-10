@@ -11,8 +11,15 @@ struct memory;
 _PROTOTYPE( phys_clicks alloc_mem, (phys_clicks clicks)			);
 _PROTOTYPE( void free_mem, (phys_clicks base, phys_clicks clicks)	);
 _PROTOTYPE( void mem_init, (struct memory *chunks, phys_clicks *free)	);
+#if ENABLE_SWAP
+_PROTOTYPE( int swap_on, (char *file, u32_t offset, u32_t size)	);
+_PROTOTYPE( int swap_off, (void)					);
+_PROTOTYPE( void swap_in, (void)					);
+_PROTOTYPE( void swap_inqueue, (struct mproc *rmp)			);
+#else /* !SWAP */
 #define swap_in()			((void)0)
 #define swap_inqueue(rmp)		((void)0)
+#endif /* !SWAP */
 
 /* break.c */
 _PROTOTYPE( int adjust, (struct mproc *rmp,
@@ -55,6 +62,10 @@ _PROTOTYPE( int do_svrctl, (void)					);
 _PROTOTYPE( int do_allocmem, (void)					);
 _PROTOTYPE( int do_freemem, (void)					);
 _PROTOTYPE( int do_getsetpriority, (void)					);
+
+#if (MACHINE == MACINTOSH)
+_PROTOTYPE( phys_clicks start_click, (void)				);
+#endif
 
 _PROTOTYPE( void setreply, (int proc_nr, int result)			);
 
@@ -99,3 +110,4 @@ _PROTOTYPE( int get_stack_ptr, (int proc_nr, vir_bytes *sp)		);
 _PROTOTYPE( int get_mem_map, (int proc_nr, struct mem_map *mem_map)	);
 _PROTOTYPE( char *find_param, (const char *key));
 _PROTOTYPE( int proc_from_pid, (pid_t p));
+

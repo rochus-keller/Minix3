@@ -7,8 +7,13 @@
 #include "proc.h"
 #include "protect.h"
 
+#if _WORD_SIZE == 4
 #define INT_GATE_TYPE	(INT_286_GATE | DESC_386_BIT)
 #define TSS_TYPE	(AVL_286_TSS  | DESC_386_BIT)
+#else
+#define INT_GATE_TYPE	INT_286_GATE
+#define TSS_TYPE	AVL_286_TSS
+#endif
 
 struct desctableptr_s {
   char limit[sizeof(u16_t)];
@@ -31,7 +36,9 @@ struct tss_s {
   reg_t ss1;
   reg_t sp2;
   reg_t ss2;
+#if _WORD_SIZE == 4
   reg_t cr3;
+#endif
   reg_t ip;
   reg_t flags;
   reg_t ax;
@@ -46,12 +53,16 @@ struct tss_s {
   reg_t cs;
   reg_t ss;
   reg_t ds;
+#if _WORD_SIZE == 4
   reg_t fs;
   reg_t gs;
+#endif
   reg_t ldt;
+#if _WORD_SIZE == 4
   u16_t trap;
   u16_t iobase;
 /* u8_t iomap[0]; */
+#endif
 };
 
 PUBLIC struct segdesc_s gdt[GDT_SIZE];		/* used in klib.s and mpx.s */
@@ -96,8 +107,10 @@ PUBLIC void prot_init()
 	{ segment_not_present, SEG_NOT_VECTOR, INTR_PRIVILEGE },
 	{ stack_exception, STACK_FAULT_VECTOR, INTR_PRIVILEGE },
 	{ general_protection, PROTECTION_VECTOR, INTR_PRIVILEGE },
+#if _WORD_SIZE == 4
 	{ page_fault, PAGE_FAULT_VECTOR, INTR_PRIVILEGE },
 	{ copr_error, COPROC_ERR_VECTOR, INTR_PRIVILEGE },
+#endif
 	{ hwint00, VECTOR( 0), INTR_PRIVILEGE },
 	{ hwint01, VECTOR( 1), INTR_PRIVILEGE },
 	{ hwint02, VECTOR( 2), INTR_PRIVILEGE },
@@ -114,7 +127,11 @@ PUBLIC void prot_init()
 	{ hwint13, VECTOR(13), INTR_PRIVILEGE },
 	{ hwint14, VECTOR(14), INTR_PRIVILEGE },
 	{ hwint15, VECTOR(15), INTR_PRIVILEGE },
+#if _WORD_SIZE == 2
+	{ p_s_call, SYS_VECTOR, USER_PRIVILEGE },	/* 286 system call */
+#else
 	{ s_call, SYS386_VECTOR, USER_PRIVILEGE },	/* 386 system call */
+#endif
 	{ level0_call, LEVEL0_VECTOR, TASK_PRIVILEGE },
   };
 
@@ -168,8 +185,10 @@ PUBLIC void prot_init()
 		 PRESENT | INT_GATE_TYPE | (gtp->privilege << DPL_SHIFT));
   }
 
+#if _WORD_SIZE == 4
   /* Complete building of main TSS. */
   tss.iobase = sizeof tss;	/* empty i/o permissions map */
+#endif
 }
 
 /*===========================================================================*
@@ -216,6 +235,7 @@ vir_bytes size;
   segdp->base_middle = base >> BASE_MIDDLE_SHIFT;
   segdp->base_high = base >> BASE_HIGH_SHIFT;
 
+#if _WORD_SIZE == 4
   --size;			/* convert to a limit, 0 size means 4G */
   if (size > BYTE_GRAN_MAX) {
 	segdp->limit_low = size >> PAGE_GRAN_SHIFT;
@@ -226,6 +246,9 @@ vir_bytes size;
 	segdp->granularity = size >> GRANULARITY_SHIFT;
   }
   segdp->granularity |= DEFAULT;	/* means BIG for data seg */
+#else
+  segdp->limit_low = size - 1;
+#endif
 }
 
 /*===========================================================================*
@@ -262,8 +285,21 @@ phys_bytes phys;
 /* Return a segment selector and offset that can be used to reach a physical
  * address, for use by a driver doing memory I/O in the A0000 - DFFFF range.
  */
+#if _WORD_SIZE == 2
+  if (! machine.protected) {
+	*seg = phys / HCLICK_SIZE;
+	*off = phys % HCLICK_SIZE;
+  } else {
+	unsigned bank = phys >> 16;
+	unsigned index = bank - 0xA + A_INDEX;
+	init_dataseg(&gdt[index], (phys_bytes) bank << 16, 0, TASK_PRIVILEGE);
+	*seg = (index * 0x08) | TASK_PRIVILEGE;
+	*off = phys & 0xFFFF;
+  }
+#else
   *seg = FLAT_DS_SELECTOR;
   *off = phys;
+#endif
 }
 
 /*===========================================================================*
@@ -281,7 +317,9 @@ unsigned dpl_type;
   idp->offset_low = offset;
   idp->selector = CS_SELECTOR;
   idp->p_dpl_type = dpl_type;
+#if _WORD_SIZE == 4
   idp->offset_high = offset >> OFFSET_HIGH_SHIFT;
+#endif
 }
 
 /*===========================================================================*
@@ -327,8 +365,10 @@ register struct proc *rp;
           (phys_bytes) rp->p_memmap[D].mem_phys << CLICK_SHIFT,
           data_bytes, privilege);
       rp->p_reg.cs = (CS_LDT_INDEX * DESC_SIZE) | TI | privilege;
+#if _WORD_SIZE == 4
       rp->p_reg.gs =
       rp->p_reg.fs =
+#endif
       rp->p_reg.ss =
       rp->p_reg.es =
       rp->p_reg.ds = (DS_LDT_INDEX*DESC_SIZE) | TI | privilege;

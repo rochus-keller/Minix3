@@ -1,0 +1,3438 @@
+diff --git a/drivers/Makefile b/drivers/Makefile
+index 9bc6292..4eb46ea 100644
+--- a/drivers/Makefile
++++ b/drivers/Makefile
+@@ -20,7 +20,18 @@ all install depend clean:
+ 	cd ./tty && $(MAKE) $@
+ 	cd ./memory && $(MAKE) $@
+ 	cd ./at_wini && $(MAKE) $@
++	cd ./floppy && $(MAKE) $@
++	cd ./printer && $(MAKE) $@
++	cd ./rtl8139 && $(MAKE) $@
++	cd ./fxp && $(MAKE) $@
++	cd ./dpeth && $(MAKE) $@
+ 	cd ./log && $(MAKE) $@
++	cd ./bios_wini && $(MAKE) $@
++	cd ./cmos && $(MAKE) $@
++	cd ./random && $(MAKE) $@
++	cd ./dp8390 && $(MAKE) $@
++	cd ./sb16 && $(MAKE) $@
++	cd ./lance && $(MAKE) $@
+ 
+ image:
+ 	cd ./libdriver && $(MAKE) build
+@@ -28,4 +39,6 @@ image:
+ 	cd ./tty && $(MAKE) build
+ 	cd ./memory && $(MAKE) build
+ 	cd ./at_wini && $(MAKE) build
++	cd ./floppy && $(MAKE) build
++	cd ./bios_wini && $(MAKE) build
+ 	cd ./log && $(MAKE) build
+diff --git a/drivers/at_wini/at_wini.c b/drivers/at_wini/at_wini.c
+index 13f79ab..969b436 100644
+--- a/drivers/at_wini/at_wini.c
++++ b/drivers/at_wini/at_wini.c
+@@ -83,6 +83,35 @@
+ #define   CTL_RESET		0x04	/* reset controller */
+ #define   CTL_INTDISABLE	0x02	/* disable interrupts */
+ 
++#if ENABLE_ATAPI
++#define   ERROR_SENSE           0xF0    /* sense key mask */
++#define     SENSE_NONE          0x00    /* no sense key */
++#define     SENSE_RECERR        0x10    /* recovered error */
++#define     SENSE_NOTRDY        0x20    /* not ready */
++#define     SENSE_MEDERR        0x30    /* medium error */
++#define     SENSE_HRDERR        0x40    /* hardware error */
++#define     SENSE_ILRQST        0x50    /* illegal request */
++#define     SENSE_UATTN         0x60    /* unit attention */
++#define     SENSE_DPROT         0x70    /* data protect */
++#define     SENSE_ABRT          0xb0    /* aborted command */
++#define     SENSE_MISCOM        0xe0    /* miscompare */
++#define   ERROR_MCR             0x08    /* media change requested */
++#define   ERROR_ABRT            0x04    /* aborted command */
++#define   ERROR_EOM             0x02    /* end of media detected */
++#define   ERROR_ILI             0x01    /* illegal length indication */
++#define REG_FEAT            1   /* features */
++#define   FEAT_OVERLAP          0x02    /* overlap */
++#define   FEAT_DMA              0x01    /* dma */
++#define REG_IRR             2   /* interrupt reason register */
++#define   IRR_REL               0x04    /* release */
++#define   IRR_IO                0x02    /* direction for xfer */
++#define   IRR_COD               0x01    /* command or data */
++#define REG_SAMTAG          3
++#define REG_CNT_LO          4   /* low byte of cylinder number */
++#define REG_CNT_HI          5   /* high byte of cylinder number */
++#define REG_DRIVE           6   /* drive select */
++#endif
++
+ #define REG_STATUS          7   /* status */
+ #define   STATUS_BSY            0x80    /* controller busy */
+ #define   STATUS_DRDY           0x40    /* drive ready */
+@@ -92,6 +121,15 @@
+ #define   STATUS_CORR           0x04    /* correctable error occurred */
+ #define   STATUS_CHECK          0x01    /* check error */
+ 
++#ifdef ENABLE_ATAPI
++#define   ATAPI_PACKETCMD       0xA0    /* packet command */
++#define   ATAPI_IDENTIFY        0xA1    /* identify drive */
++#define   SCSI_READ10           0x28    /* read from disk */
++#define   SCSI_SENSE            0x03    /* sense request */
++
++#define CD_SECTOR_SIZE		2048	/* sector size of a CD-ROM */
++#endif /* ATAPI */
++
+ /* Interrupt request lines. */
+ #define NO_IRQ		 0	/* no IRQ set yet */
+ 
+@@ -119,7 +157,11 @@ struct command {
+ /* Miscellaneous. */
+ #define MAX_DRIVES         8
+ #define COMPAT_DRIVES      4
++#if _WORD_SIZE > 2
+ #define MAX_SECS	 256	/* controller can transfer this many sectors */
++#else
++#define MAX_SECS	 127	/* but not to a 16 bit process */
++#endif
+ #define MAX_ERRORS         4	/* how often to try rd/wt before quitting */
+ #define NR_MINORS       (MAX_DRIVES * DEV_PER_DRIVE)
+ #define SUB_PER_DRIVE	(NR_PARTITIONS * NR_PARTITIONS)
+@@ -132,7 +174,11 @@ struct command {
+ #define INITIALIZED	0x01	/* drive is initialized */
+ #define DEAF		0x02	/* controller must be reset */
+ #define SMART		0x04	/* drive supports ATA commands */
++#if ENABLE_ATAPI
++#define ATAPI		0x08	/* it is an ATAPI device */
++#else
+ #define ATAPI		   0	/* don't bother with ATAPI; optimise out */
++#endif
+ #define IDENTIFIED	0x10	/* w_identify done successfully */
+ #define IGNORING	0x20	/* w_identify failed once */
+ 
+@@ -212,6 +258,14 @@ FORWARD _PROTOTYPE( void w_intr_wait, (void) 				);
+ FORWARD _PROTOTYPE( int at_intr_wait, (void) 				);
+ FORWARD _PROTOTYPE( int w_waitfor, (int mask, int value) 		);
+ FORWARD _PROTOTYPE( void w_geometry, (struct partition *entry) 		);
++#if ENABLE_ATAPI
++FORWARD _PROTOTYPE( int atapi_sendpacket, (u8_t *packet, unsigned cnt) 	);
++FORWARD _PROTOTYPE( int atapi_intr_wait, (void) 			);
++FORWARD _PROTOTYPE( int atapi_open, (void) 				);
++FORWARD _PROTOTYPE( void atapi_close, (void) 				);
++FORWARD _PROTOTYPE( int atapi_transfer, (int proc_nr, int opcode,
++			off_t position, iovec_t *iov, unsigned nr_req) 	);
++#endif
+ 
+ /* Entry points to this driver. */
+ PRIVATE struct driver w_dtab = {
+@@ -440,6 +494,9 @@ message *m_ptr;
+   if (!(wn->state & IDENTIFIED) || (wn->state & DEAF)) {
+ 	/* Try to identify the device. */
+ 	if (w_identify() != OK) {
++#if VERBOSE
++  		printf("%s: probe failed\n", w_name());
++#endif
+ 		if (wn->state & DEAF) w_reset();
+ 		wn->state = IGNORING;
+ 		return(ENXIO);
+@@ -453,8 +510,22 @@ message *m_ptr;
+   		wn->state |= IGNORING;
+ 	  	return(ENXIO);
+ 	  }
++
++#if VERBOSE
++	  printf("%s: AT driver detected ", w_name());
++	  if (wn->state & (SMART|ATAPI)) {
++		printf("%.40s\n", w_id_string);
++	  } else {
++		printf("%ux%ux%u\n", wn->pcylinders, wn->pheads, wn->psectors);
++	  }
++#endif
+   }
+ 
++#if ENABLE_ATAPI
++   if ((wn->state & ATAPI) && (m_ptr->COUNT & W_BIT))
++	return(EACCES);
++#endif
++
+    /* If it's not an ATAPI device, then don't open with RO_BIT. */
+    if (!(wn->state & ATAPI) && (m_ptr->COUNT & RO_BIT)) return EACCES;
+ 
+@@ -462,10 +533,14 @@ message *m_ptr;
+    * or being opened after being closed.
+    */
+   if (wn->open_ct == 0) {
++#if ENABLE_ATAPI
++	if (wn->state & ATAPI) {
++		int r;
++		if ((r = atapi_open()) != OK) return(r);
++	}
++#endif
+ 
+ 	/* Partition the disk. */
+-	memset(wn->part, sizeof(wn->part), 0);
+-	memset(wn->subpart, sizeof(wn->subpart), 0);
+ 	partition(&w_dtab, w_drive * DEV_PER_DRIVE, P_PRIMARY, wn->state & ATAPI);
+   }
+   wn->open_ct++;
+@@ -574,6 +649,21 @@ PRIVATE int w_identify()
+ 			wn->lcylinders /= 2;
+ 		}
+ 	}
++#if ENABLE_ATAPI
++  } else
++  if (cmd.command = ATAPI_IDENTIFY, com_simple(&cmd) == OK) {
++	/* An ATAPI device. */
++	wn->state |= ATAPI;
++
++	/* Device information. */
++	if ((s=sys_insw(wn->base_cmd + REG_DATA, SELF, tmp_buf, 512)) != OK)
++		panic(w_name(),"Call to sys_insw() failed", s);
++
++	/* Why are the strings byte swapped??? */
++	for (i = 0; i < 40; i++) w_id_string[i] = id_byte(27)[i^1];
++
++	size = 0;	/* Size set later. */
++#endif
+   } else {
+ 	/* Not an ATA device; no translations, no special features.  Don't
+ 	 * touch it unless the BIOS knows about it.
+@@ -626,7 +716,12 @@ PRIVATE int w_io_test(void)
+ 	int r, save_dev;
+ 	int save_timeout, save_errors, save_wakeup;
+ 	iovec_t iov;
++#ifdef CD_SECTOR_SIZE
++	static char buf[CD_SECTOR_SIZE];
++#else
+ 	static char buf[SECTOR_SIZE];
++#endif
++
+ 	iov.iov_addr = (vir_bytes) buf;
+ 	iov.iov_size = sizeof(buf);
+ 	save_dev = w_device;
+@@ -760,6 +855,14 @@ unsigned nr_req;		/* length of request vector */
+   unsigned long dv_size = cv64ul(w_dv->dv_size);
+   unsigned cylinder, head, sector, nbytes;
+ 
++#if ENABLE_ATAPI
++  if (w_wn->state & ATAPI) {
++	return atapi_transfer(proc_nr, opcode, position, iov, nr_req);
++  }
++#endif
++
++  
++
+   /* Check disk address. */
+   if ((position & SECTOR_MASK) != 0) return(EINVAL);
+ 
+@@ -922,6 +1025,9 @@ message *m_ptr;
+   if (w_prepare(m_ptr->DEVICE) == NIL_DEV)
+   	return(ENXIO);
+   w_wn->open_ct--;
++#if ENABLE_ATAPI
++  if (w_wn->open_ct == 0 && (w_wn->state & ATAPI)) atapi_close();
++#endif
+   return(OK);
+ }
+ 
+@@ -1119,6 +1225,262 @@ struct partition *entry;
+   }
+ }
+ 
++#if ENABLE_ATAPI
++/*===========================================================================*
++ *				atapi_open				     *
++ *===========================================================================*/
++PRIVATE int atapi_open()
++{
++/* Should load and lock the device and obtain its size.  For now just set the
++ * size of the device to something big.  What is really needed is a generic
++ * SCSI layer that does all this stuff for ATAPI and SCSI devices (kjb). (XXX)
++ */
++  w_wn->part[0].dv_size = mul64u(800L*1024, 1024);
++  return(OK);
++}
++
++/*===========================================================================*
++ *				atapi_close				     *
++ *===========================================================================*/
++PRIVATE void atapi_close()
++{
++/* Should unlock the device.  For now do nothing.  (XXX) */
++}
++
++void sense_request(void)
++{
++	int r, i;
++	static u8_t sense[100], packet[ATAPI_PACKETSIZE];
++
++	packet[0] = SCSI_SENSE;
++	packet[1] = 0;
++	packet[2] = 0;
++	packet[3] = 0;
++	packet[4] = SENSE_PACKETSIZE;
++	packet[5] = 0;
++	packet[7] = 0;
++	packet[8] = 0;
++	packet[9] = 0;
++	packet[10] = 0;
++	packet[11] = 0;
++
++	for(i = 0; i < SENSE_PACKETSIZE; i++) sense[i] = 0xff;
++	r = atapi_sendpacket(packet, SENSE_PACKETSIZE);
++	if (r != OK) { printf("request sense command failed\n"); return; }
++	if (atapi_intr_wait() <= 0) { printf("WARNING: request response failed\n"); }
++
++	if (sys_insw(w_wn->base_cmd + REG_DATA, SELF, (void *) sense, SENSE_PACKETSIZE) != OK)
++		printf("WARNING: sense reading failed\n");
++
++	printf("sense data:");
++	for(i = 0; i < SENSE_PACKETSIZE; i++) printf(" %02x", sense[i]);
++	printf("\n");
++}
++
++/*===========================================================================*
++ *				atapi_transfer				     *
++ *===========================================================================*/
++PRIVATE int atapi_transfer(proc_nr, opcode, position, iov, nr_req)
++int proc_nr;			/* process doing the request */
++int opcode;			/* DEV_GATHER or DEV_SCATTER */
++off_t position;			/* offset on device to read or write */
++iovec_t *iov;			/* pointer to read or write request vector */
++unsigned nr_req;		/* length of request vector */
++{
++  struct wini *wn = w_wn;
++  iovec_t *iop, *iov_end = iov + nr_req;
++  int r, s, errors, fresh;
++  u64_t pos;
++  unsigned long block;
++  unsigned long dv_size = cv64ul(w_dv->dv_size);
++  unsigned nbytes, nblocks, count, before, chunk;
++  static u8_t packet[ATAPI_PACKETSIZE];
++
++  errors = fresh = 0;
++
++  while (nr_req > 0 && !fresh) {
++	/* The Minix block size is smaller than the CD block size, so we
++	 * may have to read extra before or after the good data.
++	 */
++	pos = add64ul(w_dv->dv_base, position);
++	block = div64u(pos, CD_SECTOR_SIZE);
++	before = rem64u(pos, CD_SECTOR_SIZE);
++
++	/* How many bytes to transfer? */
++	nbytes = count = 0;
++	for (iop = iov; iop < iov_end; iop++) {
++		nbytes += iop->iov_size;
++		if ((before + nbytes) % CD_SECTOR_SIZE == 0) count = nbytes;
++	}
++
++	/* Does one of the memory chunks end nicely on a CD sector multiple? */
++	if (count != 0) nbytes = count;
++
++	/* Data comes in as words, so we have to enforce even byte counts. */
++	if ((before | nbytes) & 1) return(EINVAL);
++
++	/* Which block on disk and how close to EOF? */
++	if (position >= dv_size) return(OK);		/* At EOF */
++	if (position + nbytes > dv_size) nbytes = dv_size - position;
++
++	nblocks = (before + nbytes + CD_SECTOR_SIZE - 1) / CD_SECTOR_SIZE;
++	if (ATAPI_DEBUG) {
++		printf("block=%lu, before=%u, nbytes=%u, nblocks=%u\n",
++			block, before, nbytes, nblocks);
++	}
++
++	/* First check to see if a reinitialization is needed. */
++	if (!(wn->state & INITIALIZED) && w_specify() != OK) return(EIO);
++
++	/* Build an ATAPI command packet. */
++	packet[0] = SCSI_READ10;
++	packet[1] = 0;
++	packet[2] = (block >> 24) & 0xFF;
++	packet[3] = (block >> 16) & 0xFF;
++	packet[4] = (block >>  8) & 0xFF;
++	packet[5] = (block >>  0) & 0xFF;
++	packet[7] = (nblocks >> 8) & 0xFF;
++	packet[8] = (nblocks >> 0) & 0xFF;
++	packet[9] = 0;
++	packet[10] = 0;
++	packet[11] = 0;
++
++	/* Tell the controller to execute the packet command. */
++	r = atapi_sendpacket(packet, nblocks * CD_SECTOR_SIZE);
++	if (r != OK) goto err;
++
++	/* Read chunks of data. */
++	while ((r = atapi_intr_wait()) > 0) {
++		count = r;
++
++		if (ATAPI_DEBUG) {
++			printf("before=%u, nbytes=%u, count=%u\n",
++				before, nbytes, count);
++		}
++
++		while (before > 0 && count > 0) {	/* Discard before. */
++			chunk = before;
++			if (chunk > count) chunk = count;
++			if (chunk > DMA_BUF_SIZE) chunk = DMA_BUF_SIZE;
++	if ((s=sys_insw(wn->base_cmd + REG_DATA, SELF, tmp_buf, chunk)) != OK)
++		panic(w_name(),"Call to sys_insw() failed", s);
++			before -= chunk;
++			count -= chunk;
++		}
++
++		while (nbytes > 0 && count > 0) {	/* Requested data. */
++			chunk = nbytes;
++			if (chunk > count) chunk = count;
++			if (chunk > iov->iov_size) chunk = iov->iov_size;
++	if ((s=sys_insw(wn->base_cmd + REG_DATA, proc_nr, (void *) iov->iov_addr, chunk)) != OK)
++		panic(w_name(),"Call to sys_insw() failed", s);
++			position += chunk;
++			nbytes -= chunk;
++			count -= chunk;
++			iov->iov_addr += chunk;
++			fresh = 0;
++			if ((iov->iov_size -= chunk) == 0) {
++				iov++;
++				nr_req--;
++				fresh = 1;	/* new element is optional */
++			}
++		}
++
++		while (count > 0) {		/* Excess data. */
++			chunk = count;
++			if (chunk > DMA_BUF_SIZE) chunk = DMA_BUF_SIZE;
++	if ((s=sys_insw(wn->base_cmd + REG_DATA, SELF, tmp_buf, chunk)) != OK)
++		panic(w_name(),"Call to sys_insw() failed", s);
++			count -= chunk;
++		}
++	}
++
++	if (r < 0) {
++  err:		/* Don't retry if too many errors. */
++		if (atapi_debug) sense_request();
++		if (++errors == max_errors) {
++			w_command = CMD_IDLE;
++			if (atapi_debug) printf("giving up (%d)\n", errors);
++			return(EIO);
++		}
++		if (atapi_debug) printf("retry (%d)\n", errors);
++	}
++  }
++
++  w_command = CMD_IDLE;
++  return(OK);
++}
++
++/*===========================================================================*
++ *				atapi_sendpacket			     *
++ *===========================================================================*/
++PRIVATE int atapi_sendpacket(packet, cnt)
++u8_t *packet;
++unsigned cnt;
++{
++/* Send an Atapi Packet Command */
++  struct wini *wn = w_wn;
++  pvb_pair_t outbyte[6];		/* vector for sys_voutb() */
++  int s;
++
++  if (wn->state & IGNORING) return ERR;
++
++  /* Select Master/Slave drive */
++  if ((s=sys_outb(wn->base_cmd + REG_DRIVE, wn->ldhpref)) != OK)
++  	panic(w_name(),"Couldn't select master/ slave drive",s);
++
++  if (!w_waitfor(STATUS_BSY | STATUS_DRQ, 0)) {
++	printf("%s: atapi_sendpacket: drive not ready\n", w_name());
++	return(ERR);
++  }
++
++  /* Schedule a wakeup call, some controllers are flaky. This is done with
++   * a synchronous alarm. If a timeout occurs a SYN_ALARM message is sent
++   * from HARDWARE, so that w_intr_wait() can call w_timeout() in case the
++   * controller was not able to execute the command. Leftover timeouts are
++   * simply ignored by the main loop. 
++   */
++  sys_setalarm(wakeup_ticks, 0);
++
++#if _WORD_SIZE > 2
++  if (cnt > 0xFFFE) cnt = 0xFFFE;	/* Max data per interrupt. */
++#endif
++
++  w_command = ATAPI_PACKETCMD;
++  pv_set(outbyte[0], wn->base_cmd + REG_FEAT, 0);
++  pv_set(outbyte[1], wn->base_cmd + REG_IRR, 0);
++  pv_set(outbyte[2], wn->base_cmd + REG_SAMTAG, 0);
++  pv_set(outbyte[3], wn->base_cmd + REG_CNT_LO, (cnt >> 0) & 0xFF);
++  pv_set(outbyte[4], wn->base_cmd + REG_CNT_HI, (cnt >> 8) & 0xFF);
++  pv_set(outbyte[5], wn->base_cmd + REG_COMMAND, w_command);
++  if (atapi_debug) printf("cmd: %x  ", w_command);
++  if ((s=sys_voutb(outbyte,6)) != OK)
++  	panic(w_name(),"Couldn't write registers with sys_voutb()",s);
++
++  if (!w_waitfor(STATUS_BSY | STATUS_DRQ, STATUS_DRQ)) {
++	printf("%s: timeout (BSY|DRQ -> DRQ)\n", w_name());
++	return(ERR);
++  }
++  wn->w_status |= STATUS_ADMBSY;		/* Command not at all done yet. */
++
++  /* Send the command packet to the device. */
++  if ((s=sys_outsw(wn->base_cmd + REG_DATA, SELF, packet, ATAPI_PACKETSIZE)) != OK)
++	panic(w_name(),"sys_outsw() failed", s);
++
++ {
++ int p;
++ if (atapi_debug) {
++ 	printf("sent command:");
++	 for(p = 0; p < ATAPI_PACKETSIZE; p++) { printf(" %02x", packet[p]); }
++	 printf("\n");
++	}
++ }
++  return(OK);
++}
++
++
++#endif /* ENABLE_ATAPI */
++
+ /*===========================================================================*
+  *				w_other					     *
+  *===========================================================================*/
+@@ -1242,3 +1604,86 @@ char *strerr(int e)
+ 
+ 	return str;
+ }
++
++#if ENABLE_ATAPI
++
++/*===========================================================================*
++ *				atapi_intr_wait				     *
++ *===========================================================================*/
++PRIVATE int atapi_intr_wait()
++{
++/* Wait for an interrupt and study the results.  Returns a number of bytes
++ * that need to be transferred, or an error code.
++ */
++  struct wini *wn = w_wn;
++  pvb_pair_t inbyte[4];		/* vector for sys_vinb() */
++  int s;			/* status for sys_vinb() */
++  int e;
++  int len;
++  int irr;
++  int r;
++  int phase;
++
++  w_intr_wait();
++
++  /* Request series of device I/O. */
++  inbyte[0].port = wn->base_cmd + REG_ERROR;
++  inbyte[1].port = wn->base_cmd + REG_CNT_LO;
++  inbyte[2].port = wn->base_cmd + REG_CNT_HI;
++  inbyte[3].port = wn->base_cmd + REG_IRR;
++  if ((s=sys_vinb(inbyte, 4)) != OK)
++  	panic(w_name(),"ATAPI failed sys_vinb()", s);
++  e = inbyte[0].value;
++  len = inbyte[1].value;
++  len |= inbyte[2].value << 8;
++  irr = inbyte[3].value;
++
++#if ATAPI_DEBUG
++	printf("wn %p  S=%x=%s E=%02x=%s L=%04x I=%02x\n", wn, wn->w_status, strstatus(wn->w_status), e, strerr(e), len, irr);
++#endif
++  if (wn->w_status & (STATUS_BSY | STATUS_CHECK)) {
++	if (atapi_debug) {
++		printf("atapi fail:  S=%x=%s E=%02x=%s L=%04x I=%02x\n", wn->w_status, strstatus(wn->w_status), e, strerr(e), len, irr);
++	}
++  	return ERR;
++  }
++
++  phase = (wn->w_status & STATUS_DRQ) | (irr & (IRR_COD | IRR_IO));
++
++  switch (phase) {
++  case IRR_COD | IRR_IO:
++	if (ATAPI_DEBUG) printf("ACD: Phase Command Complete\n");
++	r = OK;
++	break;
++  case 0:
++	if (ATAPI_DEBUG) printf("ACD: Phase Command Aborted\n");
++	r = ERR;
++	break;
++  case STATUS_DRQ | IRR_COD:
++	if (ATAPI_DEBUG) printf("ACD: Phase Command Out\n");
++	r = ERR;
++	break;
++  case STATUS_DRQ:
++	if (ATAPI_DEBUG) printf("ACD: Phase Data Out %d\n", len);
++	r = len;
++	break;
++  case STATUS_DRQ | IRR_IO:
++	if (ATAPI_DEBUG) printf("ACD: Phase Data In %d\n", len);
++	r = len;
++	break;
++  default:
++	if (ATAPI_DEBUG) printf("ACD: Phase Unknown\n");
++	r = ERR;
++	break;
++  }
++
++#if 0
++  /* retry if the media changed */
++  XXX while (phase == (IRR_IO | IRR_COD) && (wn->w_status & STATUS_CHECK)
++	&& (e & ERROR_SENSE) == SENSE_UATTN && --try > 0);
++#endif
++
++  wn->w_status |= STATUS_ADMBSY;	/* Assume not done yet. */
++  return(r);
++}
++#endif /* ENABLE_ATAPI */
+diff --git a/drivers/at_wini/at_wini.h b/drivers/at_wini/at_wini.h
+index 2ae2248..b9d57aa 100644
+--- a/drivers/at_wini/at_wini.h
++++ b/drivers/at_wini/at_wini.h
+@@ -5,4 +5,4 @@
+ _PROTOTYPE(int main, (void));
+ 
+ #define VERBOSE		   0	/* display identify messages during boot */
+-#define ENABLE_ATAPI	0	/* add ATAPI cd-rom support to driver */
++#define ENABLE_ATAPI	   1	/* add ATAPI cd-rom support to driver */
+diff --git a/drivers/libdriver/driver.c b/drivers/libdriver/driver.c
+index b1e037d..44c6581 100644
+--- a/drivers/libdriver/driver.c
++++ b/drivers/libdriver/driver.c
+@@ -39,13 +39,28 @@
+ #include <sys/ioc_disk.h>
+ #include "driver.h"
+ 
++#if (CHIP == INTEL)
++
++#if USE_EXTRA_DMA_BUF && DMA_BUF_SIZE < 2048
++/* A bit extra scratch for the Adaptec driver. */
++#define BUF_EXTRA	(2048 - DMA_BUF_SIZE)
++#else
+ #define BUF_EXTRA	0
++#endif
+ 
+ /* Claim space for variables. */
+ PRIVATE u8_t buffer[(unsigned) 2 * DMA_BUF_SIZE + BUF_EXTRA];
+ u8_t *tmp_buf;			/* the DMA buffer eventually */
+ phys_bytes tmp_phys;		/* phys address of DMA buffer */
+ 
++#else /* CHIP != INTEL */
++
++/* Claim space for variables. */
++u8_t tmp_buf[DMA_BUF_SIZE];	/* the DMA buffer */
++phys_bytes tmp_phys;		/* phys address of DMA buffer */
++
++#endif /* CHIP != INTEL */
++
+ FORWARD _PROTOTYPE( void init_buffer, (void) );
+ FORWARD _PROTOTYPE( int do_rdwt, (struct driver *dr, message *mp) );
+ FORWARD _PROTOTYPE( int do_vrdwt, (struct driver *dr, message *mp) );
+@@ -131,6 +146,7 @@ PRIVATE void init_buffer()
+  * 'tmp_phys', the normal address is 'tmp_buf'.
+  */
+ 
++#if (CHIP == INTEL)
+   unsigned left;
+ 
+   tmp_buf = buffer;
+@@ -141,6 +157,7 @@ PRIVATE void init_buffer()
+ 	tmp_buf += left;
+ 	tmp_phys += left;
+   }
++#endif /* CHIP == INTEL */
+ }
+ 
+ /*===========================================================================*
+diff --git a/drivers/memory/memory.c b/drivers/memory/memory.c
+index 2289adb..bac4180 100644
+--- a/drivers/memory/memory.c
++++ b/drivers/memory/memory.c
+@@ -248,14 +248,26 @@ PRIVATE void m_init()
+   }
+ 
+   /* Set up memory ranges for /dev/mem. */
++#if (CHIP == INTEL)
+   if (OK != (s=sys_getmachine(&machine))) {
+       panic("MEM","Couldn't get machine information.",s);
+   }
+   if (! machine.protected) {
+ 	m_geom[MEM_DEV].dv_size =   cvul64(0x100000); /* 1M for 8086 systems */
+   } else {
++#if _WORD_SIZE == 2
++	m_geom[MEM_DEV].dv_size =  cvul64(0x1000000); /* 16M for 286 systems */
++#else
+ 	m_geom[MEM_DEV].dv_size = cvul64(0xFFFFFFFF); /* 4G-1 for 386 systems */
++#endif
+   }
++#else /* !(CHIP == INTEL) */
++#if (CHIP == M68000)
++  m_geom[MEM_DEV].dv_size = cvul64(MEM_BYTES);
++#else /* !(CHIP == M68000) */
++#error /* memory limit not set up */
++#endif /* !(CHIP == M68000) */
++#endif /* !(CHIP == INTEL) */
+ }
+ 
+ /*===========================================================================*
+@@ -316,3 +328,4 @@ struct partition *entry;
+   entry->heads = 64;
+   entry->sectors = 32;
+ }
++
+diff --git a/drivers/tty/Makefile b/drivers/tty/Makefile
+index e784aaf..40ebd82 100644
+--- a/drivers/tty/Makefile
++++ b/drivers/tty/Makefile
+@@ -16,7 +16,7 @@ CFLAGS = -I$i
+ LDFLAGS = -i
+ LIBS = -lsys -lsysutil -ltimers
+ 
+-OBJ = tty.o console.o vidcopy.o keyboard.o 
++OBJ = tty.o console.o vidcopy.o keyboard.o pty.o rs232.o 
+ 
+ # build local binary 
+ all build:	$(DRIVER)
+diff --git a/drivers/tty/console.c b/drivers/tty/console.c
+index b68c4e9..1f6496a 100644
+--- a/drivers/tty/console.c
++++ b/drivers/tty/console.c
+@@ -893,6 +893,16 @@ message *m;
+   int r;
+ 
+   /* Try to get a fresh copy of the buffer with kernel messages. */
++#if DEAD_CODE	
++  /* During shutdown, the reply is garbled because new notifications arrive
++   * while the system task makes a copy of the kernel messages buffer.
++   * Hence, don't check the return value. 
++   */
++  if ((r=sys_getkmessages(&kmess)) != OK) {
++  	printf("TTY: couldn't get copy of kmessages: %d, 0x%x\n", r,r);
++  	return;
++  }
++#endif
+   sys_getkmessages(&kmess);
+ 
+   /* Print only the new part. Determine how many new bytes there are with 
+diff --git a/drivers/tty/keymaps/Makefile b/drivers/tty/keymaps/Makefile
+index ed49e39..9395468 100644
+--- a/drivers/tty/keymaps/Makefile
++++ b/drivers/tty/keymaps/Makefile
+@@ -10,11 +10,33 @@ LK =	/usr/lib/keymaps
+ 	@rm -f a.out
+ 
+ all:	\
++	french.map \
++	german.map \
++	italian.map \
++	japanese.map \
++	latin-am.map \
++	olivetti.map \
++	polish.map \
++	scandinavn.map \
++	spanish.map \
++	uk.map \
+ 	us-std.map \
++	us-swap.map \
+ 
+ install:	\
+ 	$(LK) \
++	$(LK)/french.map \
++	$(LK)/german.map \
++	$(LK)/italian.map \
++	$(LK)/japanese.map \
++	$(LK)/latin-am.map \
++	$(LK)/olivetti.map \
++	$(LK)/polish.map \
++	$(LK)/scandinavn.map \
++	$(LK)/spanish.map \
++	$(LK)/uk.map \
+ 	$(LK)/us-std.map \
++	$(LK)/us-swap.map \
+ 
+ clean:
+ 	rm -f a.out *.map
+@@ -22,5 +44,38 @@ clean:
+ $(LK):
+ 	install -d $@
+ 
++$(LK)/french.map:	french.map
++	install -c $? $@
++
++$(LK)/german.map:	german.map
++	install -c $? $@
++
++$(LK)/italian.map:	italian.map
++	install -c $? $@
++
++$(LK)/japanese.map:	japanese.map
++	install -c $? $@
++
++$(LK)/latin-am.map:	latin-am.map
++	install -c $? $@
++
++$(LK)/olivetti.map:	olivetti.map
++	install -c $? $@
++
++$(LK)/polish.map:	polish.map
++	install -c $? $@
++
++$(LK)/scandinavn.map:	scandinavn.map
++	install -c $? $@
++
++$(LK)/spanish.map:	spanish.map
++	install -c $? $@
++
++$(LK)/uk.map:	uk.map
++	install -c $? $@
++
+ $(LK)/us-std.map:	us-std.map
+ 	install -c $? $@
++
++$(LK)/us-swap.map:	us-swap.map
++	install -c $? $@
+diff --git a/drivers/tty/tty.c b/drivers/tty/tty.c
+index b7794f8..6cf8e77 100644
+--- a/drivers/tty/tty.c
++++ b/drivers/tty/tty.c
+@@ -59,10 +59,15 @@
+ #include "../drivers.h"
+ #include "../drivers.h"
+ #include <termios.h>
++#if ENABLE_SRCCOMPAT || ENABLE_BINCOMPAT
++#include <sgtty.h>
++#endif
+ #include <sys/ioc_tty.h>
+ #include <signal.h>
+ #include <minix/callnr.h>
++#if (CHIP == INTEL)
+ #include <minix/keymap.h>
++#endif
+ #include "tty.h"
+ 
+ #include <sys/time.h>
+@@ -116,6 +121,17 @@ FORWARD _PROTOTYPE( void dev_ioctl, (tty_t *tp)				);
+ FORWARD _PROTOTYPE( void setattr, (tty_t *tp)				);
+ FORWARD _PROTOTYPE( void tty_icancel, (tty_t *tp)			);
+ FORWARD _PROTOTYPE( void tty_init, (void)				);
++#if ENABLE_SRCCOMPAT || ENABLE_BINCOMPAT
++FORWARD _PROTOTYPE( int compat_getp, (tty_t *tp, struct sgttyb *sg)	);
++FORWARD _PROTOTYPE( int compat_getc, (tty_t *tp, struct tchars *sg)	);
++FORWARD _PROTOTYPE( int compat_setp, (tty_t *tp, struct sgttyb *sg)	);
++FORWARD _PROTOTYPE( int compat_setc, (tty_t *tp, struct tchars *sg)	);
++FORWARD _PROTOTYPE( int tspd2sgspd, (speed_t tspd)			);
++FORWARD _PROTOTYPE( speed_t sgspd2tspd, (int sgspd)			);
++#if ENABLE_BINCOMPAT
++FORWARD _PROTOTYPE( void do_ioctl_compat, (tty_t *tp, message *m_ptr)	);
++#endif
++#endif
+ 
+ /* Default attributes. */
+ PRIVATE struct termios termios_defaults = {
+@@ -488,6 +504,10 @@ message *m_ptr;			/* pointer to message sent to task */
+   int r;
+   union {
+ 	int i;
++#if ENABLE_SRCCOMPAT
++	struct sgttyb sg;
++	struct tchars tc;
++#endif
+   } param;
+   size_t size;
+ 
+@@ -513,6 +533,18 @@ message *m_ptr;			/* pointer to message sent to task */
+         size = sizeof(struct winsize);
+         break;
+ 
++#if ENABLE_SRCCOMPAT
++    case TIOCGETP:      /* BSD-style get terminal properties */
++    case TIOCSETP:	/* BSD-style set terminal properties */
++	size = sizeof(struct sgttyb);
++	break;
++
++    case TIOCGETC:      /* BSD-style get terminal special characters */ 
++    case TIOCSETC:	/* BSD-style get terminal special characters */ 
++	size = sizeof(struct tchars);
++	break;
++#endif
++#if (MACHINE == IBM_PC)
+     case KIOCSMAP:	/* load keymap (Minix extension) */
+         size = sizeof(keymap_t);
+         break;
+@@ -521,6 +553,7 @@ message *m_ptr;			/* pointer to message sent to task */
+         size = sizeof(u8_t [8192]);
+         break;
+ 
++#endif
+     case TCDRAIN:	/* Posix tcdrain function -- no parameter */
+     default:		size = 0;
+   }
+@@ -606,6 +639,37 @@ message *m_ptr;			/* pointer to message sent to task */
+ 	/* SIGWINCH... */
+ 	break;
+ 
++#if ENABLE_SRCCOMPAT
++    case TIOCGETP:
++	compat_getp(tp, &param.sg);
++	r = sys_vircopy(SELF, D, (vir_bytes) &param.sg,
++		m_ptr->PROC_NR, D, (vir_bytes) m_ptr->ADDRESS,
++		(vir_bytes) size);
++	break;
++
++    case TIOCSETP:
++	r = sys_vircopy( m_ptr->PROC_NR, D, (vir_bytes) m_ptr->ADDRESS,
++		SELF, D, (vir_bytes) &param.sg, (vir_bytes) size);
++	if (r != OK) break;
++	compat_setp(tp, &param.sg);
++	break;
++
++    case TIOCGETC:
++	compat_getc(tp, &param.tc);
++	r = sys_vircopy(SELF, D, (vir_bytes) &param.tc,
++		m_ptr->PROC_NR, D, (vir_bytes) m_ptr->ADDRESS, 
++		(vir_bytes) size);
++	break;
++
++    case TIOCSETC:
++	r = sys_vircopy( m_ptr->PROC_NR, D, (vir_bytes) m_ptr->ADDRESS,
++		SELF, D, (vir_bytes) &param.tc, (vir_bytes) size);
++	if (r != OK) break;
++	compat_setc(tp, &param.tc);
++	break;
++#endif
++
++#if (MACHINE == IBM_PC)
+     case KIOCSMAP:
+ 	/* Load a new keymap (only /dev/console). */
+ 	if (isconsole(tp)) r = kbd_loadmap(m_ptr);
+@@ -615,6 +679,13 @@ message *m_ptr;			/* pointer to message sent to task */
+ 	/* Load a font into an EGA or VGA card (hs@hck.hr) */
+ 	if (isconsole(tp)) r = con_loadfont(m_ptr);
+ 	break;
++#endif
++
++#if (MACHINE == ATARI)
++    case VDU_LOADFONT:
++	r = vdu_loadfont(m_ptr);
++	break;
++#endif
+ 
+ /* These Posix functions are allowed to fail if _POSIX_JOB_CONTROL is 
+  * not defined.
+@@ -622,7 +693,12 @@ message *m_ptr;			/* pointer to message sent to task */
+     case TIOCGPGRP:     
+     case TIOCSPGRP:	
+     default:
++#if ENABLE_BINCOMPAT
++	do_ioctl_compat(tp, m_ptr);
++	return;
++#else
+ 	r = ENOTTY;
++#endif
+   }
+ 
+   /* Send the reply. */
+@@ -1443,6 +1519,15 @@ PRIVATE void tty_init()
+ 		tp->tty_minor = s - (NR_CONS+NR_RS_LINES) + TTYPX_MINOR;
+   	}
+   }
++
++#if DEAD_CODE
++  /* Install signal handler to ignore SIGTERM. */
++  sigact.sa_handler = SIG_IGN;
++  sigact.sa_mask = ~0;			/* block all other signals */
++  sigact.sa_flags = 0;			/* default behaviour */
++  if (sigaction(SIGTERM, &sigact, NULL) != OK) 
++      report("TTY","warning, sigaction() failed", errno);
++#endif
+ }
+ 
+ /*===========================================================================*
+@@ -1553,3 +1638,342 @@ register message *m_ptr;	/* pointer to message sent to the task */
+ 
+         return;
+ }
++
++#if ENABLE_SRCCOMPAT || ENABLE_BINCOMPAT
++/*===========================================================================*
++ *				compat_getp				     *
++ *===========================================================================*/
++PRIVATE int compat_getp(tp, sg)
++tty_t *tp;
++struct sgttyb *sg;
++{
++/* Translate an old TIOCGETP to the termios equivalent. */
++  int flgs;
++
++  sg->sg_erase = tp->tty_termios.c_cc[VERASE];
++  sg->sg_kill = tp->tty_termios.c_cc[VKILL];
++  sg->sg_ospeed = tspd2sgspd(cfgetospeed(&tp->tty_termios));
++  sg->sg_ispeed = tspd2sgspd(cfgetispeed(&tp->tty_termios));
++
++  flgs = 0;
++
++  /* XTABS	- if OPOST and XTABS */
++  if ((tp->tty_termios.c_oflag & (OPOST|XTABS)) == (OPOST|XTABS))
++	flgs |= 0006000;
++
++  /* BITS5..BITS8  - map directly to CS5..CS8 */
++  flgs |= (tp->tty_termios.c_cflag & CSIZE) << (8-2);
++
++  /* EVENP	- if PARENB and not PARODD */
++  if ((tp->tty_termios.c_cflag & (PARENB|PARODD)) == PARENB)
++	flgs |= 0000200;
++
++  /* ODDP	- if PARENB and PARODD */
++  if ((tp->tty_termios.c_cflag & (PARENB|PARODD)) == (PARENB|PARODD))
++	flgs |= 0000100;
++
++  /* RAW	- if not ICANON and not ISIG */
++  if (!(tp->tty_termios.c_lflag & (ICANON|ISIG)))
++	flgs |= 0000040;
++
++  /* CRMOD	- if ICRNL */
++  if (tp->tty_termios.c_iflag & ICRNL)
++	flgs |= 0000020;
++
++  /* ECHO	- if ECHO */
++  if (tp->tty_termios.c_lflag & ECHO)
++	flgs |= 0000010;
++
++  /* CBREAK	- if not ICANON and ISIG */
++  if ((tp->tty_termios.c_lflag & (ICANON|ISIG)) == ISIG)
++	flgs |= 0000002;
++
++  sg->sg_flags = flgs;
++  return(OK);
++}
++
++/*===========================================================================*
++ *				compat_getc				     *
++ *===========================================================================*/
++PRIVATE int compat_getc(tp, tc)
++tty_t *tp;
++struct tchars *tc;
++{
++/* Translate an old TIOCGETC to the termios equivalent. */
++
++  tc->t_intrc = tp->tty_termios.c_cc[VINTR];
++  tc->t_quitc = tp->tty_termios.c_cc[VQUIT];
++  tc->t_startc = tp->tty_termios.c_cc[VSTART];
++  tc->t_stopc = tp->tty_termios.c_cc[VSTOP];
++  tc->t_brkc = tp->tty_termios.c_cc[VEOL];
++  tc->t_eofc = tp->tty_termios.c_cc[VEOF];
++  return(OK);
++}
++
++/*===========================================================================*
++ *				compat_setp				     *
++ *===========================================================================*/
++PRIVATE int compat_setp(tp, sg)
++tty_t *tp;
++struct sgttyb *sg;
++{
++/* Translate an old TIOCSETP to the termios equivalent. */
++  struct termios termios;
++  int flags;
++
++  termios = tp->tty_termios;
++
++  termios.c_cc[VERASE] = sg->sg_erase;
++  termios.c_cc[VKILL] = sg->sg_kill;
++  cfsetispeed(&termios, sgspd2tspd(sg->sg_ispeed & BYTE));
++  cfsetospeed(&termios, sgspd2tspd(sg->sg_ospeed & BYTE));
++  flags = sg->sg_flags;
++
++  /* Input flags */
++
++  /* BRKINT	- not changed */
++  /* ICRNL	- set if CRMOD is set and not RAW */
++  /*		  (CRMOD also controls output) */
++  termios.c_iflag &= ~ICRNL;
++  if ((flags & 0000020) && !(flags & 0000040))
++	termios.c_iflag |= ICRNL;
++
++  /* IGNBRK	- not changed */
++  /* IGNCR	- forced off (ignoring cr's is not supported) */
++  termios.c_iflag &= ~IGNCR;
++
++  /* IGNPAR	- not changed */
++  /* INLCR	- forced off (mapping nl's to cr's is not supported) */
++  termios.c_iflag &= ~INLCR;
++
++  /* INPCK	- not changed */
++  /* ISTRIP	- not changed */
++  /* IXOFF	- not changed */
++  /* IXON	- forced on if not RAW */
++  termios.c_iflag &= ~IXON;
++  if (!(flags & 0000040))
++	termios.c_iflag |= IXON;
++
++  /* PARMRK	- not changed */
++
++  /* Output flags */
++
++  /* OPOST	- forced on if not RAW */
++  termios.c_oflag &= ~OPOST;
++  if (!(flags & 0000040))
++	termios.c_oflag |= OPOST;
++
++  /* ONLCR	- forced on if CRMOD */
++  termios.c_oflag &= ~ONLCR;
++  if (flags & 0000020)
++	termios.c_oflag |= ONLCR;
++
++  /* XTABS	- forced on if XTABS */
++  termios.c_oflag &= ~XTABS;
++  if (flags & 0006000)
++	termios.c_oflag |= XTABS;
++
++  /* CLOCAL	- not changed */
++  /* CREAD	- forced on (receiver is always enabled) */
++  termios.c_cflag |= CREAD;
++
++  /* CSIZE	- CS5-CS8 correspond directly to BITS5-BITS8 */
++  termios.c_cflag = (termios.c_cflag & ~CSIZE) | ((flags & 0001400) >> (8-2));
++
++  /* CSTOPB	- not changed */
++  /* HUPCL	- not changed */
++  /* PARENB	- set if EVENP or ODDP is set */
++  termios.c_cflag &= ~PARENB;
++  if (flags & (0000200|0000100))
++	termios.c_cflag |= PARENB;
++
++  /* PARODD	- set if ODDP is set */
++  termios.c_cflag &= ~PARODD;
++  if (flags & 0000100)
++	termios.c_cflag |= PARODD;
++
++  /* Local flags */
++
++  /* ECHO		- set if ECHO is set */
++  termios.c_lflag &= ~ECHO;
++  if (flags & 0000010)
++	termios.c_lflag |= ECHO;
++
++  /* ECHOE	- not changed */
++  /* ECHOK	- not changed */
++  /* ECHONL	- not changed */
++  /* ICANON	- set if neither CBREAK nor RAW */
++  termios.c_lflag &= ~ICANON;
++  if (!(flags & (0000002|0000040)))
++	termios.c_lflag |= ICANON;
++
++  /* IEXTEN	- set if not RAW */
++  /* ISIG	- set if not RAW */
++  termios.c_lflag &= ~(IEXTEN|ISIG);
++  if (!(flags & 0000040))
++	termios.c_lflag |= (IEXTEN|ISIG);
++
++  /* NOFLSH	- not changed */
++  /* TOSTOP	- not changed */
++
++  tp->tty_termios = termios;
++  setattr(tp);
++  return(OK);
++}
++
++/*===========================================================================*
++ *				compat_setc				     *
++ *===========================================================================*/
++PRIVATE int compat_setc(tp, tc)
++tty_t *tp;
++struct tchars *tc;
++{
++/* Translate an old TIOCSETC to the termios equivalent. */
++  struct termios termios;
++
++  termios = tp->tty_termios;
++
++  termios.c_cc[VINTR] = tc->t_intrc;
++  termios.c_cc[VQUIT] = tc->t_quitc;
++  termios.c_cc[VSTART] = tc->t_startc;
++  termios.c_cc[VSTOP] = tc->t_stopc;
++  termios.c_cc[VEOL] = tc->t_brkc;
++  termios.c_cc[VEOF] = tc->t_eofc;
++
++  tp->tty_termios = termios;
++  setattr(tp);
++  return(OK);
++}
++
++/* Table of termios line speed to sgtty line speed translations.   All termios
++ * speeds are present even if sgtty didn't know about them.  (Now it does.)
++ */
++PRIVATE struct s2s {
++  speed_t	tspd;
++  u8_t		sgspd;
++} ts2sgs[] = {
++  { B0,		  0 },
++  { B50,	 50 },
++  { B75,	 75 },
++  { B110,	  1 },
++  { B134,	134 },
++  { B200,	  2 },
++  { B300,	  3 },
++  { B600,	  6 },
++  { B1200,	 12 },
++  { B1800,	 18 },
++  { B2400,	 24 },
++  { B4800,	 48 },
++  { B9600,	 96 },
++  { B19200,	192 },
++  { B38400,	195 },
++  { B57600,	194 },
++  { B115200,	193 },
++};
++
++/*===========================================================================*
++ *				tspd2sgspd				     *
++ *===========================================================================*/
++PRIVATE int tspd2sgspd(tspd)
++speed_t tspd;
++{
++/* Translate a termios speed to sgtty speed. */
++  struct s2s *s;
++
++  for (s = ts2sgs; s < ts2sgs + sizeof(ts2sgs)/sizeof(ts2sgs[0]); s++) {
++	if (s->tspd == tspd) return(s->sgspd);
++  }
++  return 96;
++}
++
++/*===========================================================================*
++ *				sgspd2tspd				     *
++ *===========================================================================*/
++PRIVATE speed_t sgspd2tspd(sgspd)
++int sgspd;
++{
++/* Translate a sgtty speed to termios speed. */
++  struct s2s *s;
++
++  for (s = ts2sgs; s < ts2sgs + sizeof(ts2sgs)/sizeof(ts2sgs[0]); s++) {
++	if (s->sgspd == sgspd) return(s->tspd);
++  }
++  return B9600;
++}
++
++#if ENABLE_BINCOMPAT
++/*===========================================================================*
++ *				do_ioctl_compat				     *
++ *===========================================================================*/
++PRIVATE void do_ioctl_compat(tp, m_ptr)
++tty_t *tp;
++message *m_ptr;
++{
++/* Handle the old sgtty ioctl's that packed the sgtty or tchars struct into
++ * the Minix message.  Efficient then, troublesome now.
++ */
++  int minor, proc, func, result, r;
++  long flags, erki, spek;
++  u8_t erase, kill, intr, quit, xon, xoff, brk, eof, ispeed, ospeed;
++  struct sgttyb sg;
++  struct tchars tc;
++  message reply_mess;
++
++  minor = m_ptr->TTY_LINE;
++  proc = m_ptr->PROC_NR;
++  func = m_ptr->REQUEST;
++  spek = m_ptr->m2_l1;
++  flags = m_ptr->m2_l2;
++
++  switch(func)
++  {
++    case (('t'<<8) | 8):	/* TIOCGETP */
++	r = compat_getp(tp, &sg);
++	erase = sg.sg_erase;
++	kill = sg.sg_kill;
++	ispeed = sg.sg_ispeed;
++	ospeed = sg.sg_ospeed;
++	flags = sg.sg_flags;
++	erki = ((long)ospeed<<24) | ((long)ispeed<<16) | ((long)erase<<8) |kill;
++	break;
++    case (('t'<<8) | 18):	/* TIOCGETC */
++	r = compat_getc(tp, &tc);
++	intr = tc.t_intrc;
++	quit = tc.t_quitc;
++	xon = tc.t_startc;
++	xoff = tc.t_stopc;
++	brk = tc.t_brkc;
++	eof = tc.t_eofc;
++	erki = ((long)intr<<24) | ((long)quit<<16) | ((long)xon<<8) | xoff;
++	flags = (eof << 8) | brk;
++	break;
++    case (('t'<<8) | 17):	/* TIOCSETC */
++	tc.t_stopc = (spek >> 0) & 0xFF;
++	tc.t_startc = (spek >> 8) & 0xFF;
++	tc.t_quitc = (spek >> 16) & 0xFF;
++	tc.t_intrc = (spek >> 24) & 0xFF;
++	tc.t_brkc = (flags >> 0) & 0xFF;
++	tc.t_eofc = (flags >> 8) & 0xFF;
++	r = compat_setc(tp, &tc);
++	break;
++    case (('t'<<8) | 9):	/* TIOCSETP */
++	sg.sg_erase = (spek >> 8) & 0xFF;
++	sg.sg_kill = (spek >> 0) & 0xFF;
++	sg.sg_ispeed = (spek >> 16) & 0xFF;
++	sg.sg_ospeed = (spek >> 24) & 0xFF;
++	sg.sg_flags = flags;
++	r = compat_setp(tp, &sg);
++	break;
++    default:
++	r = ENOTTY;
++  }
++  reply_mess.m_type = TASK_REPLY;
++  reply_mess.REP_PROC_NR = m_ptr->PROC_NR;
++  reply_mess.REP_STATUS = r;
++  reply_mess.m2_l1 = erki;
++  reply_mess.m2_l2 = flags;
++  send(m_ptr->m_source, &reply_mess);
++}
++#endif /* ENABLE_BINCOMPAT */
++#endif /* ENABLE_SRCCOMPAT || ENABLE_BINCOMPAT */
++
+diff --git a/drivers/tty/tty.h b/drivers/tty/tty.h
+index 643e7bd..f26ca22 100644
+--- a/drivers/tty/tty.h
++++ b/drivers/tty/tty.h
+@@ -139,6 +139,11 @@ _PROTOTYPE( int tty_devnop, (struct tty *tp, int try)			);
+ _PROTOTYPE( int select_try, (struct tty *tp, int ops)			);
+ _PROTOTYPE( int select_retry, (struct tty *tp)				);
+ 
++/* rs232.c */
++_PROTOTYPE( void rs_init, (struct tty *tp)				);
++_PROTOTYPE( void rs_interrupt, (message *m)				);
++
++#if (CHIP == INTEL)
+ /* console.c */
+ _PROTOTYPE( void kputc, (int c)						);
+ _PROTOTYPE( void cons_stop, (void)					);
+@@ -157,6 +162,15 @@ _PROTOTYPE( void do_panic_dumps, (message *m)				);
+ _PROTOTYPE( void do_fkey_ctl, (message *m)				);
+ _PROTOTYPE( void kbd_interrupt, (message *m)				);
+ 
++/* pty.c */
++_PROTOTYPE( void do_pty, (struct tty *tp, message *m_ptr)		);
++_PROTOTYPE( void pty_init, (struct tty *tp)				);
++_PROTOTYPE( void select_retry_pty, (struct tty *tp)			);
++_PROTOTYPE( int pty_status, (message *m_ptr)				);
++
+ /* vidcopy.s */
+ _PROTOTYPE( void vid_vid_copy, (unsigned src, unsigned dst, unsigned count));
+ _PROTOTYPE( void mem_vid_copy, (u16_t *src, unsigned dst, unsigned count));
++
++#endif /* (CHIP == INTEL) */
++
+diff --git a/include/limits.h b/include/limits.h
+old mode 100644
+new mode 100755
+index 2b97f86..38b08c4
+--- a/include/limits.h
++++ b/include/limits.h
+@@ -21,9 +21,17 @@
+ #define USHRT_MAX     0xFFFF	/* maximum value of unsigned short */
+ 
+ /* _EM_WSIZE is a compiler-generated symbol giving the word size in bytes. */
++#if _EM_WSIZE == 2
++#define INT_MIN   (-32767-1)	/* minimum value of a 16-bit int */
++#define INT_MAX        32767	/* maximum value of a 16-bit int */
++#define UINT_MAX      0xFFFF	/* maximum value of an unsigned 16-bit int */
++#endif
++
++#if _EM_WSIZE == 4
+ #define INT_MIN (-2147483647-1)	/* minimum value of a 32-bit int */
+ #define INT_MAX   2147483647	/* maximum value of a 32-bit int */
+ #define UINT_MAX  0xFFFFFFFF	/* maximum value of an unsigned 32-bit int */
++#endif
+ 
+ /*Definitions about longs (32 bits in MINIX). */
+ #define LONG_MIN (-2147483647L-1)/* minimum value of a long */
+@@ -53,10 +61,18 @@
+ #define _NO_LIMIT          100	/* arbitrary number; limit not enforced */
+ 
+ #define NGROUPS_MAX          0	/* supplemental group IDs not available */
++#if _EM_WSIZE > 2
+ #define ARG_MAX          16384	/* # bytes of args + environ for exec() */
++#else
++#define ARG_MAX           4096	/* args + environ on small machines */
++#endif
+ #define CHILD_MAX    _NO_LIMIT	/* MINIX does not limit children */
+ #define OPEN_MAX            20	/* # open files a process may have */
++#if 0			/* V1 file system */
++#define LINK_MAX      CHAR_MAX	/* # links a file may have */
++#else			/* V2 or better file system */
+ #define LINK_MAX      SHRT_MAX	/* # links a file may have */
++#endif
+ #define MAX_CANON          255	/* size of the canonical input queue */
+ #define MAX_INPUT          255	/* size of the type-ahead buffer */
+ #define NAME_MAX        DIRSIZ	/* # chars in a file name */
+diff --git a/include/minix/config.h b/include/minix/config.h
+old mode 100644
+new mode 100755
+index 0fa5c17..a37d243
+--- a/include/minix/config.h
++++ b/include/minix/config.h
+@@ -15,10 +15,6 @@
+  * don't want to pollute the users namespace. Some editable values have
+  * gone there.
+  *
+- * This is a modified version of config.h for compiling a small Minix system
+- * with only the options described in the text, Operating Systems Design and
+- * Implementation, 3rd edition. See the version of config.h in the full 
+- * source code directory for information on alternatives omitted here.
+  */
+ 
+ /* The MACHINE (called _MINIX_MACHINE) setting can be done
+@@ -43,9 +39,31 @@
+ #define NR_PROCS 	  _NR_PROCS 
+ #define NR_SYS_PROCS      _NR_SYS_PROCS
+ 
++#if _MINIX_SMALL
++
+ #define NR_BUFS	128
+ #define NR_BUF_HASH 128
+ 
++#else
++
++/* The buffer cache should be made as large as you can afford. */
++#if (MACHINE == IBM_PC && _WORD_SIZE == 2)
++#define NR_BUFS           40	/* # blocks in the buffer cache */
++#define NR_BUF_HASH       64	/* size of buf hash table; MUST BE POWER OF 2*/
++#endif
++
++#if (MACHINE == IBM_PC && _WORD_SIZE == 4)
++#define NR_BUFS         1280	/* # blocks in the buffer cache */
++#define NR_BUF_HASH     2048	/* size of buf hash table; MUST BE POWER OF 2*/
++#endif
++
++#if (MACHINE == SUN_4_60)
++#define NR_BUFS		 512	/* # blocks in the buffer cache (<=1536) */
++#define NR_BUF_HASH	 512	/* size of buf hash table; MUST BE POWER OF 2*/
++#endif
++
++#endif	/* _MINIX_SMALL */
++
+ /* Number of controller tasks (/dev/cN device classes). */
+ #define NR_CTRLRS          2
+ 
+@@ -53,7 +71,7 @@
+ #define ENABLE_CACHE2      0
+ 
+ /* Enable or disable swapping processes to disk. */
+-#define ENABLE_SWAP	   0 
++#define ENABLE_SWAP	   1
+ 
+ /* Include or exclude an image of /dev/boot in the boot image. 
+  * Please update the makefile in /usr/src/tools/ as well.
+@@ -77,8 +95,8 @@
+  * system can handle.
+  */
+ #define NR_CONS            4	/* # system consoles (1 to 8) */
+-#define	NR_RS_LINES	   0	/* # rs232 terminals (0 to 4) */
+-#define	NR_PTYS		   0	/* # pseudo terminals (0 to 64) */
++#define	NR_RS_LINES	   4	/* # rs232 terminals (0 to 4) */
++#define	NR_PTYS		   32	/* # pseudo terminals (0 to 64) */
+ 
+ /*===========================================================================*
+  *	There are no user-settable parameters after this line		     *
+diff --git a/include/minix/devio.h b/include/minix/devio.h
+index 85e066e..ae8918c 100644
+--- a/include/minix/devio.h
++++ b/include/minix/devio.h
+@@ -27,4 +27,34 @@ typedef struct { u16_t port; u32_t value; } pvl_pair_t;
+ #define pv_set(pv, p, v) ((pv).port = (p), (pv).value = (v))
+ #define pv_ptr_set(pv_ptr, p, v) ((pv_ptr)->port = (p), (pv_ptr)->value = (v))
+ 
++#if 0	/* no longer in use !!! */
++/* Define a number of flags to indicate granularity we are using. */
++#define MASK_GRANULARITY 0x000F  /* not in use! does not match flags */
++#define PVB_FLAG 'b'
++#define PVW_FLAG 'w'
++#define PVL_FLAG 'l'
++
++/* Flags indicating whether request wants to do input or output. */
++#define MASK_IN_OR_OUT 0x00F0
++#define DEVIO_INPUT 0x0010
++#define DEVIO_OUTPUT 0x0020
++#endif	/* 0 */
++
++#if 0	/* no longer used !!! */
++/* Define how large the (port,value)-pair buffer in the kernel is. 
++ * This buffer is used to copy the (port,value)-pairs in kernel space.
++ */
++#define PV_BUF_SIZE  64      /* creates char pv_buf[PV_BUF_SIZE] */
++
++/* Note that SYS_VDEVIO sends a pointer to a vector of (port,value)-pairs, 
++ * whereas SYS_DEVIO includes a single (port,value)-pair in the messages.
++ * Calculate maximum number of (port,value)-pairs that can be handled 
++ * in a single SYS_VDEVIO system call with above struct definitions. 
++ */
++#define MAX_PVB_PAIRS ((PV_BUF_SIZE * sizeof(char)) / sizeof(pvb_pair_t))
++#define MAX_PVW_PAIRS ((PV_BUF_SIZE * sizeof(char)) / sizeof(pvw_pair_t))
++#define MAX_PVL_PAIRS ((PV_BUF_SIZE * sizeof(char)) / sizeof(pvl_pair_t))
++#endif /* 0 */
++	
++
+ #endif  /* _DEVIO_H */
+diff --git a/include/minix/sys_config.h b/include/minix/sys_config.h
+old mode 100644
+new mode 100755
+index 1c0c2f9..7a86e07
+--- a/include/minix/sys_config.h
++++ b/include/minix/sys_config.h
+@@ -1,18 +1,16 @@
+ #ifndef _MINIX_SYS_CONFIG_H
+ #define _MINIX_SYS_CONFIG_H 1
+ 
+-/* This is a modified sys_config.h for compiling a small Minix system 
+- * with only the options described in the text, Operating Systems Design and 
+- * Implementation, 3rd edition. See the sys_config.h in the full 
+- * source code directory for information on alternatives omitted here.
+- */
+-
+ /*===========================================================================*
+  *		This section contains user-settable parameters		     *
+  *===========================================================================*/
+ #define _MINIX_MACHINE       _MACHINE_IBM_PC
+ 
+ #define _MACHINE_IBM_PC             1	/* any  8088 or 80x86-based system */
++#define _MACHINE_SUN_4             40	/* any Sun SPARC-based system */
++#define _MACHINE_SUN_4_60	   40	/* Sun-4/60 (aka SparcStation 1 or Campus) */
++#define _MACHINE_ATARI             60	/* ATARI ST/STe/TT (68000/68030) */
++#define _MACHINE_MACINTOSH         62	/* Apple Macintosh (68000) */
+ 
+ /* Word size in bytes (a constant equal to sizeof(int)). */
+ #if __ACK__ || __GNUC__
+@@ -27,15 +25,35 @@
+  * indicative of more than just the CPU.  For example, machines for which
+  * CHIP == INTEL are expected to have 8259A interrrupt controllers and the
+  * other properties of IBM PC/XT/AT/386 types machines in general. */
+-#define _CHIP_INTEL     1	/* CHIP type for PC, XT, AT, 386 and clones */
++#define _CHIP_INTEL             1	/* CHIP type for PC, XT, AT, 386 and clones */
++#define _CHIP_M68000            2	/* CHIP type for Atari, Amiga, Macintosh    */
++#define _CHIP_SPARC             3	/* CHIP type for SUN-4 (e.g. SPARCstation)  */
+ 
+ /* Set the FP_FORMAT type based on the machine selected, either hw or sw    */
+-#define _FP_NONE	0	/* no floating point support                */
+-#define _FP_IEEE	1	/* conform IEEE floating point standard     */
++#define _FP_NONE		  0	/* no floating point support                */
++#define _FP_IEEE		  1	/* conform IEEE floating point standard     */
+ 
++#if (_MINIX_MACHINE == _MACHINE_IBM_PC)
+ #define _MINIX_CHIP          _CHIP_INTEL
++#endif
++
++#if (_MINIX_MACHINE == _MACHINE_ATARI) || (_MINIX_MACHINE == _MACHINE_MACINTOSH)
++#define _MINIX_CHIP         _CHIP_M68000
++#endif
++
++#if (_MINIX_MACHINE == _MACHINE_SUN_4) || (_MINIX_MACHINE == _MACHINE_SUN_4_60)
++#define _MINIX_CHIP          _CHIP_SPARC
++#define _MINIX_FP_FORMAT   _FP_IEEE
++#endif
+ 
++#if (_MINIX_MACHINE == _MACHINE_ATARI) || (_MINIX_MACHINE == _MACHINE_SUN_4)
++#define _ASKDEV            1	/* ask for boot device */
++#define _FASTLOAD          1	/* use multiple block transfers to init ram */
++#endif
++
++#ifndef _MINIX_FP_FORMAT
+ #define _MINIX_FP_FORMAT   _FP_NONE
++#endif
+ 
+ #ifndef _MINIX_MACHINE
+ error "In <minix/sys_config.h> please define _MINIX_MACHINE"
+@@ -50,5 +68,3 @@ error "_MINIX_MACHINE has incorrect value (0)"
+ #endif
+ 
+ #endif /* _MINIX_SYS_CONFIG_H */
+-
+-
+diff --git a/include/stdio.h b/include/stdio.h
+index 0dced69..1e83bbc 100755
+--- a/include/stdio.h
++++ b/include/stdio.h
+@@ -4,7 +4,7 @@
+  * (c) copyright 1987 by the Vrije Universiteit, Amsterdam, The Netherlands.
+  * See the copyright notice in the ACK home directory, in the file "Copyright".
+  */
+-/* $Header: /cvsup/minix/src/include/stdio.h,v 1.2 2005/09/01 13:07:08 beng Exp $ */
++/* $Header$ */
+ 
+ #ifndef _STDIO_H
+ #define	_STDIO_H
+diff --git a/include/sys/ioctl.h b/include/sys/ioctl.h
+old mode 100644
+new mode 100755
+index bad5be8..289f287
+--- a/include/sys/ioctl.h
++++ b/include/sys/ioctl.h
+@@ -14,8 +14,13 @@
+  */
+ 
+ #include <sys/ioc_tty.h>	/* 'T' 't' 'k'		*/
++#include <net/ioctl.h>		/* 'n'			*/
+ #include <sys/ioc_disk.h>	/* 'd'			*/
++#include <sys/ioc_file.h>	/* 'f'			*/
+ #include <sys/ioc_memory.h>	/* 'm'			*/
+ #include <sys/ioc_cmos.h>	/* 'c'			*/
++#include <sys/ioc_tape.h>	/* 'M'			*/
++#include <sys/ioc_scsi.h>	/* 'S'			*/
++#include <sys/ioc_sound.h>	/* 's'			*/
+ 
+ #endif /* _S_IOCTL_H */
+diff --git a/include/sys/sigcontext.h b/include/sys/sigcontext.h
+old mode 100644
+new mode 100755
+index 152478e..288ff82
+--- a/include/sys/sigcontext.h
++++ b/include/sys/sigcontext.h
+@@ -22,9 +22,12 @@
+  * by the kernel's context switching code.  Floating point registers should
+  * be added in a different struct.
+  */
++#if (_MINIX_CHIP == _CHIP_INTEL)
+ struct sigregs {  
++#if _WORD_SIZE == 4
+   short sr_gs;
+   short sr_fs;
++#endif /* _WORD_SIZE == 4 */
+   short sr_es;
+   short sr_ds;
+   int sr_di;
+@@ -54,14 +57,45 @@ struct sigframe {		/* stack frame created for signalled process */
+   struct sigcontext *sf_scpcopy;
+ };
+ 
++#else
++#if (_MINIX_CHIP == _CHIP_M68000)
++struct sigregs {  
++  long sr_retreg;			/* d0 */
++  long sr_d1;
++  long sr_d2;
++  long sr_d3;
++  long sr_d4;
++  long sr_d5;
++  long sr_d6;
++  long sr_d7;
++  long sr_a0;
++  long sr_a1;
++  long sr_a2;
++  long sr_a3;
++  long sr_a4;
++  long sr_a5;
++  long sr_a6;
++  long sr_sp;			/* also known as a7 */
++  long sr_pc;
++  short sr_psw;
++  short sr_dummy;		/* make size multiple of 4 for system.c */
++};
++#else
++#include "error, _MINIX_CHIP is not supported"
++#endif
++#endif /* _MINIX_CHIP == _CHIP_INTEL */
++
+ struct sigcontext {
+   int sc_flags;			/* sigstack state to restore */
+   long sc_mask;			/* signal mask to restore */
+   struct sigregs sc_regs;	/* register set to restore */
+ };
+ 
++#if (_MINIX_CHIP == _CHIP_INTEL)
++#if _WORD_SIZE == 4
+ #define sc_gs sc_regs.sr_gs
+ #define sc_fs sc_regs.sr_fs
++#endif /* _WORD_SIZE == 4 */
+ #define sc_es sc_regs.sr_es
+ #define sc_ds sc_regs.sr_ds
+ #define sc_di sc_regs.sr_di
+@@ -79,6 +113,28 @@ struct sigcontext {
+ #define sc_psw sc_regs.sr_psw
+ #define sc_sp sc_regs.sr_sp
+ #define sc_ss sc_regs.sr_ss
++#endif /* _MINIX_CHIP == _CHIP_INTEL */
++
++#if (_MINIX_CHIP == M68000)
++#define sc_retreg sc_regs.sr_retreg
++#define sc_d1 sc_regs.sr_d1
++#define sc_d2 sc_regs.sr_d2
++#define sc_d3 sc_regs.sr_d3
++#define sc_d4 sc_regs.sr_d4
++#define sc_d5 sc_regs.sr_d5
++#define sc_d6 sc_regs.sr_d6
++#define sc_d7 sc_regs.sr_d7
++#define sc_a0 sc_regs.sr_a0
++#define sc_a1 sc_regs.sr_a1
++#define sc_a2 sc_regs.sr_a2
++#define sc_a3 sc_regs.sr_a3
++#define sc_a4 sc_regs.sr_a4
++#define sc_a5 sc_regs.sr_a5
++#define sc_fp sc_regs.sr_a6
++#define sc_sp sc_regs.sr_sp
++#define sc_pc sc_regs.sr_pc
++#define sc_psw sc_regs.sr_psw
++#endif /* _MINIX_CHIP == M68000 */
+ 
+ /* Values for sc_flags.  Must agree with <minix/jmp_buf.h>. */
+ #define SC_SIGCONTEXT	2	/* nonzero when signal context is included */
+diff --git a/kernel/Makefile b/kernel/Makefile
+old mode 100644
+new mode 100755
+index f1fcb48..3d1b422
+--- a/kernel/Makefile
++++ b/kernel/Makefile
+@@ -15,7 +15,7 @@ LDFLAGS = -i
+ 
+ HEAD =	mpx.o
+ OBJS =	start.o protect.o klib.o table.o main.o proc.o \
+-	i8259.o exception.o system.o clock.o utility.o
++	i8259.o exception.o system.o clock.o utility.o debug.o
+ SYSTEM = system.a
+ LIBS = -ltimers 
+ 
+diff --git a/kernel/const.h b/kernel/const.h
+old mode 100644
+new mode 100755
+index 37e29e1..77385f3
+--- a/kernel/const.h
++++ b/kernel/const.h
+@@ -47,6 +47,8 @@
+ 	( MAP_CHUNK(map.chunk,bit) &= ~(1 << CHUNK_OFFSET(bit) )
+ #define NR_SYS_CHUNKS	BITMAP_CHUNKS(NR_SYS_PROCS)
+ 
++#if (CHIP == INTEL)
++
+ /* Program stack words and masks. */
+ #define INIT_PSW      0x0200	/* initial psw */
+ #define INIT_TASK_PSW 0x1200	/* initial psw for tasks (with IOPL 1) */
+@@ -68,9 +70,10 @@
+  */
+ #define NR_MEMS            8	
+ 
+-#endif /* CONST_H */
+-
+-
+-
++#endif /* (CHIP == INTEL) */
+ 
++#if (CHIP == M68000)
++/* M68000 specific constants go here. */
++#endif /* (CHIP == M68000) */
+ 
++#endif /* CONST_H */
+diff --git a/kernel/glo.h b/kernel/glo.h
+old mode 100644
+new mode 100755
+index 76ed6eb..bbc3e83
+--- a/kernel/glo.h
++++ b/kernel/glo.h
+@@ -33,6 +33,8 @@ EXTERN struct proc *bill_ptr;	/* process to bill for clock ticks */
+ EXTERN char k_reenter;		/* kernel reentry count (entry count less 1) */
+ EXTERN unsigned lost_ticks;	/* clock ticks counted outside clock task */
+ 
++#if (CHIP == INTEL)
++
+ /* Interrupt related variables. */
+ EXTERN irq_hook_t irq_hooks[NR_IRQ_HOOKS];	/* hooks for general use */
+ EXTERN irq_hook_t *irq_handlers[NR_IRQ_VECTORS];/* list of IRQ handlers */
+@@ -49,10 +51,10 @@ extern char *t_stack[];			/* task stack space */
+ extern struct segdesc_s gdt[];		/* global descriptor table */
+ 
+ EXTERN _PROTOTYPE( void (*level0_func), (void) );
++#endif /* (CHIP == INTEL) */
+ 
+-#endif /* GLO_H */
+-
+-
+-
+-
++#if (CHIP == M68000)
++/* M68000 specific variables go here. */
++#endif
+ 
++#endif /* GLO_H */
+diff --git a/kernel/i8259.c b/kernel/i8259.c
+old mode 100644
+new mode 100755
+index ce1f594..c832bd9
+--- a/kernel/i8259.c
++++ b/kernel/i8259.c
+@@ -17,7 +17,22 @@
+ #define ICW4_PC_SLAVE   0x09	/* not SFNM, buffered, normal EOI, 8086 */
+ #define ICW4_PC_MASTER  0x0D	/* not SFNM, buffered, normal EOI, 8086 */
+ 
++#if _WORD_SIZE == 2
++typedef _PROTOTYPE( void (*vecaddr_t), (void) );
++
++FORWARD _PROTOTYPE( void set_vec, (int vec_nr, vecaddr_t addr) );
++
++PRIVATE vecaddr_t int_vec[] = {
++  int00, int01, int02, int03, int04, int05, int06, int07,
++};
++
++PRIVATE vecaddr_t irq_vec[] = {
++  hwint00, hwint01, hwint02, hwint03, hwint04, hwint05, hwint06, hwint07,
++  hwint08, hwint09, hwint10, hwint11, hwint12, hwint13, hwint14, hwint15,
++};
++#else
+ #define set_vec(nr, addr)	((void)0)
++#endif
+ 
+ /*===========================================================================*
+  *				intr_init				     *
+@@ -34,6 +49,7 @@ int mine;
+ 
+   intr_disable();
+ 
++  if (machine.protected) {
+       /* The AT and newer PS/2 have two interrupt controllers, one master,
+        * one slaved at IRQ 2.  (We don't have to deal with the PC that
+        * has just one controller, because it must run in real mode.)
+@@ -54,7 +70,20 @@ int mine;
+       /* Copy the BIOS vectors from the BIOS to the Minix location, so we
+        * can still make BIOS calls without reprogramming the i8259s.
+        */
++#if IRQ0_VECTOR != BIOS_IRQ0_VEC
+       phys_copy(BIOS_VECTOR(0) * 4L, VECTOR(0) * 4L, 8 * 4L);
++#endif
++#if IRQ8_VECTOR != BIOS_IRQ8_VEC
++      phys_copy(BIOS_VECTOR(8) * 4L, VECTOR(8) * 4L, 8 * 4L);
++#endif
++  } else {
++      /* Use the BIOS interrupt vectors in real mode.  We only reprogram the
++       * exceptions here, the interrupt vectors are reprogrammed on demand.
++       * SYS_VECTOR is the Minix system call for message passing.
++       */
++      for (i = 0; i < 8; i++) set_vec(i, int_vec[i]);
++      set_vec(SYS_VECTOR, s_call);
++  }
+ }
+ 
+ /*===========================================================================*
+@@ -141,3 +170,24 @@ irq_hook_t *hook;
+    * if all active ID bits are cleared, and restart a process.
+    */
+ }
++
++#if _WORD_SIZE == 2
++/*===========================================================================*
++ *				set_vec                                      *
++ *===========================================================================*/
++PRIVATE void set_vec(vec_nr, addr)
++int vec_nr;			/* which vector */
++vecaddr_t addr;			/* where to start */
++{
++/* Set up a real mode interrupt vector. */
++
++  u16_t vec[2];
++
++  /* Build the vector in the array 'vec'. */
++  vec[0] = (u16_t) addr;
++  vec[1] = (u16_t) physb_to_hclick(code_base);
++
++  /* Copy the vector into place. */
++  phys_copy(vir2phys(vec), vec_nr * 4L, 4L);
++}
++#endif /* _WORD_SIZE == 2 */
+diff --git a/kernel/kernel.h b/kernel/kernel.h
+old mode 100644
+new mode 100755
+index 5aa2291..3783880
+--- a/kernel/kernel.h
++++ b/kernel/kernel.h
+@@ -17,7 +17,10 @@
+ #include <minix/ipc.h>		/* MINIX run-time system */
+ #include <timers.h>		/* watchdog timer management */
+ #include <errno.h>		/* return codes and error numbers */
++
++#if (CHIP == INTEL)
+ #include <ibm/portio.h>		/* device I/O and toggle interrupts */ 
++#endif
+ 
+ /* Important kernel header files. */
+ #include "config.h"		/* configuration, MUST be first */
+@@ -26,7 +29,6 @@
+ #include "proto.h"		/* function prototypes */
+ #include "glo.h"		/* global variables */
+ #include "ipc.h"		/* IPC constants */
+-/* #include "debug.h" */	/* debugging, MUST be last kernel header */
++#include "debug.h"		/* debugging, MUST be last kernel header */
+ 
+ #endif /* KERNEL_H */
+-
+diff --git a/kernel/main.c b/kernel/main.c
+old mode 100644
+new mode 100755
+index 08ae417..e6a6ebc
+--- a/kernel/main.c
++++ b/kernel/main.c
+@@ -59,7 +59,7 @@ PUBLIC void main()
+ 	ppriv_addr[i] = sp;			/* priv ptr from number */
+   }
+ 
+-  /* Set up proc table entries for tasks and servers.  The stacks of the
++  /* Set up proc table entries for processes in boot image.  The stacks of the
+    * kernel tasks are initialized to an array in data space.  The stacks
+    * of the servers have been added to the data segment by the monitor, so
+    * the stack pointer is set to the end of the data segment.  All the
+@@ -142,6 +142,19 @@ PUBLIC void main()
+ 	alloc_segments(rp);
+   }
+ 
++#if ENABLE_BOOTDEV 
++  /* Expect an image of the boot device to be loaded into memory as well. 
++   * The boot device is the last module that is loaded into memory, and, 
++   * for example, can contain the root FS (useful for embedded systems). 
++   */
++  hdrindex ++;
++  phys_copy(aout + hdrindex * A_MINHDR,vir2phys(&e_hdr),(phys_bytes) A_MINHDR);
++  if (e_hdr.a_flags & A_IMG) {
++  	kinfo.bootdev_base = e_hdr.a_syms; 
++  	kinfo.bootdev_size = e_hdr.a_data; 
++  }
++#endif
++
+   /* We're definitely not shutting down. */
+   shutdown_started = 0;
+ 
+@@ -159,13 +172,14 @@ PUBLIC void main()
+ PRIVATE void announce(void)
+ {
+   /* Display the MINIX startup banner. */
+-  kprintf("MINIX %s.%s."  
+-      "Copyright 2006, Vrije Universiteit, Amsterdam, The Netherlands\n", 
++  kprintf("\nMINIX %s.%s. "
++  "Copyright 2006, Vrije Universiteit, Amsterdam, The Netherlands\n",
+       OS_RELEASE, OS_VERSION);
+-
++#if (CHIP == INTEL)
+   /* Real mode, or 16/32-bit protected mode? */
+   kprintf("Executing in %s mode.\n\n",
+       machine.protected ? "32-bit protected" : "real");
++#endif
+ }
+ 
+ /*===========================================================================*
+@@ -179,7 +193,7 @@ int how;
+   register struct proc *rp; 
+   message m;
+ 
+-  /* Show debugging dumps on panics. Make sure that the TTY task is still 
++  /* Show debugging dumps on panics. Make sure that the TTY driver is still 
+    * available to handle them. This is done with help of a non-blocking send. 
+    * We rely on TTY to call sys_abort() when it is done with the dumps.
+    */
+diff --git a/kernel/proc.c b/kernel/proc.c
+old mode 100644
+new mode 100755
+index 2985fae..91228cf
+--- a/kernel/proc.c
++++ b/kernel/proc.c
+@@ -71,9 +71,17 @@ FORWARD _PROTOTYPE( void pick_proc, (void) );
+ 		break;							\
+ 	}
+ 
++#if (CHIP == INTEL)
+ #define CopyMess(s,sp,sm,dp,dm) \
+ 	cp_mess(s, (sp)->p_memmap[D].mem_phys,	\
+ 		 (vir_bytes)sm, (dp)->p_memmap[D].mem_phys, (vir_bytes)dm)
++#endif /* (CHIP == INTEL) */
++
++#if (CHIP == M68000)
++/* M68000 does not have cp_mess() in assembly like INTEL. Declare prototype
++ * for cp_mess() here and define the function below. Also define CopyMess. 
++ */
++#endif /* (CHIP == M68000) */
+ 
+ /*===========================================================================*
+  *				sys_call				     * 
+@@ -141,9 +149,9 @@ message *m_ptr;			/* pointer to message in the caller's space */
+           return(ECALLDENIED);		/* call denied by ipc mask */
+       }
+ 
+-      if (isemptyn(src_dst) && !shutdown_started) {
+-          kprintf("sys_call: dead dest; %d, %d, %d\n", 
+-              function, proc_nr(caller_ptr), src_dst);
++      if (isemptyn(src_dst)) {
++	if(!shutdown_started)
++	 kprintf("sys_call: dead dst; %d->%d\n", proc_nr(caller_ptr), src_dst);
+           return(EDEADDST); 		/* cannot send to the dead */
+       }
+   }
+@@ -361,7 +369,7 @@ int src;			/* sender of the notification */
+ int dst;			/* who is to be notified */
+ {
+ /* Safe gateway to mini_notify() for tasks and interrupt handlers. The sender
+- * is explicitly given to prevent confusion where the call comes from. MINIX 
++ * is explicitely given to prevent confusion where the call comes from. MINIX 
+  * kernel is not reentrant, which means to interrupts are disabled after 
+  * the first kernel entry (hardware interrupt, trap, or exception). Locking
+  * is done by temporarily disabling interrupts. 
+@@ -396,6 +404,11 @@ register struct proc *rp;	/* this process is now runnable */
+   int q;	 				/* scheduling queue to use */
+   int front;					/* add to front or back */
+ 
++#if DEBUG_SCHED_CHECK
++  check_runqueues("enqueue");
++  if (rp->p_ready) kprintf("enqueue() already ready process\n");
++#endif
++
+   /* Determine where to insert to process. */
+   sched(rp, &q, &front);
+ 
+@@ -416,6 +429,11 @@ register struct proc *rp;	/* this process is now runnable */
+ 
+   /* Now select the next process to run. */
+   pick_proc();			
++
++#if DEBUG_SCHED_CHECK
++  rp->p_ready = 1;
++  check_runqueues("enqueue");
++#endif
+ }
+ 
+ /*===========================================================================*
+@@ -438,6 +456,11 @@ register struct proc *rp;	/* this process is no longer runnable */
+ 		panic("stack overrun by task", proc_nr(rp));
+   }
+ 
++#if DEBUG_SCHED_CHECK
++  check_runqueues("dequeue");
++  if (! rp->p_ready) kprintf("dequeue() already unready process\n");
++#endif
++
+   /* Now make sure that the process is not in its ready queue. Remove the 
+    * process if it is found. A process can be made unready even if it is not 
+    * running by being sent a signal that kills it.
+@@ -455,6 +478,11 @@ register struct proc *rp;	/* this process is no longer runnable */
+       }
+       prev_xp = *xpp;				/* save previous in chain */
+   }
++  
++#if DEBUG_SCHED_CHECK
++  rp->p_ready = 0;
++  check_runqueues("dequeue");
++#endif
+ }
+ 
+ /*===========================================================================*
+@@ -486,7 +514,7 @@ int *front;					/* return: front or back */
+   }
+ 
+   /* Determine the new priority of this process. The bounds are determined
+-   * by IDLE's queue and the maximum priority of this process. Kernel tasks 
++   * by IDLE's queue and the maximum priority of this process. Kernel task 
+    * and the idle process are never changed in priority.
+    */
+   if (penalty != 0 && ! iskernelp(rp)) {
+diff --git a/kernel/proc.h b/kernel/proc.h
+old mode 100644
+new mode 100755
+index 9454cca..5e4a1f0
+--- a/kernel/proc.h
++++ b/kernel/proc.h
+@@ -16,8 +16,15 @@
+  
+ struct proc {
+   struct stackframe_s p_reg;	/* process' registers saved in stack frame */
++
++#if (CHIP == INTEL)
+   reg_t p_ldt_sel;		/* selector in gdt with ldt base and limit */
+   struct segdesc_s p_ldt[2+NR_REMOTE_SEGS]; /* CS, DS and remote segments */
++#endif 
++
++#if (CHIP == M68000)
++/* M68000 specific registers and FPU details go here. */
++#endif 
+ 
+   proc_nr_t p_nr;		/* number of this process (for fast access) */
+   struct priv *p_priv;		/* system privileges structure */
+@@ -43,6 +50,10 @@ struct proc {
+   sigset_t p_pending;		/* bit map for pending kernel signals */
+ 
+   char p_name[P_NAME_LEN];	/* name of the process, including \0 */
++
++#if DEBUG_SCHED_CHECK
++  int p_ready, p_found;
++#endif
+ };
+ 
+ /* Bits for the runtime flags. A process is runnable iff p_rts_flags == 0. */
+diff --git a/kernel/protect.c b/kernel/protect.c
+old mode 100644
+new mode 100755
+index 860195d..5f5324d
+--- a/kernel/protect.c
++++ b/kernel/protect.c
+@@ -7,8 +7,13 @@
+ #include "proc.h"
+ #include "protect.h"
+ 
++#if _WORD_SIZE == 4
+ #define INT_GATE_TYPE	(INT_286_GATE | DESC_386_BIT)
+ #define TSS_TYPE	(AVL_286_TSS  | DESC_386_BIT)
++#else
++#define INT_GATE_TYPE	INT_286_GATE
++#define TSS_TYPE	AVL_286_TSS
++#endif
+ 
+ struct desctableptr_s {
+   char limit[sizeof(u16_t)];
+@@ -31,7 +36,9 @@ struct tss_s {
+   reg_t ss1;
+   reg_t sp2;
+   reg_t ss2;
++#if _WORD_SIZE == 4
+   reg_t cr3;
++#endif
+   reg_t ip;
+   reg_t flags;
+   reg_t ax;
+@@ -46,12 +53,16 @@ struct tss_s {
+   reg_t cs;
+   reg_t ss;
+   reg_t ds;
++#if _WORD_SIZE == 4
+   reg_t fs;
+   reg_t gs;
++#endif
+   reg_t ldt;
++#if _WORD_SIZE == 4
+   u16_t trap;
+   u16_t iobase;
+ /* u8_t iomap[0]; */
++#endif
+ };
+ 
+ PUBLIC struct segdesc_s gdt[GDT_SIZE];		/* used in klib.s and mpx.s */
+@@ -96,8 +107,10 @@ PUBLIC void prot_init()
+ 	{ segment_not_present, SEG_NOT_VECTOR, INTR_PRIVILEGE },
+ 	{ stack_exception, STACK_FAULT_VECTOR, INTR_PRIVILEGE },
+ 	{ general_protection, PROTECTION_VECTOR, INTR_PRIVILEGE },
++#if _WORD_SIZE == 4
+ 	{ page_fault, PAGE_FAULT_VECTOR, INTR_PRIVILEGE },
+ 	{ copr_error, COPROC_ERR_VECTOR, INTR_PRIVILEGE },
++#endif
+ 	{ hwint00, VECTOR( 0), INTR_PRIVILEGE },
+ 	{ hwint01, VECTOR( 1), INTR_PRIVILEGE },
+ 	{ hwint02, VECTOR( 2), INTR_PRIVILEGE },
+@@ -114,7 +127,11 @@ PUBLIC void prot_init()
+ 	{ hwint13, VECTOR(13), INTR_PRIVILEGE },
+ 	{ hwint14, VECTOR(14), INTR_PRIVILEGE },
+ 	{ hwint15, VECTOR(15), INTR_PRIVILEGE },
++#if _WORD_SIZE == 2
++	{ p_s_call, SYS_VECTOR, USER_PRIVILEGE },	/* 286 system call */
++#else
+ 	{ s_call, SYS386_VECTOR, USER_PRIVILEGE },	/* 386 system call */
++#endif
+ 	{ level0_call, LEVEL0_VECTOR, TASK_PRIVILEGE },
+   };
+ 
+@@ -168,8 +185,10 @@ PUBLIC void prot_init()
+ 		 PRESENT | INT_GATE_TYPE | (gtp->privilege << DPL_SHIFT));
+   }
+ 
++#if _WORD_SIZE == 4
+   /* Complete building of main TSS. */
+   tss.iobase = sizeof tss;	/* empty i/o permissions map */
++#endif
+ }
+ 
+ /*===========================================================================*
+@@ -216,6 +235,7 @@ vir_bytes size;
+   segdp->base_middle = base >> BASE_MIDDLE_SHIFT;
+   segdp->base_high = base >> BASE_HIGH_SHIFT;
+ 
++#if _WORD_SIZE == 4
+   --size;			/* convert to a limit, 0 size means 4G */
+   if (size > BYTE_GRAN_MAX) {
+ 	segdp->limit_low = size >> PAGE_GRAN_SHIFT;
+@@ -226,6 +246,9 @@ vir_bytes size;
+ 	segdp->granularity = size >> GRANULARITY_SHIFT;
+   }
+   segdp->granularity |= DEFAULT;	/* means BIG for data seg */
++#else
++  segdp->limit_low = size - 1;
++#endif
+ }
+ 
+ /*===========================================================================*
+@@ -262,8 +285,21 @@ phys_bytes phys;
+ /* Return a segment selector and offset that can be used to reach a physical
+  * address, for use by a driver doing memory I/O in the A0000 - DFFFF range.
+  */
++#if _WORD_SIZE == 2
++  if (! machine.protected) {
++	*seg = phys / HCLICK_SIZE;
++	*off = phys % HCLICK_SIZE;
++  } else {
++	unsigned bank = phys >> 16;
++	unsigned index = bank - 0xA + A_INDEX;
++	init_dataseg(&gdt[index], (phys_bytes) bank << 16, 0, TASK_PRIVILEGE);
++	*seg = (index * 0x08) | TASK_PRIVILEGE;
++	*off = phys & 0xFFFF;
++  }
++#else
+   *seg = FLAT_DS_SELECTOR;
+   *off = phys;
++#endif
+ }
+ 
+ /*===========================================================================*
+@@ -281,7 +317,9 @@ unsigned dpl_type;
+   idp->offset_low = offset;
+   idp->selector = CS_SELECTOR;
+   idp->p_dpl_type = dpl_type;
++#if _WORD_SIZE == 4
+   idp->offset_high = offset >> OFFSET_HIGH_SHIFT;
++#endif
+ }
+ 
+ /*===========================================================================*
+@@ -327,8 +365,10 @@ register struct proc *rp;
+           (phys_bytes) rp->p_memmap[D].mem_phys << CLICK_SHIFT,
+           data_bytes, privilege);
+       rp->p_reg.cs = (CS_LDT_INDEX * DESC_SIZE) | TI | privilege;
++#if _WORD_SIZE == 4
+       rp->p_reg.gs =
+       rp->p_reg.fs =
++#endif
+       rp->p_reg.ss =
+       rp->p_reg.es =
+       rp->p_reg.ds = (DS_LDT_INDEX*DESC_SIZE) | TI | privilege;
+diff --git a/kernel/proto.h b/kernel/proto.h
+old mode 100644
+new mode 100755
+index 77fec22..f253054
+--- a/kernel/proto.h
++++ b/kernel/proto.h
+@@ -51,6 +51,8 @@ _PROTOTYPE( phys_bytes umap_remote, (struct proc *rp, int seg,
+ _PROTOTYPE( phys_bytes umap_bios, (struct proc *rp, vir_bytes vir_addr,
+ 		vir_bytes bytes)					);
+ 
++#if (CHIP == INTEL)
++
+ /* exception.c */
+ _PROTOTYPE( void exception, (unsigned vec_nr)				);
+ 
+@@ -140,6 +142,10 @@ _PROTOTYPE( void phys2seg, (u16_t *seg, vir_bytes *off, phys_bytes phys));
+ _PROTOTYPE( void enable_iop, (struct proc *pp)				);
+ _PROTOTYPE( void alloc_segments, (struct proc *rp)			);
+ 
+-#endif /* PROTO_H */
++#endif /* (CHIP == INTEL) */
+ 
++#if (CHIP == M68000)
++/* M68000 specific prototypes go here. */
++#endif /* (CHIP == M68000) */
+ 
++#endif /* PROTO_H */
+diff --git a/kernel/sconst.h b/kernel/sconst.h
+old mode 100644
+new mode 100755
+index faf9248..41c6d13
+--- a/kernel/sconst.h
++++ b/kernel/sconst.h
+@@ -3,9 +3,13 @@ W		=	_WORD_SIZE	! Machine word size.
+ 
+ ! Offsets in struct proc. They MUST match proc.h.
+ P_STACKBASE	=	0
++#if _WORD_SIZE == 2
++ESREG		=	P_STACKBASE
++#else
+ GSREG		=	P_STACKBASE
+ FSREG		=	GSREG + 2	! 386 introduces FS and GS segments
+ ESREG		=	FSREG + 2
++#endif
+ DSREG		=	ESREG + 2
+ DIREG		=	DSREG + 2
+ SIREG		=	DIREG + W
+@@ -25,4 +29,8 @@ P_STACKTOP	=	SSREG + W
+ P_LDT_SEL	=	P_STACKTOP
+ P_LDT		=	P_LDT_SEL + W
+ 
++#if _WORD_SIZE == 2
++Msize		=	12		! size of a message in 16-bit words
++#else
+ Msize		=	9		! size of a message in 32-bit words
++#endif
+diff --git a/kernel/system.c b/kernel/system.c
+old mode 100644
+new mode 100755
+index 5e14c67..5a07486
+--- a/kernel/system.c
++++ b/kernel/system.c
+@@ -34,8 +34,10 @@
+ #include <signal.h>
+ #include <unistd.h>
+ #include <sys/sigcontext.h>
++#if (CHIP == INTEL)
+ #include <ibm/memory.h>
+ #include "protect.h"
++#endif
+ 
+ /* Declaration of the call vector that defines the mapping of kernel calls 
+  * to handler functions. The vector is initialized in sys_init() with map(), 
+@@ -290,7 +292,9 @@ vir_bytes bytes;		/* # of bytes to be copied */
+ /* Calculate the physical memory address for a given virtual address. */
+   vir_clicks vc;		/* the virtual address in clicks */
+   phys_bytes pa;		/* intermediate variables as phys_bytes */
++#if (CHIP == INTEL)
+   phys_bytes seg_base;
++#endif
+ 
+   /* If 'seg' is D it could really be S and vice versa.  T really means T.
+    * If the virtual address falls in the gap,  it causes a problem. On the
+@@ -304,8 +308,13 @@ vir_bytes bytes;		/* # of bytes to be copied */
+   if (vir_addr + bytes <= vir_addr) return 0;	/* overflow */
+   vc = (vir_addr + bytes - 1) >> CLICK_SHIFT;	/* last click of data */
+ 
++#if (CHIP == INTEL) || (CHIP == M68000)
+   if (seg != T)
+ 	seg = (vc < rp->p_memmap[D].mem_vir + rp->p_memmap[D].mem_len ? D : S);
++#else
++  if (seg != T)
++       seg = (vc < rp->p_memmap[S].mem_vir ? D : S);
++#endif
+ 
+   if ((vir_addr>>CLICK_SHIFT) >= rp->p_memmap[seg].mem_vir + 
+   	rp->p_memmap[seg].mem_len) return( (phys_bytes) 0 );
+@@ -313,11 +322,20 @@ vir_bytes bytes;		/* # of bytes to be copied */
+   if (vc >= rp->p_memmap[seg].mem_vir + 
+   	rp->p_memmap[seg].mem_len) return( (phys_bytes) 0 );
+ 
++#if (CHIP == INTEL)
+   seg_base = (phys_bytes) rp->p_memmap[seg].mem_phys;
+   seg_base = seg_base << CLICK_SHIFT;	/* segment origin in bytes */
++#endif
+   pa = (phys_bytes) vir_addr;
++#if (CHIP != M68000)
+   pa -= rp->p_memmap[seg].mem_vir << CLICK_SHIFT;
+   return(seg_base + pa);
++#endif
++#if (CHIP == M68000)
++  pa -= (phys_bytes)rp->p_memmap[seg].mem_vir << CLICK_SHIFT;
++  pa += (phys_bytes)rp->p_memmap[seg].mem_phys << CLICK_SHIFT;
++  return(pa);
++#endif
+ }
+ 
+ /*===========================================================================*
+diff --git a/kernel/system.h b/kernel/system.h
+index c2ad8a4..b4af92f 100644
+--- a/kernel/system.h
++++ b/kernel/system.h
+@@ -1,10 +1,30 @@
+-/* Function prototypes for the system library.  
++/* Function prototypes for the system library.  The prototypes in this file 
++ * are undefined to do_unused if the kernel call is not enabled in config.h. 
+  * The implementation is contained in src/kernel/system/.  
+  *
+- * The system library allows access to system services by doing a kernel call.
+- * Kernel calls are transformed into request messages to the SYS task that is 
++ * The system library allows to access system services by doing a kernel call.
++ * System calls are transformed into request messages to the SYS task that is 
+  * responsible for handling the call. By convention, sys_call() is transformed 
+  * into a message with type SYS_CALL that is handled in a function do_call(). 
++ * 
++ * Changes:
++ *   Jul 30, 2005   created SYS_INT86 to support BIOS driver  (Philip Homburg) 
++ *   Jul 13, 2005   created SYS_PRIVCTL to manage services  (Jorrit N. Herder) 
++ *   Jul 09, 2005   updated SYS_KILL to signal services  (Jorrit N. Herder) 
++ *   Jun 21, 2005   created SYS_NICE for nice(2) kernel call  (Ben J. Gras)
++ *   Jun 21, 2005   created SYS_MEMSET to speed up exec(2)  (Ben J. Gras)
++ *   Apr 12, 2005   updated SYS_VCOPY for virtual_copy()  (Jorrit N. Herder)
++ *   Jan 20, 2005   updated SYS_COPY for virtual_copy()  (Jorrit N. Herder)
++ *   Oct 24, 2004   created SYS_GETKSIG to support PM  (Jorrit N. Herder) 
++ *   Oct 10, 2004   created handler for unused calls  (Jorrit N. Herder) 
++ *   Sep 09, 2004   updated SYS_EXIT to let services exit  (Jorrit N. Herder) 
++ *   Aug 25, 2004   rewrote SYS_SETALARM to clean up code  (Jorrit N. Herder)
++ *   Jul 13, 2004   created SYS_SEGCTL to support drivers  (Jorrit N. Herder) 
++ *   May 24, 2004   created SYS_SDEVIO to support drivers  (Jorrit N. Herder) 
++ *   May 24, 2004   created SYS_GETINFO to retrieve info  (Jorrit N. Herder) 
++ *   Apr 18, 2004   created SYS_VDEVIO to support drivers  (Jorrit N. Herder) 
++ *   Feb 24, 2004   created SYS_IRQCTL to support drivers  (Jorrit N. Herder) 
++ *   Feb 02, 2004   created SYS_DEVIO to support drivers  (Jorrit N. Herder) 
+  */ 
+ 
+ #ifndef SYSTEM_H
+@@ -17,38 +37,137 @@
+ 
+ /* Default handler for unused kernel calls. */
+ _PROTOTYPE( int do_unused, (message *m_ptr) );
++
+ _PROTOTYPE( int do_exec, (message *m_ptr) );		
++#if ! USE_EXEC
++#define do_exec do_unused
++#endif
++
+ _PROTOTYPE( int do_fork, (message *m_ptr) );
++#if ! USE_FORK
++#define do_fork do_unused
++#endif
++
+ _PROTOTYPE( int do_newmap, (message *m_ptr) );
++#if ! USE_NEWMAP
++#define do_newmap do_unused
++#endif
++
+ _PROTOTYPE( int do_exit, (message *m_ptr) );
++#if ! USE_EXIT
++#define do_exit do_unused
++#endif
++
+ _PROTOTYPE( int do_trace, (message *m_ptr) );	
++#if ! USE_TRACE
++#define do_trace do_unused
++#endif
++
+ _PROTOTYPE( int do_nice, (message *m_ptr) );
++#if ! USE_NICE
++#define do_nice do_unused
++#endif
++
+ _PROTOTYPE( int do_copy, (message *m_ptr) );	
+ #define do_vircopy 	do_copy
+ #define do_physcopy 	do_copy
++#if ! (USE_VIRCOPY || USE_PHYSCOPY)
++#define do_copy do_unused
++#endif
++
+ _PROTOTYPE( int do_vcopy, (message *m_ptr) );		
+ #define do_virvcopy 	do_vcopy
+ #define do_physvcopy 	do_vcopy
++#if ! (USE_VIRVCOPY || USE_PHYSVCOPY)
++#define do_vcopy do_unused
++#endif
++
+ _PROTOTYPE( int do_umap, (message *m_ptr) );
++#if ! USE_UMAP
++#define do_umap do_unused
++#endif
++
+ _PROTOTYPE( int do_memset, (message *m_ptr) );
++#if ! USE_MEMSET
++#define do_memset do_unused
++#endif
++
+ _PROTOTYPE( int do_abort, (message *m_ptr) );
++#if ! USE_ABORT
++#define do_abort do_unused
++#endif
++
+ _PROTOTYPE( int do_getinfo, (message *m_ptr) );
++#if ! USE_GETINFO
++#define do_getinfo do_unused
++#endif
++
+ _PROTOTYPE( int do_privctl, (message *m_ptr) );	
++#if ! USE_PRIVCTL
++#define do_privctl do_unused
++#endif
++
+ _PROTOTYPE( int do_segctl, (message *m_ptr) );
++#if ! USE_SEGCTL
++#define do_segctl do_unused
++#endif
++
+ _PROTOTYPE( int do_irqctl, (message *m_ptr) );
++#if ! USE_IRQCTL
++#define do_irqctl do_unused
++#endif
++
+ _PROTOTYPE( int do_devio, (message *m_ptr) );
++#if ! USE_DEVIO
++#define do_devio do_unused
++#endif
++
+ _PROTOTYPE( int do_vdevio, (message *m_ptr) );
++#if ! USE_VDEVIO
++#define do_vdevio do_unused
++#endif
++
+ _PROTOTYPE( int do_int86, (message *m_ptr) );
++
+ _PROTOTYPE( int do_sdevio, (message *m_ptr) );
++#if ! USE_SDEVIO
++#define do_sdevio do_unused
++#endif
++
+ _PROTOTYPE( int do_kill, (message *m_ptr) );
++#if ! USE_KILL
++#define do_kill do_unused
++#endif
++
+ _PROTOTYPE( int do_getksig, (message *m_ptr) );
++#if ! USE_GETKSIG
++#define do_getksig do_unused
++#endif
++
+ _PROTOTYPE( int do_endksig, (message *m_ptr) );
++#if ! USE_ENDKSIG
++#define do_endksig do_unused
++#endif
++
+ _PROTOTYPE( int do_sigsend, (message *m_ptr) );
++#if ! USE_SIGSEND
++#define do_sigsend do_unused
++#endif
++
+ _PROTOTYPE( int do_sigreturn, (message *m_ptr) );
++#if ! USE_SIGRETURN
++#define do_sigreturn do_unused
++#endif
++
+ _PROTOTYPE( int do_times, (message *m_ptr) );		
++#if ! USE_TIMES
++#define do_times do_unused
++#endif
++
+ _PROTOTYPE( int do_setalarm, (message *m_ptr) );	
++#if ! USE_SETALARM
++#define do_setalarm do_unused
++#endif
+ 
+ #endif	/* SYSTEM_H */
+ 
+-
+-
+diff --git a/kernel/system/do_exec.c b/kernel/system/do_exec.c
+index 2f9d1e0..932d42e 100644
+--- a/kernel/system/do_exec.c
++++ b/kernel/system/do_exec.c
+@@ -28,8 +28,17 @@ register message *m_ptr;	/* pointer to request message */
+   rp = proc_addr(m_ptr->PR_PROC_NR);
+   sp = (reg_t) m_ptr->PR_STACK_PTR;
+   rp->p_reg.sp = sp;		/* set the stack pointer */
++#if (CHIP == M68000)
++  rp->p_splow = sp;		/* set the stack pointer low water */
++#ifdef FPP
++  /* Initialize fpp for this process */
++  fpp_new_state(rp);
++#endif
++#endif
++#if (CHIP == INTEL)		/* wipe extra LDT entries */
+   phys_memset(vir2phys(&rp->p_ldt[EXTRA_LDT_INDEX]), 0,
+ 	(LDT_SIZE - EXTRA_LDT_INDEX) * sizeof(rp->p_ldt[0]));
++#endif
+   rp->p_reg.pc = (reg_t) m_ptr->PR_IP_PTR;	/* set pc */
+   rp->p_rts_flags &= ~RECEIVING;	/* PM does not reply to EXEC call */
+   if (rp->p_rts_flags == 0) lock_enqueue(rp);
+@@ -47,3 +56,4 @@ register message *m_ptr;	/* pointer to request message */
+   return(OK);
+ }
+ #endif /* USE_EXEC */
++
+diff --git a/servers/Makefile b/servers/Makefile
+index cdd4c05..8e0852c 100644
+--- a/servers/Makefile
++++ b/servers/Makefile
+@@ -18,7 +18,9 @@ all install depend clean:
+ 	cd ./pm && $(MAKE) $@
+ 	cd ./fs && $(MAKE) $@
+ 	cd ./rs && $(MAKE) $@
++	cd ./is && $(MAKE) $@
+ 	cd ./init && $(MAKE) $@
++	cd ./inet && $(MAKE) $@
+ 
+ image:
+ 	cd ./pm && $(MAKE) EXTRA_OPTS=$(EXTRA_OPTS) build
+diff --git a/servers/fs/Makefile b/servers/fs/Makefile
+index 54e57e8..efeebe8 100644
+--- a/servers/fs/Makefile
++++ b/servers/fs/Makefile
+@@ -15,7 +15,7 @@ LIBS = -lsys -lsysutil -ltimers
+ 
+ OBJ =	main.o open.o read.o write.o pipe.o dmap.o \
+ 	device.o path.o mount.o link.o super.o inode.o \
+-	cache.o filedes.o stadir.o protect.o time.o \
++	cache.o cache2.o filedes.o stadir.o protect.o time.o \
+ 	lock.o misc.o utility.o select.o timers.o table.o \
+ 	cdprobe.o
+ 
+@@ -39,3 +39,4 @@ depend:
+ 
+ # Include generated dependencies.
+ include .depend
++
+diff --git a/servers/fs/cache.c b/servers/fs/cache.c
+index b7680ed..d3fc613 100644
+--- a/servers/fs/cache.c
++++ b/servers/fs/cache.c
+@@ -94,6 +94,9 @@ int only_search;		/* if NO_READ, don't read, else act normal */
+    */
+   if (bp->b_dev != NO_DEV) {
+ 	if (bp->b_dirt == DIRTY) flushall(bp->b_dev);
++#if ENABLE_CACHE2
++	put_block2(bp);
++#endif
+   }
+ 
+   /* Fill in block's parameters and add it to the hash chain where it goes. */
+@@ -106,6 +109,10 @@ int only_search;		/* if NO_READ, don't read, else act normal */
+ 
+   /* Go get the requested block unless searching or prefetching. */
+   if (dev != NO_DEV) {
++#if ENABLE_CACHE2
++	if (get_block2(bp, only_search)) /* in 2nd level cache */;
++	else
++#endif
+ 	if (only_search == PREFETCH) bp->b_dev = NO_DEV;
+ 	else
+ 	if (only_search == NORMAL) {
+@@ -287,6 +294,10 @@ dev_t device;			/* device whose blocks are to be purged */
+ 
+   for (bp = &buf[0]; bp < &buf[NR_BUFS]; bp++)
+ 	if (bp->b_dev == device) bp->b_dev = NO_DEV;
++
++#if ENABLE_CACHE2
++  invalidate2(device);
++#endif
+ }
+ 
+ /*===========================================================================*
+diff --git a/servers/fs/device.c b/servers/fs/device.c
+index 55c9ae9..0af0d62 100644
+--- a/servers/fs/device.c
++++ b/servers/fs/device.c
+@@ -266,6 +266,28 @@ PUBLIC int do_ioctl()
+ 	&& (rip->i_mode & I_TYPE) != I_BLOCK_SPECIAL) return(ENOTTY);
+   dev = (dev_t) rip->i_zone[0];
+ 
++#if ENABLE_BINCOMPAT
++  if ((m_in.TTY_REQUEST >> 8) == 't') {
++	/* Obsolete sgtty ioctl, message contains more than is sane. */
++	struct dmap *dp;
++	message dev_mess;
++
++	dp = &dmap[(dev >> MAJOR) & BYTE];
++
++	dev_mess = m;	/* Copy full message with all the weird bits. */
++	dev_mess.m_type   = DEV_IOCTL;
++	dev_mess.PROC_NR  = who;
++	dev_mess.TTY_LINE = (dev >> MINOR) & BYTE;	
++
++	/* Call the task. */
++	(*dp->dmap_io)(dp->dmap_driver, &dev_mess);
++
++	m_out.TTY_SPEK = dev_mess.TTY_SPEK;	/* erase and kill */
++	m_out.TTY_FLAGS = dev_mess.TTY_FLAGS;	/* flags */
++	return(dev_mess.REP_STATUS);
++  }
++#endif
++
+   return(dev_io(DEV_IOCTL, dev, who, m_in.ADDRESS, 0L, 
+   	m_in.REQUEST, f->filp_flags));
+ }
+diff --git a/servers/fs/dmap.c b/servers/fs/dmap.c
+index d691ea2..c177258 100644
+--- a/servers/fs/dmap.c
++++ b/servers/fs/dmap.c
+@@ -39,6 +39,8 @@ PRIVATE struct dmap init_dmap[] = {
+   DT(1, tty_opcl, gen_io,  TTY_PROC_NR, 0)    	  	/* 4 = /dev/tty00 */
+   DT(1, ctty_opcl,ctty_io, TTY_PROC_NR, 0)     	   	/* 5 = /dev/tty   */
+   DT(0, no_dev,   0,       NONE,	DMAP_MUTABLE)	/* 6 = /dev/lp    */
++
++#if (MACHINE == IBM_PC)
+   DT(1, no_dev,   0,       0,   	DMAP_MUTABLE)   /* 7 = /dev/ip    */
+   DT(0, no_dev,   0,       NONE,        DMAP_MUTABLE)   /* 8 = /dev/c1    */
+   DT(0, 0,        0,       0,   	DMAP_MUTABLE)   /* 9 = not used   */
+@@ -50,6 +52,7 @@ PRIVATE struct dmap init_dmap[] = {
+   DT(1, gen_opcl, gen_io,  LOG_PROC_NR, 0)  	        /*15 = /dev/klog  */
+   DT(0, no_dev,   0,       NONE,	DMAP_MUTABLE)   /*16 = /dev/random*/
+   DT(0, no_dev,   0,       NONE,	DMAP_MUTABLE)   /*17 = /dev/cmos  */
++#endif /* IBM_PC */
+ };
+ 
+ /*===========================================================================*
+diff --git a/servers/fs/main.c b/servers/fs/main.c
+index 355f1c3..3bdd7eb 100644
+--- a/servers/fs/main.c
++++ b/servers/fs/main.c
+@@ -348,6 +348,11 @@ PRIVATE void load_ram(void)
+   	}
+   }
+ 
++#if ENABLE_CACHE2
++  /* The RAM disk is a second level block cache while not otherwise used. */
++  init_cache2(ram_size);
++#endif
++
+   /* See if we must load the RAM disk image, otherwise return. */
+   if (root_dev != DEV_RAM)
+   	return;
+diff --git a/servers/fs/proto.h b/servers/fs/proto.h
+index 7eee92d..4cd7911 100644
+--- a/servers/fs/proto.h
++++ b/servers/fs/proto.h
+@@ -19,6 +19,14 @@ _PROTOTYPE( void rw_block, (struct buf *bp, int rw_flag)		);
+ _PROTOTYPE( void rw_scattered, (Dev_t dev,
+ 			struct buf **bufq, int bufqsize, int rw_flag)	);
+ 
++#if ENABLE_CACHE2
++/* cache2.c */
++_PROTOTYPE( void init_cache2, (unsigned long size)			);
++_PROTOTYPE( int get_block2, (struct buf *bp, int only_search)		);
++_PROTOTYPE( void put_block2, (struct buf *bp)				);
++_PROTOTYPE( void invalidate2, (Dev_t device)				);
++#endif
++
+ /* device.c */
+ _PROTOTYPE( int dev_open, (Dev_t dev, int proc, int flags)		);
+ _PROTOTYPE( void dev_close, (Dev_t dev)					);
+diff --git a/servers/fs/select.c b/servers/fs/select.c
+index e728456..3873cea 100644
+--- a/servers/fs/select.c
++++ b/servers/fs/select.c
+@@ -9,6 +9,8 @@
+  *   6 june 2005  Created (Ben Gras)
+  */
+ 
++#define DEBUG_SELECT 0
++
+ #include "fs.h"
+ #include "select.h"
+ #include "file.h"
+@@ -161,6 +163,7 @@ PRIVATE void ops2tab(int ops, int fd, struct selectentry *e)
+ 		FD_SET(fd, &e->ready_errorfds);
+ 		e->nreadyfds++;
+ 	}
++
+ 	return;
+ }
+ 
+@@ -178,6 +181,7 @@ PRIVATE void copy_fdsets(struct selectentry *e)
+ 	if (e->vir_errorfds)
+ 		sys_vircopy(SELF, D, (vir_bytes) &e->ready_errorfds,
+ 		e->req_procnr, D, (vir_bytes) e->vir_errorfds, sizeof(fd_set));
++
+ 	return;
+ }
+ 
+@@ -274,6 +278,9 @@ PUBLIC int do_select(void)
+ 		for(t = 0; t < SEL_FDS; t++) {
+ 			if (fdtypes[t].select_match) {
+ 			   if (fdtypes[t].select_match(filp)) {
++#if DEBUG_SELECT
++				printf("select: fd %d is type %d ", fd, t);
++#endif
+ 				if (type != -1)
+ 					printf("select: double match\n");
+ 				type = t;
+@@ -295,6 +302,9 @@ PUBLIC int do_select(void)
+ 		 */
+ 		if (type == -1)
+ 		{
++#if DEBUG_SELECT
++			printf("do_select: bad type\n");
++#endif
+ 			return EBADF;
+ 		}
+ 
+@@ -303,7 +313,15 @@ PUBLIC int do_select(void)
+ 		if ((selecttab[s].filps[fd]->filp_select_ops & ops) != ops) {
+ 			int wantops;
+ 			/* Request the select on this fd.  */
++#if DEBUG_SELECT
++			printf("%p requesting ops %d -> ",
++				selecttab[s].filps[fd],
++				selecttab[s].filps[fd]->filp_select_ops);
++#endif
+ 			wantops = (selecttab[s].filps[fd]->filp_select_ops |= ops);
++#if DEBUG_SELECT
++			printf("%d\n", selecttab[s].filps[fd]->filp_select_ops);
++#endif
+ 			if ((r = fdtypes[type].select_request(filp,
+ 				&wantops, block)) != SEL_OK) {
+ 				/* error or bogus return code.. backpaddle */
+@@ -324,10 +342,21 @@ PUBLIC int do_select(void)
+ 				 */
+ 				select_callback(filp, ops);
+ 			}
++#if DEBUG_SELECT
++			printf("select request ok; ops returned %d\n", wantops);
++#endif
+ 		} else {
++#if DEBUG_SELECT
++			printf("select already happening on that filp\n");
++#endif
+ 		}
++
+ 		selecttab[s].nfds = fd+1;
+ 		selecttab[s].filps[fd]->filp_selectors++;
++
++#if DEBUG_SELECT
++		printf("[fd %d ops: %d] ", fd, ops);
++#endif
+ 	}
+ 
+ 	if (selecttab[s].nreadyfds > 0 || !block) {
+@@ -344,8 +373,15 @@ PUBLIC int do_select(void)
+ 		 * functions shall return the total number of bits
+ 		 * set in the bit masks."
+ 		 */
++#if DEBUG_SELECT
++		printf("returning\n");
++#endif
++
+ 		return selecttab[s].nreadyfds;
+ 	}
++#if DEBUG_SELECT
++		printf("not returning (%d, %d)\n", selecttab[s].nreadyfds, block);
++#endif
+  
+ 	/* Convert timeval to ticks and set the timer. If it fails, undo
+ 	 * all, return error.
+@@ -368,6 +404,9 @@ PUBLIC int do_select(void)
+ 			(timeout.tv_usec * HZ + USECPERSEC-1) / USECPERSEC;
+ 		selecttab[s].expiry = ticks;
+ 		fs_set_timer(&selecttab[s].timer, ticks, select_timeout_check, s);
++#if DEBUG_SELECT
++		printf("%d: blocking %d ticks\n", s, ticks);
++#endif
+ 	}
+ 
+ 	/* if we're blocking, the table entry is now valid. */
+@@ -389,9 +428,15 @@ PRIVATE void select_cancel_all(struct selectentry *e)
+ 		struct filp *fp;
+ 		fp = e->filps[fd];
+ 		if (!fp) {
++#if DEBUG_SELECT
++			printf("[ fd %d/%d NULL ] ", fd, e->nfds);
++#endif
+ 			continue;
+ 		}
+ 		if (fp->filp_selectors < 1) {
++#if DEBUG_SELECT
++			printf("select: %d selectors?!\n", fp->filp_selectors);
++#endif
+ 			continue;
+ 		}
+ 		fp->filp_selectors--;
+@@ -400,6 +445,9 @@ PRIVATE void select_cancel_all(struct selectentry *e)
+ 	}
+ 
+ 	if (e->expiry > 0) {
++#if DEBUG_SELECT
++		printf("cancelling timer %d\n", e - selecttab);
++#endif
+ 		fs_cancel_timer(&e->timer); 
+ 		e->expiry = 0;
+ 	}
+@@ -447,6 +495,9 @@ PRIVATE int select_reevaluate(struct filp *fp)
+ 	 * still in the market for it.
+ 	 */
+ 	fp->filp_select_ops = remain_ops;
++#if DEBUG_SELECT
++	printf("remaining operations on fp are %d\n", fp->filp_select_ops);
++#endif
+ 
+ 	return remain_ops;
+ }
+@@ -502,11 +553,18 @@ PUBLIC int select_notified(int major, int minor, int selected_ops)
+ {
+ 	int s, f, t;
+ 
++#if DEBUG_SELECT
++	printf("select callback: %d, %d: %d\n", major, minor, selected_ops);
++#endif
++
+ 	for(t = 0; t < SEL_FDS; t++)
+ 		if (!fdtypes[t].select_match && fdtypes[t].select_major == major)
+ 		    	break;
+ 
+ 	if (t >= SEL_FDS) {
++#if DEBUG_SELECT
++		printf("select callback: no fdtype found for device %d\n", major);
++#endif
+ 		return OK;
+ 	}
+ 
+@@ -564,6 +622,9 @@ PUBLIC void select_forget(int proc)
+ 	}
+ 
+ 	if (s >= MAXSELECTS) {
++#if DEBUG_SELECT
++		printf("select: cancelled select() not found");
++#endif
+ 		return;
+ 	}
+ 
+@@ -583,14 +644,23 @@ PUBLIC void select_timeout_check(timer_t *timer)
+ 	s = tmr_arg(timer)->ta_int;
+ 
+ 	if (s < 0 || s >= MAXSELECTS) {
++#if DEBUG_SELECT
++		printf("select: bogus slot arg to watchdog %d\n", s);
++#endif
+ 		return;
+ 	}
+ 
+ 	if (!selecttab[s].requestor) {
++#if DEBUG_SELECT
++		printf("select: no requestor in watchdog\n");
++#endif
+ 		return;
+ 	}
+ 
+ 	if (selecttab[s].expiry <= 0) {
++#if DEBUG_SELECT
++		printf("select: strange expiry value in watchdog\n", s);
++#endif
+ 		return;
+ 	}
+ 
+diff --git a/servers/pm/alloc.c b/servers/pm/alloc.c
+index 2fb2d0b..391e1f8 100644
+--- a/servers/pm/alloc.c
++++ b/servers/pm/alloc.c
+@@ -36,11 +36,24 @@ PRIVATE struct hole {
+ 
+ PRIVATE struct hole *hole_head;	/* pointer to first hole */
+ PRIVATE struct hole *free_slots;/* ptr to list of unused table slots */
++#if ENABLE_SWAP
++PRIVATE int swap_fd = -1;	/* file descriptor of open swap file/device */
++PRIVATE u32_t swap_offset;	/* offset to start of swap area on swap file */
++PRIVATE phys_clicks swap_base;	/* memory offset chosen as swap base */
++PRIVATE phys_clicks swap_maxsize;/* maximum amount of swap "memory" possible */
++PRIVATE struct mproc *in_queue;	/* queue of processes wanting to swap in */
++PRIVATE struct mproc *outswap = &mproc[0]; 	 /* outswap candidate? */
++#else /* ! ENABLE_SWAP */
+ #define swap_base ((phys_clicks) -1)
++#endif /* ENABLE_SWAP */
+ 
+ FORWARD _PROTOTYPE( void del_slot, (struct hole *prev_ptr, struct hole *hp) );
+ FORWARD _PROTOTYPE( void merge, (struct hole *hp)			    );
++#if ENABLE_SWAP
++FORWARD _PROTOTYPE( int swap_out, (void)				    );
++#else
+ #define swap_out()	(0)
++#endif
+ 
+ /*===========================================================================*
+  *				alloc_mem				     *
+@@ -216,6 +229,197 @@ phys_clicks *free;		/* memory size summaries */
+   	if (chunks[i].size > 0) {
+ 		free_mem(chunks[i].base, chunks[i].size);
+ 		*free += chunks[i].size;
++#if ENABLE_SWAP
++		if (swap_base < chunks[i].base + chunks[i].size) 
++			swap_base = chunks[i].base + chunks[i].size;
++#endif
+ 	}
+   }
++
++#if ENABLE_SWAP
++  /* The swap area is represented as a hole above and separate of regular
++   * memory.  A hole at the size of the swap file is allocated on "swapon".
++   */
++  swap_base++;				/* make separate */
++  swap_maxsize = 0 - swap_base;		/* maximum we can possibly use */
++#endif
++}
++
++#if ENABLE_SWAP
++/*===========================================================================*
++ *				swap_on					     *
++ *===========================================================================*/
++PUBLIC int swap_on(file, offset, size)
++char *file;				/* file to swap on */
++u32_t offset, size;			/* area on swap file to use */
++{
++/* Turn swapping on. */
++
++  if (swap_fd != -1) return(EBUSY);	/* already have swap? */
++
++  tell_fs(CHDIR, who, FALSE, 0);	/* be like the caller for open() */
++  if ((swap_fd = open(file, O_RDWR)) < 0) return(-errno);
++  swap_offset = offset;
++  size >>= CLICK_SHIFT;
++  if (size > swap_maxsize) size = swap_maxsize;
++  if (size > 0) free_mem(swap_base, (phys_clicks) size);
++  return(OK);
++}
++
++/*===========================================================================*
++ *				swap_off				     *
++ *===========================================================================*/
++PUBLIC int swap_off()
++{
++/* Turn swapping off. */
++  struct mproc *rmp;
++  struct hole *hp, *prev_ptr;
++
++  if (swap_fd == -1) return(OK);	/* can't turn off what isn't on */
++
++  /* Put all swapped out processes on the inswap queue and swap in. */
++  for (rmp = &mproc[0]; rmp < &mproc[NR_PROCS]; rmp++) {
++	if (rmp->mp_flags & ONSWAP) swap_inqueue(rmp);
++  }
++  swap_in();
++
++  /* All in memory? */
++  for (rmp = &mproc[0]; rmp < &mproc[NR_PROCS]; rmp++) {
++	if (rmp->mp_flags & ONSWAP) return(ENOMEM);
++  }
++
++  /* Yes.  Remove the swap hole and close the swap file descriptor. */
++  for (hp = hole_head; hp != NIL_HOLE; prev_ptr = hp, hp = hp->h_next) {
++	if (hp->h_base >= swap_base) {
++		del_slot(prev_ptr, hp);
++		hp = hole_head;
++	}
++  }
++  close(swap_fd);
++  swap_fd = -1;
++  return(OK);
++}
++
++/*===========================================================================*
++ *				swap_inqueue				     *
++ *===========================================================================*/
++PUBLIC void swap_inqueue(rmp)
++register struct mproc *rmp;		/* process to add to the queue */
++{
++/* Put a swapped out process on the queue of processes to be swapped in.  This
++ * happens when such a process gets a signal, or if a reply message must be
++ * sent, like when a process doing a wait() has a child that exits.
++ */
++  struct mproc **pmp;
++
++  if (rmp->mp_flags & SWAPIN) return;	/* already queued */
++
++  
++  for (pmp = &in_queue; *pmp != NULL; pmp = &(*pmp)->mp_swapq) {}
++  *pmp = rmp;
++  rmp->mp_swapq = NULL;
++  rmp->mp_flags |= SWAPIN;
++}
++
++/*===========================================================================*
++ *				swap_in					     *
++ *===========================================================================*/
++PUBLIC void swap_in()
++{
++/* Try to swap in a process on the inswap queue.  We want to send it a message,
++ * interrupt it, or something.
++ */
++  struct mproc **pmp, *rmp;
++  phys_clicks old_base, new_base, size;
++  off_t off;
++  int proc_nr;
++
++  pmp = &in_queue;
++  while ((rmp = *pmp) != NULL) {
++	proc_nr = (rmp - mproc);
++	size = rmp->mp_seg[S].mem_vir + rmp->mp_seg[S].mem_len
++		- rmp->mp_seg[D].mem_vir;
++
++	if (!(rmp->mp_flags & SWAPIN)) {
++		/* Guess it got killed.  (Queue is cleaned here.) */
++		*pmp = rmp->mp_swapq;
++		continue;
++	} else
++	if ((new_base = alloc_mem(size)) == NO_MEM) {
++		/* No memory for this one, try the next. */
++		pmp = &rmp->mp_swapq;
++	} else {
++		/* We've found memory.  Update map and swap in. */
++		old_base = rmp->mp_seg[D].mem_phys;
++		rmp->mp_seg[D].mem_phys = new_base;
++		rmp->mp_seg[S].mem_phys = rmp->mp_seg[D].mem_phys + 
++			(rmp->mp_seg[S].mem_vir - rmp->mp_seg[D].mem_vir);
++		sys_newmap(proc_nr, rmp->mp_seg);
++		off = swap_offset + ((off_t) (old_base-swap_base)<<CLICK_SHIFT);
++		lseek(swap_fd, off, SEEK_SET);
++		rw_seg(0, swap_fd, proc_nr, D, (phys_bytes)size << CLICK_SHIFT);
++		free_mem(old_base, size);
++		rmp->mp_flags &= ~(ONSWAP|SWAPIN);
++		*pmp = rmp->mp_swapq;
++		check_pending(rmp);	/* a signal may have waked this one */
++	}
++  }
++}
++
++/*===========================================================================*
++ *				swap_out				     *
++ *===========================================================================*/
++PRIVATE int swap_out()
++{
++/* Try to find a process that can be swapped out.  Candidates are those blocked
++ * on a system call that PM handles, like wait(), pause() or sigsuspend().
++ */
++  struct mproc *rmp;
++  struct hole *hp, *prev_ptr;
++  phys_clicks old_base, new_base, size;
++  off_t off;
++  int proc_nr;
++
++  rmp = outswap;
++  do {
++	if (++rmp == &mproc[NR_PROCS]) rmp = &mproc[0];
++
++	/* A candidate? */
++	if (!(rmp->mp_flags & (PAUSED | WAITING | SIGSUSPENDED))) continue;
++
++	/* Already on swap or otherwise to be avoided? */
++	if (rmp->mp_flags & (DONT_SWAP | TRACED | REPLY | ONSWAP)) continue;
++
++	/* Got one, find a swap hole and swap it out. */
++	proc_nr = (rmp - mproc);
++	size = rmp->mp_seg[S].mem_vir + rmp->mp_seg[S].mem_len
++		- rmp->mp_seg[D].mem_vir;
++
++	prev_ptr = NIL_HOLE;
++	for (hp = hole_head; hp != NIL_HOLE; prev_ptr = hp, hp = hp->h_next) {
++		if (hp->h_base >= swap_base && hp->h_len >= size) break;
++	}
++	if (hp == NIL_HOLE) continue;	/* oops, not enough swapspace */
++	new_base = hp->h_base;
++	hp->h_base += size;
++	hp->h_len -= size;
++	if (hp->h_len == 0) del_slot(prev_ptr, hp);
++
++	off = swap_offset + ((off_t) (new_base - swap_base) << CLICK_SHIFT);
++	lseek(swap_fd, off, SEEK_SET);
++	rw_seg(1, swap_fd, proc_nr, D, (phys_bytes)size << CLICK_SHIFT);
++	old_base = rmp->mp_seg[D].mem_phys;
++	rmp->mp_seg[D].mem_phys = new_base;
++	rmp->mp_seg[S].mem_phys = rmp->mp_seg[D].mem_phys + 
++		(rmp->mp_seg[S].mem_vir - rmp->mp_seg[D].mem_vir);
++	sys_newmap(proc_nr, rmp->mp_seg);
++	free_mem(old_base, size);
++	rmp->mp_flags |= ONSWAP;
++
++	outswap = rmp;		/* next time start here */
++	return(TRUE);
++  } while (rmp != outswap);
++
++  return(FALSE);	/* no candidate found */
+ }
++#endif /* SWAP */
+diff --git a/servers/pm/break.c b/servers/pm/break.c
+index 29294c9..a628fd2 100644
+--- a/servers/pm/break.c
++++ b/servers/pm/break.c
+@@ -12,7 +12,7 @@
+  * The entry points into this file are:
+  *   do_brk:	  BRK/SBRK system calls to grow or shrink the data segment
+  *   adjust:	  see if a proposed segment adjustment is allowed
+- *   size_ok:	  see if the segment sizes are feasible
++ *   size_ok:	  see if the segment sizes are feasible (i86 only)
+  */
+ 
+ #include "pm.h"
+@@ -113,8 +113,13 @@ vir_bytes sp;			/* new value of sp */
+ 
+   /* Do the new data and stack segment sizes fit in the address space? */
+   ft = (rmp->mp_flags & SEPARATE);
++#if (CHIP == INTEL && _WORD_SIZE == 2)
++  r = size_ok(ft, rmp->mp_seg[T].mem_len, rmp->mp_seg[D].mem_len, 
++       rmp->mp_seg[S].mem_len, rmp->mp_seg[D].mem_vir, rmp->mp_seg[S].mem_vir);
++#else
+   r = (rmp->mp_seg[D].mem_vir + rmp->mp_seg[D].mem_len > 
+           rmp->mp_seg[S].mem_vir) ? ENOMEM : OK;
++#endif
+   if (r == OK) {
+ 	if (changed) sys_newmap((int)(rmp - mproc), rmp->mp_seg);
+ 	return(OK);
+@@ -129,3 +134,42 @@ vir_bytes sp;			/* new value of sp */
+   }
+   return(ENOMEM);
+ }
++
++#if (CHIP == INTEL && _WORD_SIZE == 2)
++/*===========================================================================*
++ *				size_ok  				     *
++ *===========================================================================*/
++PUBLIC int size_ok(file_type, tc, dc, sc, dvir, s_vir)
++int file_type;			/* SEPARATE or 0 */
++vir_clicks tc;			/* text size in clicks */
++vir_clicks dc;			/* data size in clicks */
++vir_clicks sc;			/* stack size in clicks */
++vir_clicks dvir;		/* virtual address for start of data seg */
++vir_clicks s_vir;		/* virtual address for start of stack seg */
++{
++/* Check to see if the sizes are feasible and enough segmentation registers
++ * exist.  On a machine with eight 8K pages, text, data, stack sizes of
++ * (32K, 16K, 16K) will fit, but (33K, 17K, 13K) will not, even though the
++ * former is bigger (64K) than the latter (63K).  Even on the 8088 this test
++ * is needed, since the data and stack may not exceed 4096 clicks.
++ * Note this is not used for 32-bit Intel Minix, the test is done in-line.
++ */
++
++  int pt, pd, ps;		/* segment sizes in pages */
++
++  pt = ( (tc << CLICK_SHIFT) + PAGE_SIZE - 1)/PAGE_SIZE;
++  pd = ( (dc << CLICK_SHIFT) + PAGE_SIZE - 1)/PAGE_SIZE;
++  ps = ( (sc << CLICK_SHIFT) + PAGE_SIZE - 1)/PAGE_SIZE;
++
++  if (file_type == SEPARATE) {
++	if (pt > MAX_PAGES || pd + ps > MAX_PAGES) return(ENOMEM);
++  } else {
++	if (pt + pd + ps > MAX_PAGES) return(ENOMEM);
++  }
++
++  if (dvir + dc > s_vir) return(ENOMEM);
++
++  return(OK);
++}
++#endif
++
+diff --git a/servers/pm/const.h b/servers/pm/const.h
+index 9556968..7c62a68 100644
+--- a/servers/pm/const.h
++++ b/servers/pm/const.h
+@@ -2,6 +2,15 @@
+ 
+ #define NO_MEM ((phys_clicks) 0)  /* returned by alloc_mem() with mem is up */
+ 
++#if (CHIP == INTEL && _WORD_SIZE == 2)
++/* These definitions are used in size_ok and are not needed for 386.
++ * The 386 segment granularity is 1 for segments smaller than 1M and 4096
++ * above that.  
++ */
++#define PAGE_SIZE	  16	/* how many bytes in a page (s.b.HCLICK_SIZE)*/
++#define MAX_PAGES       4096	/* how many pages in the virtual addr space */
++#endif
++
+ #define NR_PIDS	       30000	/* process ids range from 0 to NR_PIDS-1.
+ 				 * (magic constant: some old applications use
+ 				 * a 'short' instead of pid_t.)
+diff --git a/servers/pm/exec.c b/servers/pm/exec.c
+index 99f9a23..b6d8dd1 100644
+--- a/servers/pm/exec.c
++++ b/servers/pm/exec.c
+@@ -242,7 +242,12 @@ vir_bytes *pc;			/* program entry point (initial PC) */
+ 
+   /* Check magic number, cpu type, and flags. */
+   if (BADMAG(hdr)) return(ENOEXEC);
++#if (CHIP == INTEL && _WORD_SIZE == 2)
++  if (hdr.a_cpu != A_I8086) return(ENOEXEC);
++#endif
++#if (CHIP == INTEL && _WORD_SIZE == 4)
+   if (hdr.a_cpu != A_I80386) return(ENOEXEC);
++#endif
+   if ((hdr.a_flags & ~(A_NSYM | A_EXEC | A_SEP)) != 0) return(ENOEXEC);
+ 
+   *ft = ( (hdr.a_flags & A_SEP) ? SEPARATE : 0);    /* separate I & D or not */
+@@ -269,7 +274,11 @@ vir_bytes *pc;			/* program entry point (initial PC) */
+   if (dc >= totc) return(ENOEXEC);	/* stack must be at least 1 click */
+   dvir = (*ft == SEPARATE ? 0 : tc);
+   s_vir = dvir + (totc - sc);
++#if (CHIP == INTEL && _WORD_SIZE == 2)
++  m = size_ok(*ft, tc, dc, sc, dvir, s_vir);
++#else
+   m = (dvir + dc > s_vir) ? ENOMEM : OK;
++#endif
+   ct = hdr.a_hdrlen & BYTE;		/* header length */
+   if (ct > A_MINHDR) lseek(fd, (off_t) ct, SEEK_SET); /* skip unused hdr */
+   return(m);
+@@ -350,6 +359,13 @@ phys_bytes tot_bytes;		/* total memory to allocate, including gap */
+   rmp->mp_seg[S].mem_vir = rmp->mp_seg[D].mem_vir + data_clicks + gap_clicks;
+   rmp->mp_seg[S].mem_len = stack_clicks;
+ 
++#if (CHIP == M68000)
++  rmp->mp_seg[T].mem_vir = 0;
++  rmp->mp_seg[D].mem_vir = rmp->mp_seg[T].mem_len;
++  rmp->mp_seg[S].mem_vir = rmp->mp_seg[D].mem_vir 
++  	+ rmp->mp_seg[D].mem_len + gap_clicks;
++#endif
++
+   sys_newmap(who, rmp->mp_seg);   /* report new map to the kernel */
+ 
+   /* The old memory may have been swapped out, but the new memory is real. */
+diff --git a/servers/pm/main.c b/servers/pm/main.c
+index 0682557..0225c12 100644
+--- a/servers/pm/main.c
++++ b/servers/pm/main.c
+@@ -249,6 +249,16 @@ PRIVATE void pm_init()
+   if (sendrec(FS_PROC_NR, &mess) != OK || mess.m_type != OK)
+ 	panic(__FILE__,"can't sync up with FS", NO_NUM);
+ 
++#if ENABLE_BOOTDEV
++  /* Possibly we must correct the memory chunks for the boot device. */
++  if (kinfo.bootdev_size > 0) {
++      mem_map[T].mem_phys = kinfo.bootdev_base >> CLICK_SHIFT;
++      mem_map[T].mem_len = 0;
++      mem_map[D].mem_len = (kinfo.bootdev_size+CLICK_SIZE-1) >> CLICK_SHIFT;
++      patch_mem_chunks(mem_chunks, mem_map);
++  }
++#endif /* ENABLE_BOOTDEV */
++
+   /* Initialize tables to all physical memory and print memory information. */
+   printf("Physical memory:");
+   mem_init(mem_chunks, &free_clicks);
+@@ -275,6 +285,16 @@ int queue;				/* store mem chunks here */
+   return nice_val;
+ }
+ 
++#if _WORD_SIZE == 2
++/* In real mode only 1M can be addressed, and in 16-bit protected we can go
++ * no further than we can count in clicks.  (The 286 is further limited by
++ * its 24 bit address bus, but we can assume in that case that no more than
++ * 16M memory is reported by the BIOS.)
++ */
++#define MAX_REAL	0x00100000L
++#define MAX_16BIT	(0xFFF0L << CLICK_SHIFT)
++#endif
++
+ /*===========================================================================*
+  *				get_mem_chunks				     *
+  *===========================================================================*/
+@@ -290,6 +310,12 @@ struct memory *mem_chunks;			/* store mem chunks here */
+   char *s, *end;			/* use to parse boot variable */ 
+   int i, done = 0;
+   struct memory *memp;
++#if _WORD_SIZE == 2
++  unsigned long max_address;
++  struct machine machine;
++  if (OK != (i=sys_getmachine(&machine)))
++	panic(__FILE__, "sys_getmachine failed", i);
++#endif
+ 
+   /* Initialize everything to zero. */
+   for (i = 0; i < NR_MEMS; i++) {
+@@ -320,6 +346,10 @@ struct memory *mem_chunks;			/* store mem chunks here */
+ 	    else done = 1;
+ 	}
+ 	limit = base + size;	
++#if _WORD_SIZE == 2
++	max_address = machine.protected ? MAX_16BIT : MAX_REAL;
++	if (limit > max_address) limit = max_address;
++#endif
+ 	base = (base + CLICK_SIZE-1) & ~(long)(CLICK_SIZE-1);
+ 	limit &= ~(long)(CLICK_SIZE-1);
+ 	if (limit <= base) continue;
+@@ -349,3 +379,4 @@ struct mem_map *map_ptr;			/* memory to remove */
+ 	}
+   }
+ }
++
+diff --git a/servers/pm/misc.c b/servers/pm/misc.c
+index a70cdcc..26828cf 100644
+--- a/servers/pm/misc.c
++++ b/servers/pm/misc.c
+@@ -314,7 +314,27 @@ PUBLIC int do_svrctl()
+ 
+       return OK;
+   }
++
++#if ENABLE_SWAP
++  case MMSWAPON: {
++	struct mmswapon swapon;
++
++	if (mp->mp_effuid != SUPER_USER) return(EPERM);
++
++	if (sys_datacopy(who, (phys_bytes) ptr,
++		PM_PROC_NR, (phys_bytes) &swapon,
++		(phys_bytes) sizeof(swapon)) != OK) return(EFAULT);
++
++	return(swap_on(swapon.file, swapon.offset, swapon.size)); }
++
++  case MMSWAPOFF: {
++	if (mp->mp_effuid != SUPER_USER) return(EPERM);
++
++	return(swap_off()); }
++#endif /* SWAP */
++
+   default:
+ 	return(EINVAL);
+   }
+ }
++
+diff --git a/servers/pm/param.h b/servers/pm/param.h
+index 8223eb7..15b0e4f 100644
+--- a/servers/pm/param.h
++++ b/servers/pm/param.h
+@@ -24,6 +24,9 @@
+ #define sig_how		m2_i1
+ #define sig_flags	m2_i2
+ #define sig_context	m2_p1
++#ifdef _SIGMESSAGE
++#define sig_msg		m1_i1
++#endif
+ #define info_what	m1_i1
+ #define info_where	m1_p1
+ #define reboot_flag	m1_i1
+diff --git a/servers/pm/proto.h b/servers/pm/proto.h
+index 5e7e3ce..49a1e4d 100644
+--- a/servers/pm/proto.h
++++ b/servers/pm/proto.h
+@@ -11,8 +11,15 @@ struct memory;
+ _PROTOTYPE( phys_clicks alloc_mem, (phys_clicks clicks)			);
+ _PROTOTYPE( void free_mem, (phys_clicks base, phys_clicks clicks)	);
+ _PROTOTYPE( void mem_init, (struct memory *chunks, phys_clicks *free)	);
++#if ENABLE_SWAP
++_PROTOTYPE( int swap_on, (char *file, u32_t offset, u32_t size)	);
++_PROTOTYPE( int swap_off, (void)					);
++_PROTOTYPE( void swap_in, (void)					);
++_PROTOTYPE( void swap_inqueue, (struct mproc *rmp)			);
++#else /* !SWAP */
+ #define swap_in()			((void)0)
+ #define swap_inqueue(rmp)		((void)0)
++#endif /* !SWAP */
+ 
+ /* break.c */
+ _PROTOTYPE( int adjust, (struct mproc *rmp,
+@@ -56,6 +63,10 @@ _PROTOTYPE( int do_allocmem, (void)					);
+ _PROTOTYPE( int do_freemem, (void)					);
+ _PROTOTYPE( int do_getsetpriority, (void)					);
+ 
++#if (MACHINE == MACINTOSH)
++_PROTOTYPE( phys_clicks start_click, (void)				);
++#endif
++
+ _PROTOTYPE( void setreply, (int proc_nr, int result)			);
+ 
+ /* signal.c */
+@@ -99,3 +110,4 @@ _PROTOTYPE( int get_stack_ptr, (int proc_nr, vir_bytes *sp)		);
+ _PROTOTYPE( int get_mem_map, (int proc_nr, struct mem_map *mem_map)	);
+ _PROTOTYPE( char *find_param, (const char *key));
+ _PROTOTYPE( int proc_from_pid, (pid_t p));
++
+diff --git a/servers/pm/signal.c b/servers/pm/signal.c
+index b284244..621828b 100644
+--- a/servers/pm/signal.c
++++ b/servers/pm/signal.c
+@@ -256,6 +256,12 @@ sigset_t sig_map;
+ 		id = 0; break;	/* broadcast to process group */
+ 	    case SIGKILL:
+ 		id = -1; break;	/* broadcast to all except INIT */
++#if DEAD_CODE
++	    case SIGALRM:
++		if ((rmp->mp_flags & ALARM_ON) == 0) continue;
++		rmp->mp_flags &= ~ALARM_ON;
++		/* fall through */
++#endif
+ 	    default:
+ 		id = proc_id;
+ 		break;
+@@ -407,6 +413,14 @@ int signo;			/* signal to send to process (1 to _NSIG) */
+ 	sigaddset(&rmp->mp_sigpending, signo);
+ 	return;
+   }
++#if ENABLE_SWAP
++  if (rmp->mp_flags & ONSWAP) {
++	/* Process is swapped out, leave signal pending. */
++	sigaddset(&rmp->mp_sigpending, signo);
++	swap_inqueue(rmp);
++	return;
++  }
++#endif
+   sigflags = rmp->mp_sigact[signo].sa_flags;
+   if (sigismember(&rmp->mp_catch, signo)) {
+ 	if (rmp->mp_flags & SIGSUSPENDED)
+@@ -461,6 +475,14 @@ doterminate:
+ 
+   rmp->mp_sigstatus = (char) signo;
+   if (sigismember(&core_sset, signo)) {
++#if ENABLE_SWAP
++	if (rmp->mp_flags & ONSWAP) {
++		/* Process is swapped out, leave signal pending. */
++		sigaddset(&rmp->mp_sigpending, signo);
++		swap_inqueue(rmp);
++		return;
++	}
++#endif
+ 	/* Switch to the user's FS environment and dump core. */
+ 	tell_fs(CHDIR, slot, FALSE, 0);
+ 	dump_core(rmp);

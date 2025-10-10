@@ -314,7 +314,27 @@ PUBLIC int do_svrctl()
 
       return OK;
   }
+
+#if ENABLE_SWAP
+  case MMSWAPON: {
+	struct mmswapon swapon;
+
+	if (mp->mp_effuid != SUPER_USER) return(EPERM);
+
+	if (sys_datacopy(who, (phys_bytes) ptr,
+		PM_PROC_NR, (phys_bytes) &swapon,
+		(phys_bytes) sizeof(swapon)) != OK) return(EFAULT);
+
+	return(swap_on(swapon.file, swapon.offset, swapon.size)); }
+
+  case MMSWAPOFF: {
+	if (mp->mp_effuid != SUPER_USER) return(EPERM);
+
+	return(swap_off()); }
+#endif /* SWAP */
+
   default:
 	return(EINVAL);
   }
 }
+

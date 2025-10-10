@@ -51,6 +51,8 @@ _PROTOTYPE( phys_bytes umap_remote, (struct proc *rp, int seg,
 _PROTOTYPE( phys_bytes umap_bios, (struct proc *rp, vir_bytes vir_addr,
 		vir_bytes bytes)					);
 
+#if (CHIP == INTEL)
+
 /* exception.c */
 _PROTOTYPE( void exception, (unsigned vec_nr)				);
 
@@ -140,6 +142,10 @@ _PROTOTYPE( void phys2seg, (u16_t *seg, vir_bytes *off, phys_bytes phys));
 _PROTOTYPE( void enable_iop, (struct proc *pp)				);
 _PROTOTYPE( void alloc_segments, (struct proc *rp)			);
 
+#endif /* (CHIP == INTEL) */
+
+#if (CHIP == M68000)
+/* M68000 specific prototypes go here. */
+#endif /* (CHIP == M68000) */
+
 #endif /* PROTO_H */
-
-

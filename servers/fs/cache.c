@@ -94,6 +94,9 @@ int only_search;		/* if NO_READ, don't read, else act normal */
    */
   if (bp->b_dev != NO_DEV) {
 	if (bp->b_dirt == DIRTY) flushall(bp->b_dev);
+#if ENABLE_CACHE2
+	put_block2(bp);
+#endif
   }
 
   /* Fill in block's parameters and add it to the hash chain where it goes. */
@@ -106,6 +109,10 @@ int only_search;		/* if NO_READ, don't read, else act normal */
 
   /* Go get the requested block unless searching or prefetching. */
   if (dev != NO_DEV) {
+#if ENABLE_CACHE2
+	if (get_block2(bp, only_search)) /* in 2nd level cache */;
+	else
+#endif
 	if (only_search == PREFETCH) bp->b_dev = NO_DEV;
 	else
 	if (only_search == NORMAL) {
@@ -287,6 +294,10 @@ dev_t device;			/* device whose blocks are to be purged */
 
   for (bp = &buf[0]; bp < &buf[NR_BUFS]; bp++)
 	if (bp->b_dev == device) bp->b_dev = NO_DEV;
+
+#if ENABLE_CACHE2
+  invalidate2(device);
+#endif
 }
 
 /*===========================================================================*

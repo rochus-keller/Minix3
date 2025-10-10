@@ -15,10 +15,6 @@
  * don't want to pollute the users namespace. Some editable values have
  * gone there.
  *
- * This is a modified version of config.h for compiling a small Minix system
- * with only the options described in the text, Operating Systems Design and
- * Implementation, 3rd edition. See the version of config.h in the full 
- * source code directory for information on alternatives omitted here.
  */
 
 /* The MACHINE (called _MINIX_MACHINE) setting can be done
@@ -43,8 +39,30 @@
 #define NR_PROCS 	  _NR_PROCS 
 #define NR_SYS_PROCS      _NR_SYS_PROCS
 
+#if _MINIX_SMALL
+
 #define NR_BUFS	128
 #define NR_BUF_HASH 128
+
+#else
+
+/* The buffer cache should be made as large as you can afford. */
+#if (MACHINE == IBM_PC && _WORD_SIZE == 2)
+#define NR_BUFS           40	/* # blocks in the buffer cache */
+#define NR_BUF_HASH       64	/* size of buf hash table; MUST BE POWER OF 2*/
+#endif
+
+#if (MACHINE == IBM_PC && _WORD_SIZE == 4)
+#define NR_BUFS         1280	/* # blocks in the buffer cache */
+#define NR_BUF_HASH     2048	/* size of buf hash table; MUST BE POWER OF 2*/
+#endif
+
+#if (MACHINE == SUN_4_60)
+#define NR_BUFS		 512	/* # blocks in the buffer cache (<=1536) */
+#define NR_BUF_HASH	 512	/* size of buf hash table; MUST BE POWER OF 2*/
+#endif
+
+#endif	/* _MINIX_SMALL */
 
 /* Number of controller tasks (/dev/cN device classes). */
 #define NR_CTRLRS          2
@@ -53,7 +71,7 @@
 #define ENABLE_CACHE2      0
 
 /* Enable or disable swapping processes to disk. */
-#define ENABLE_SWAP	   0 
+#define ENABLE_SWAP	   1
 
 /* Include or exclude an image of /dev/boot in the boot image. 
  * Please update the makefile in /usr/src/tools/ as well.
@@ -77,8 +95,8 @@
  * system can handle.
  */
 #define NR_CONS            4	/* # system consoles (1 to 8) */
-#define	NR_RS_LINES	   0	/* # rs232 terminals (0 to 4) */
-#define	NR_PTYS		   0	/* # pseudo terminals (0 to 64) */
+#define	NR_RS_LINES	   4	/* # rs232 terminals (0 to 4) */
+#define	NR_PTYS		   32	/* # pseudo terminals (0 to 64) */
 
 /*===========================================================================*
  *	There are no user-settable parameters after this line		     *

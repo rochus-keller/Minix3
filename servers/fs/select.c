@@ -9,6 +9,8 @@
  *   6 june 2005  Created (Ben Gras)
  */
 
+#define DEBUG_SELECT 0
+
 #include "fs.h"
 #include "select.h"
 #include "file.h"
@@ -161,6 +163,7 @@ PRIVATE void ops2tab(int ops, int fd, struct selectentry *e)
 		FD_SET(fd, &e->ready_errorfds);
 		e->nreadyfds++;
 	}
+
 	return;
 }
 
@@ -178,6 +181,7 @@ PRIVATE void copy_fdsets(struct selectentry *e)
 	if (e->vir_errorfds)
 		sys_vircopy(SELF, D, (vir_bytes) &e->ready_errorfds,
 		e->req_procnr, D, (vir_bytes) e->vir_errorfds, sizeof(fd_set));
+
 	return;
 }
 
@@ -274,6 +278,9 @@ PUBLIC int do_select(void)
 		for(t = 0; t < SEL_FDS; t++) {
 			if (fdtypes[t].select_match) {
 			   if (fdtypes[t].select_match(filp)) {
+#if DEBUG_SELECT
+				printf("select: fd %d is type %d ", fd, t);
+#endif
 				if (type != -1)
 					printf("select: double match\n");
 				type = t;
@@ -295,6 +302,9 @@ PUBLIC int do_select(void)
 		 */
 		if (type == -1)
 		{
+#if DEBUG_SELECT
+			printf("do_select: bad type\n");
+#endif
 			return EBADF;
 		}
 
@@ -303,7 +313,15 @@ PUBLIC int do_select(void)
 		if ((selecttab[s].filps[fd]->filp_select_ops & ops) != ops) {
 			int wantops;
 			/* Request the select on this fd.  */
+#if DEBUG_SELECT
+			printf("%p requesting ops %d -> ",
+				selecttab[s].filps[fd],
+				selecttab[s].filps[fd]->filp_select_ops);
+#endif
 			wantops = (selecttab[s].filps[fd]->filp_select_ops |= ops);
+#if DEBUG_SELECT
+			printf("%d\n", selecttab[s].filps[fd]->filp_select_ops);
+#endif
 			if ((r = fdtypes[type].select_request(filp,
 				&wantops, block)) != SEL_OK) {
 				/* error or bogus return code.. backpaddle */
@@ -324,10 +342,21 @@ PUBLIC int do_select(void)
 				 */
 				select_callback(filp, ops);
 			}
+#if DEBUG_SELECT
+			printf("select request ok; ops returned %d\n", wantops);
+#endif
 		} else {
+#if DEBUG_SELECT
+			printf("select already happening on that filp\n");
+#endif
 		}
+
 		selecttab[s].nfds = fd+1;
 		selecttab[s].filps[fd]->filp_selectors++;
+
+#if DEBUG_SELECT
+		printf("[fd %d ops: %d] ", fd, ops);
+#endif
 	}
 
 	if (selecttab[s].nreadyfds > 0 || !block) {
@@ -344,8 +373,15 @@ PUBLIC int do_select(void)
 		 * functions shall return the total number of bits
 		 * set in the bit masks."
 		 */
+#if DEBUG_SELECT
+		printf("returning\n");
+#endif
+
 		return selecttab[s].nreadyfds;
 	}
+#if DEBUG_SELECT
+		printf("not returning (%d, %d)\n", selecttab[s].nreadyfds, block);
+#endif
  
 	/* Convert timeval to ticks and set the timer. If it fails, undo
 	 * all, return error.
@@ -368,6 +404,9 @@ PUBLIC int do_select(void)
 			(timeout.tv_usec * HZ + USECPERSEC-1) / USECPERSEC;
 		selecttab[s].expiry = ticks;
 		fs_set_timer(&selecttab[s].timer, ticks, select_timeout_check, s);
+#if DEBUG_SELECT
+		printf("%d: blocking %d ticks\n", s, ticks);
+#endif
 	}
 
 	/* if we're blocking, the table entry is now valid. */
@@ -389,9 +428,15 @@ PRIVATE void select_cancel_all(struct selectentry *e)
 		struct filp *fp;
 		fp = e->filps[fd];
 		if (!fp) {
+#if DEBUG_SELECT
+			printf("[ fd %d/%d NULL ] ", fd, e->nfds);
+#endif
 			continue;
 		}
 		if (fp->filp_selectors < 1) {
+#if DEBUG_SELECT
+			printf("select: %d selectors?!\n", fp->filp_selectors);
+#endif
 			continue;
 		}
 		fp->filp_selectors--;
@@ -400,6 +445,9 @@ PRIVATE void select_cancel_all(struct selectentry *e)
 	}
 
 	if (e->expiry > 0) {
+#if DEBUG_SELECT
+		printf("cancelling timer %d\n", e - selecttab);
+#endif
 		fs_cancel_timer(&e->timer); 
 		e->expiry = 0;
 	}
@@ -447,6 +495,9 @@ PRIVATE int select_reevaluate(struct filp *fp)
 	 * still in the market for it.
 	 */
 	fp->filp_select_ops = remain_ops;
+#if DEBUG_SELECT
+	printf("remaining operations on fp are %d\n", fp->filp_select_ops);
+#endif
 
 	return remain_ops;
 }
@@ -502,11 +553,18 @@ PUBLIC int select_notified(int major, int minor, int selected_ops)
 {
 	int s, f, t;
 
+#if DEBUG_SELECT
+	printf("select callback: %d, %d: %d\n", major, minor, selected_ops);
+#endif
+
 	for(t = 0; t < SEL_FDS; t++)
 		if (!fdtypes[t].select_match && fdtypes[t].select_major == major)
 		    	break;
 
 	if (t >= SEL_FDS) {
+#if DEBUG_SELECT
+		printf("select callback: no fdtype found for device %d\n", major);
+#endif
 		return OK;
 	}
 
@@ -564,6 +622,9 @@ PUBLIC void select_forget(int proc)
 	}
 
 	if (s >= MAXSELECTS) {
+#if DEBUG_SELECT
+		printf("select: cancelled select() not found");
+#endif
 		return;
 	}
 
@@ -583,14 +644,23 @@ PUBLIC void select_timeout_check(timer_t *timer)
 	s = tmr_arg(timer)->ta_int;
 
 	if (s < 0 || s >= MAXSELECTS) {
+#if DEBUG_SELECT
+		printf("select: bogus slot arg to watchdog %d\n", s);
+#endif
 		return;
 	}
 
 	if (!selecttab[s].requestor) {
+#if DEBUG_SELECT
+		printf("select: no requestor in watchdog\n");
+#endif
 		return;
 	}
 
 	if (selecttab[s].expiry <= 0) {
+#if DEBUG_SELECT
+		printf("select: strange expiry value in watchdog\n", s);
+#endif
 		return;
 	}
 
