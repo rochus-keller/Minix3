@@ -1,30 +1,38 @@
 # Makefile for system headers
-# Modified for TCC compilation - installs modified headers
+# Modified for TCC cross-compilation - Local install only
 
-INC=/usr/include
+INC=./usr/include
 
 all::
 	@echo "Headers ready for installation"
 
 clean::
-	@echo "Nothing to clean in headers"
+	@echo "Cleaning local header installation..."
+	rm -rf ./usr
 
-install::
-	@echo "Installing Minix headers to $(INC)..."
-	-rm -rf $(INC)/minix $(INC)/sys $(INC)/ibm
-	mkdir -p $(INC)
-	cp -r . $(INC)
-	@chown -R bin $(INC) 2>/dev/null || true
-	@rm -f $(INC)/Makefile
-	@echo "Headers installed successfully"
-
-# Alternative: Install to local directory for cross-compilation
 install-local:
-	@echo "Installing headers to ./usr/include for local build..."
-	mkdir -p ./usr/include
-	cp -r . ./usr/include/
-	@rm -f ./usr/include/Makefile
-	@echo "Local headers installed"
+	@echo "Installing Minix headers to $(INC)..."
+	@# Remove old installation
+	rm -rf $(INC)
+	@# Create fresh directory structure
+	mkdir -p $(INC)/minix
+	mkdir -p $(INC)/sys
+	mkdir -p $(INC)/ibm
+	@# Copy headers, excluding usr directory and Makefile
+	@echo "Copying top-level headers..."
+	@for f in *.h; do \
+		test -f "$$f" && cp "$$f" $(INC)/ || true; \
+	done
+	@echo "Copying minix/ headers..."
+	@test -d minix && cp minix/*.h $(INC)/minix/ 2>/dev/null || true
+	@echo "Copying sys/ headers..."
+	@test -d sys && cp sys/*.h $(INC)/sys/ 2>/dev/null || true
+	@echo "Copying ibm/ headers..."
+	@test -d ibm && cp ibm/*.h $(INC)/ibm/ 2>/dev/null || true
+	@echo "Headers installed successfully to $(INC)"
 
-.PHONY: all clean install install-local
+# Alias for compatibility  
+install: install-local
+
+.PHONY: all clean install-local install
 

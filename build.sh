@@ -1,7 +1,6 @@
 #!/bin/bash
 # Master build script for Minix 3 with TCC
-# Based on Minix 3 book version (www.minix3.org/doc/AppendixB.html)
-# Modified for TCC i386 compilation
+# Cross-compilation only - local installation
 
 set -e  # Exit on error
 
@@ -15,7 +14,6 @@ NC='\033[0m' # No Color
 # Configuration
 MINIX_ROOT=$(pwd)
 BUILD_JOBS=${BUILD_JOBS:-1}
-INSTALL_SYSTEM=${INSTALL_SYSTEM:-no}  # Set to 'yes' for system-wide install
 
 # Export compiler settings
 export CC=tcc
@@ -25,13 +23,13 @@ export AR=ar
 export RANLIB=ranlib
 
 echo -e "${BLUE}========================================${NC}"
-echo -e "${BLUE}Minix 3 Build System for TCC${NC}"
+echo -e "${BLUE}Minix 3 Cross-Compilation for TCC${NC}"
 echo -e "${BLUE}========================================${NC}"
 echo ""
 echo "Build root: $MINIX_ROOT"
 echo "Compiler: $CC"
 echo "Architecture: i386"
-echo "System install: $INSTALL_SYSTEM"
+echo "Mode: Cross-compilation (local headers only)"
 echo ""
 
 # Function to print status
@@ -57,19 +55,6 @@ build_component() {
     make clean 2>/dev/null || true
     make build
     echo ""
-}
-
-# Function to install a component (optional)
-install_component() {
-    local dir=$1
-    local name=$2
-    
-    if [ "$INSTALL_SYSTEM" = "yes" ]; then
-        print_status "Installing $name..."
-        cd "$MINIX_ROOT/$dir"
-        sudo make install
-        echo ""
-    fi
 }
 
 # Check prerequisites
@@ -102,19 +87,14 @@ echo ""
 # PHASE 1: Headers
 # ========================================
 echo -e "${BLUE}========================================${NC}"
-echo -e "${BLUE}PHASE 1: Installing Headers${NC}"
+echo -e "${BLUE}PHASE 1: Installing Headers (Local)${NC}"
 echo -e "${BLUE}========================================${NC}"
 echo ""
 
 cd "$MINIX_ROOT/include"
 
-if [ "$INSTALL_SYSTEM" = "yes" ]; then
-    print_status "Installing headers to /usr/include (requires root)..."
-    sudo make install
-else
-    print_status "Installing headers locally to ./usr/include..."
-    make install-local
-fi
+print_status "Installing headers locally to ./usr/include..."
+make install-local
 
 print_status "Headers installed successfully"
 echo ""
@@ -128,10 +108,7 @@ echo -e "${BLUE}========================================${NC}"
 echo ""
 
 build_component "drivers/libdriver" "libdriver (Driver Framework)"
-install_component "drivers/libdriver" "libdriver"
-
 build_component "drivers/libpci" "libpci (PCI Bus Support)"
-install_component "drivers/libpci" "libpci"
 
 print_status "Driver libraries completed"
 echo ""
@@ -146,7 +123,6 @@ echo ""
 
 build_component "kernel/system" "Kernel System Call Handlers"
 build_component "kernel" "Minix Kernel"
-install_component "kernel" "Kernel"
 
 print_status "Kernel completed"
 echo ""
@@ -160,16 +136,9 @@ echo -e "${BLUE}========================================${NC}"
 echo ""
 
 build_component "servers/pm" "Process Manager (PM)"
-install_component "servers/pm" "PM"
-
 build_component "servers/fs" "File System (FS)"
-install_component "servers/fs" "FS"
-
 build_component "servers/rs" "Reincarnation Server (RS)"
-install_component "servers/rs" "RS"
-
 build_component "servers/init" "Init Process"
-install_component "servers/init" "Init"
 
 print_status "System servers completed"
 echo ""
@@ -184,20 +153,12 @@ echo ""
 
 # Build keymaps first
 build_component "drivers/tty/keymaps" "Keyboard Maps"
-install_component "drivers/tty/keymaps" "Keyboard Maps"
 
 # Build drivers
 build_component "drivers/tty" "TTY Driver (Terminal/Console)"
-install_component "drivers/tty" "TTY"
-
 build_component "drivers/memory" "Memory Driver"
-install_component "drivers/memory" "Memory"
-
 build_component "drivers/at_wini" "AT_WINI Driver (Disk Controller)"
-install_component "drivers/at_wini" "AT_WINI"
-
 build_component "drivers/log" "Log Driver (System Logging)"
-install_component "drivers/log" "Log"
 
 print_status "Device drivers completed"
 echo ""
@@ -216,7 +177,8 @@ print_status "Verifying build outputs..."
 
 # Check kernel
 if [ -f "kernel/kernel" ]; then
-    echo -e "  ${GREEN}✓${NC} kernel/kernel ($(stat -f%z kernel/kernel 2>/dev/null || stat -c%s kernel/kernel 2>/dev/null) bytes)"
+    SIZE=$(stat -c%s kernel/kernel 2>/dev/null || stat -f%z kernel/kernel 2>/dev/null)
+    echo -e "  ${GREEN}✓${NC} kernel/kernel ($SIZE bytes)"
 else
     echo -e "  ${RED}✗${NC} kernel/kernel - MISSING"
 fi
@@ -233,8 +195,6 @@ done
 # Check RS service utility
 if [ -f "servers/rs/service" ]; then
     echo -e "  ${GREEN}✓${NC} servers/rs/service (utility)"
-else
-    echo -e "  ${RED}✗${NC} servers/rs/service - MISSING"
 fi
 
 # Check drivers
@@ -262,22 +222,15 @@ echo -e "${GREEN}========================================${NC}"
 echo ""
 
 echo "Build artifacts:"
+echo "  - Headers:     ./usr/include/"
 echo "  - Kernel:      kernel/kernel"
 echo "  - Servers:     servers/{pm,fs,rs,init}/"
 echo "  - Drivers:     drivers/{tty,memory,at_wini,log}/"
 echo "  - Libraries:   drivers/{libdriver,libpci}/"
 echo ""
 
-if [ "$INSTALL_SYSTEM" != "yes" ]; then
-    print_warning "System installation was not performed."
-    echo "To install system-wide, run:"
-    echo "  INSTALL_SYSTEM=yes ./build.sh"
-fi
-
-echo ""
 echo "Next steps:"
-echo "  1. Review the build outputs above"
-echo "  2. Create a boot image with these components"
-echo "  3. Test the system in an emulator (QEMU, Bochs, etc.)"
+echo "  1. Create boot image: ./mkbootimg.sh"
+echo "  2. Test in QEMU: ./run-qemu.sh"
 echo ""
 
