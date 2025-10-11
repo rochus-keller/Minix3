@@ -67,7 +67,6 @@ ALL	= \
 	cp \
 	crc \
 	cut \
-	date \
 	dd \
 	decomp16 \
 	dev2name \
@@ -77,6 +76,7 @@ ALL	= \
 	diff \
 	dirname \
 	du \
+	dumpcore \
 	ed \
 	eject \
 	env \
@@ -274,7 +274,7 @@ chmem:	chmem.c
 
 chmod:	chmod.c
 	$(CCLD) -o $@ $?
-	@install -S 4kw $@
+	@install -S 16kw $@
 
 chown:	chown.c
 	$(CCLD) -o $@ $?
@@ -324,10 +324,6 @@ cut:	cut.c
 	$(CCLD) -o $@ $?
 	@install -S 4kw $@
 
-date:	date.c
-	$(CCLD) -o $@ $?
-	@install -S 4kw $@
-
 dd:	dd.c
 	$(CCLD) -o $@ $?
 	@install -S 20kw $@
@@ -354,7 +350,7 @@ dhrystone:	dhrystone.c
 
 diff:	diff.c
 	$(CCLD) -o $@ $?
-	@install -S 40kw $@
+	@install -S 512kw $@
 
 dirname:	dirname.c
 	$(CCLD) -o $@ $?
@@ -363,6 +359,10 @@ dirname:	dirname.c
 du:	du.c
 	$(CCLD) -o $@ $?
 	@install -S 256kw $@
+
+dumpcore:	dumpcore.c
+	$(CCLD) -D_SYSTEM=1 -o $@ $? -lsysutil -lsys 
+	@install -S 32k $@
 
 ed:	ed.c
 	$(CCLD) -o $@ $?
@@ -374,7 +374,7 @@ eject:	eject.c
 
 env:	env.c
 	$(CCLD) -o $@ $?
-	@install -S 4kw $@
+	@install -S 50k $@
 
 expand:	expand.c
 	$(CCLD) -o $@ $?
@@ -414,7 +414,7 @@ fortune:	fortune.c
 
 fsck:	fsck.c
 	$(CCLD) -o $@ $?
-	@install -S 4096k $@
+	@install -S 6144k $@
 
 fsck1:	fsck1.c
 	$(CCLD) -o $@ $?
@@ -462,7 +462,7 @@ in.fingerd:	in.fingerd.c
 
 in.rshd:	in.rshd.c
 	$(CCLD) -o $@ in.rshd.c
-	@install -S 4kw $@
+	@install -S 8kw $@
 
 installx:	install.c	# Note: avoided confict with 'install' rule.
 	$(CCLD) -o $@ $?
@@ -546,7 +546,7 @@ mkfifo:	mkfifo.c
 
 mkfs:	mkfs.c
 	$(CCLD) -o $@ $?
-	@install -S 20kw $@
+	@install -S 25kw $@
 
 mknod:	mknod.c
 	$(CCLD) -o $@ $?
@@ -566,7 +566,7 @@ modem:	modem.c
 
 mount:	mount.c
 	$(CCLD) -o $@ $?
-	@install -S 4kw $@
+	@install -S 12kw $@
 
 mt:	mt.c
 	$(CCLD) -o $@ $?
@@ -774,7 +774,7 @@ tar:	tar.c
 
 tcpd:	tcpd.c
 	$(CCLD) -o $@ -DPARANOID=0 tcpd.c
-	@install -S 4kw $@
+	@install -S 8kw $@
 
 tcpdp:	tcpd.c
 	$(CCLD) -o $@ -DPARANOID=1 tcpd.c
@@ -945,7 +945,6 @@ install:	\
 		/bin/rm \
 	/usr/bin/crc \
 	/usr/bin/cut \
-	/usr/bin/date \
 	/usr/bin/dd \
 	/usr/bin/decomp16 \
 	/bin/dev2name \
@@ -955,6 +954,7 @@ install:	\
 	/usr/bin/diff \
 	/usr/bin/dirname \
 	/usr/bin/du \
+	/usr/bin/dumpcore \
 	/usr/bin/ed \
 	/usr/bin/eject \
 	/usr/bin/env \
@@ -1108,7 +1108,6 @@ install:	\
 	/usr/bin/yes \
 	/usr/bin/udpstat \
 	/bin/cat \
-	/bin/date \
 	/bin/fsck \
 	/bin/intr \
 	/bin/mount \
@@ -1221,9 +1220,6 @@ install:	\
 /usr/bin/cut:	cut
 	install -cs -o bin $? $@
 
-/usr/bin/date:	date
-	install -cs -o bin $? $@
-
 /usr/bin/dd:	dd
 	install -cs -o bin $? $@
 
@@ -1249,6 +1245,9 @@ install:	\
 	install -cs -o bin $? $@
 
 /usr/bin/du:	du
+	install -cs -o bin $? $@
+
+/usr/bin/dumpcore:	dumpcore
 	install -cs -o bin $? $@
 
 /usr/bin/ed:	ed
@@ -1459,7 +1458,7 @@ install:	\
 	install -cs -o root -m 4755 $? $@
 
 /usr/bin/progressbar:	progressbar
-	install -cs -o root -m 4755 $? $@
+	install -cs -o root -m 755 $? $@
 
 /usr/bin/prep:	prep
 	install -cs -o bin $? $@
@@ -1618,7 +1617,7 @@ install:	\
 	install -cs -o bin $? $@
 
 /usr/bin/top:	top
-	install -cs -o bin $? $@
+	install -cs -o root -m 4755 $? $@
 
 /usr/bin/touch:	touch
 	install -cs -o bin $? $@
@@ -1702,9 +1701,6 @@ install:	\
 	install -cs -o bin $? $@
 
 /bin/cat:	/usr/bin/cat
-	install -lcs $? $@
-
-/bin/date:	/usr/bin/date
 	install -lcs $? $@
 
 /bin/fsck:	/usr/bin/fsck

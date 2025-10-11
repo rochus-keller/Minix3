@@ -39,6 +39,8 @@ all-ack: makefiles
 	cd regex && $(MAKE) $@
 	mkdir -p obj-ack//./stdio
 	cd stdio && $(MAKE) $@
+	mkdir -p obj-ack//./stdtime
+	cd stdtime && $(MAKE) $@
 	mkdir -p obj-ack//./syscall
 	cd syscall && $(MAKE) $@
 	mkdir -p obj-ack//./syslib
@@ -51,8 +53,6 @@ all-ack: makefiles
 	cd timers && $(MAKE) $@
 	mkdir -p obj-ack//./i386
 	cd i386 && $(MAKE) $@
-	mkdir -p obj-ack//./zlib-1.2.3
-	cd zlib-1.2.3 && $(MAKE) $@
 	mkdir -p obj-ack//./ack
 	cd ack && $(MAKE) $@
 	mkdir -p obj-ack//./gnu
@@ -81,6 +81,8 @@ all-gnu: makefiles
 	cd regex && $(MAKE) $@
 	mkdir -p obj-gnu/./stdio
 	cd stdio && $(MAKE) $@
+	mkdir -p obj-gnu/./stdtime
+	cd stdtime && $(MAKE) $@
 	mkdir -p obj-gnu/./syscall
 	cd syscall && $(MAKE) $@
 	mkdir -p obj-gnu/./syslib
@@ -93,8 +95,6 @@ all-gnu: makefiles
 	cd timers && $(MAKE) $@
 	mkdir -p obj-gnu/./i386
 	cd i386 && $(MAKE) $@
-	mkdir -p obj-gnu/./zlib-1.2.3
-	cd zlib-1.2.3 && $(MAKE) $@
 	mkdir -p obj-gnu/./ack
 	cd ack && $(MAKE) $@
 	mkdir -p obj-gnu/./gnu
@@ -112,13 +112,13 @@ clean depend depend-ack depend-gnu:: makefiles
 	cd posix && $(MAKE) $@
 	cd regex && $(MAKE) $@
 	cd stdio && $(MAKE) $@
+	cd stdtime && $(MAKE) $@
 	cd syscall && $(MAKE) $@
 	cd syslib && $(MAKE) $@
 	cd util && $(MAKE) $@
 	cd sysutil && $(MAKE) $@
 	cd timers && $(MAKE) $@
 	cd i386 && $(MAKE) $@
-	cd zlib-1.2.3 && $(MAKE) $@
 	cd ack && $(MAKE) $@
 	cd gnu && $(MAKE) $@
 
@@ -133,13 +133,13 @@ makefiles: other/Makefile
 makefiles: posix/Makefile
 makefiles: regex/Makefile
 makefiles: stdio/Makefile
+makefiles: stdtime/Makefile
 makefiles: syscall/Makefile
 makefiles: syslib/Makefile
 makefiles: util/Makefile
 makefiles: sysutil/Makefile
 makefiles: timers/Makefile
 makefiles: i386/Makefile
-makefiles: zlib-1.2.3/Makefile
 makefiles: ack/Makefile
 makefiles: gnu/Makefile
 
@@ -165,6 +165,8 @@ regex/Makefile: regex/Makefile.in
 	cd regex && sh ../generate.sh ./regex ../obj-ack/ ../obj-gnu && $(MAKE) makefiles
 stdio/Makefile: stdio/Makefile.in
 	cd stdio && sh ../generate.sh ./stdio ../obj-ack/ ../obj-gnu && $(MAKE) makefiles
+stdtime/Makefile: stdtime/Makefile.in
+	cd stdtime && sh ../generate.sh ./stdtime ../obj-ack/ ../obj-gnu && $(MAKE) makefiles
 syscall/Makefile: syscall/Makefile.in
 	cd syscall && sh ../generate.sh ./syscall ../obj-ack/ ../obj-gnu && $(MAKE) makefiles
 syslib/Makefile: syslib/Makefile.in
@@ -177,8 +179,6 @@ timers/Makefile: timers/Makefile.in
 	cd timers && sh ../generate.sh ./timers ../obj-ack/ ../obj-gnu && $(MAKE) makefiles
 i386/Makefile: i386/Makefile.in
 	cd i386 && sh ../generate.sh ./i386 ../obj-ack/ ../obj-gnu && $(MAKE) makefiles
-zlib-1.2.3/Makefile: zlib-1.2.3/Makefile.in
-	cd zlib-1.2.3 && sh ../generate.sh ./zlib-1.2.3 ../obj-ack/ ../obj-gnu && $(MAKE) makefiles
 ack/Makefile: ack/Makefile.in
 	cd ack && sh ../generate.sh ./ack ../obj-ack/ ../obj-gnu && $(MAKE) makefiles
 gnu/Makefile: gnu/Makefile.in

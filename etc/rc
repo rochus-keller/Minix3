@@ -49,7 +49,6 @@ start)
     test -f /etc/keymap && loadkeys /etc/keymap
 
     up is -period 5HZ
-    up cmos -dev /dev/cmos -period 5HZ
     echo .
 
     # Set timezone.
@@ -169,7 +168,7 @@ esac
 # Further initialization.
 test -f /usr/etc/rc && sh /usr/etc/rc $action
 test -f /usr/local/etc/rc && sh /usr/local/etc/rc $action
-test -f /etc/rc.rescue && sh /etc/rc.rescue $action
+#test -f /etc/rc.rescue && sh /etc/rc.rescue $action
 
 # Any messages?
 test "$action" = start -a -f /etc/issue && cat /etc/issue

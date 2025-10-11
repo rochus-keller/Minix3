@@ -1,0 +1,947 @@
+Auf Branch 3.1.3
+Zum Commit vorgemerkte Änderungen:
+  (benutzen Sie "git restore --staged <Datei>..." zum Entfernen aus der Staging-Area)
+	umbenannt:      servers/fs/Makefile -> servers/mfs/Makefile
+	umbenannt:      servers/fs/buf.h -> servers/mfs/buf.h
+	umbenannt:      servers/fs/cache.c -> servers/mfs/cache.c
+	umbenannt:      servers/fs/cache2.c -> servers/mfs/cache2.c
+	umbenannt:      servers/fs/const.h -> servers/mfs/const.h
+	umbenannt:      servers/fs/device.c -> servers/mfs/device.c
+	umbenannt:      servers/fs/dmap.c -> servers/mfs/dmap.c
+	umbenannt:      servers/fs/file.h -> servers/mfs/file.h
+	umbenannt:      servers/fs/filedes.c -> servers/mfs/filedes.c
+	umbenannt:      servers/fs/fproc.h -> servers/mfs/fproc.h
+	umbenannt:      servers/fs/fs.h -> servers/mfs/fs.h
+	umbenannt:      servers/fs/glo.h -> servers/mfs/glo.h
+	umbenannt:      servers/fs/inode.c -> servers/mfs/inode.c
+	umbenannt:      servers/fs/inode.h -> servers/mfs/inode.h
+	umbenannt:      servers/fs/link.c -> servers/mfs/link.c
+	umbenannt:      servers/fs/lock.c -> servers/mfs/lock.c
+	umbenannt:      servers/fs/lock.h -> servers/mfs/lock.h
+	umbenannt:      servers/fs/main.c -> servers/mfs/main.c
+	umbenannt:      servers/fs/misc.c -> servers/mfs/misc.c
+	umbenannt:      servers/fs/mount.c -> servers/mfs/mount.c
+	umbenannt:      servers/fs/open.c -> servers/mfs/open.c
+	umbenannt:      servers/fs/param.h -> servers/mfs/param.h
+	umbenannt:      servers/fs/path.c -> servers/mfs/path.c
+	umbenannt:      servers/fs/pipe.c -> servers/mfs/pipe.c
+	umbenannt:      servers/fs/protect.c -> servers/mfs/protect.c
+	umbenannt:      servers/fs/proto.h -> servers/mfs/proto.h
+	umbenannt:      servers/fs/read.c -> servers/mfs/read.c
+	umbenannt:      servers/fs/select.c -> servers/mfs/select.c
+	umbenannt:      servers/fs/select.h -> servers/mfs/select.h
+	umbenannt:      servers/fs/stadir.c -> servers/mfs/stadir.c
+	umbenannt:      servers/fs/super.c -> servers/mfs/super.c
+	umbenannt:      servers/fs/super.h -> servers/mfs/super.h
+	umbenannt:      servers/fs/table.c -> servers/mfs/table.c
+	umbenannt:      servers/fs/time.c -> servers/mfs/time.c
+	umbenannt:      servers/fs/timers.c -> servers/mfs/timers.c
+	umbenannt:      servers/fs/type.h -> servers/mfs/type.h
+	umbenannt:      servers/fs/utility.c -> servers/mfs/utility.c
+	umbenannt:      servers/fs/write.c -> servers/mfs/write.c
+
+Änderungen, die nicht zum Commit vorgemerkt sind:
+  (benutzen Sie "git add/rm <Datei>...", um die Änderungen zum Commit vorzumerken)
+  (benutzen Sie "git restore <Datei>...", um die Änderungen im Arbeitsverzeichnis zu verwerfen)
+	gelöscht:       3.1.2_vs_3.1.0.changes
+	geändert:       boot/boot.c
+	geändert:       boot/boothead.s
+	geändert:       boot/bootimage.c
+	geändert:       boot/rawfs.c
+	geändert:       commands/Makefile
+	geändert:       commands/ash/Makefile
+	geändert:       commands/ash/TOUR
+	geändert:       commands/ash/bltin/bltin.h
+	geändert:       commands/ash/bltin/echo.c
+	geändert:       commands/ash/bltin/expr.c
+	geändert:       commands/ash/bltin/mkexpr
+	geändert:       commands/ash/bltin/regexp.c
+	geändert:       commands/ash/bltin/unary_op
+	gelöscht:       commands/ash/build
+	gelöscht:       commands/ash/builtins.table
+	geändert:       commands/ash/cd.c
+	gelöscht:       commands/ash/dirent.c
+	geändert:       commands/ash/error.c
+	geändert:       commands/ash/error.h
+	geändert:       commands/ash/eval.c
+	geändert:       commands/ash/eval.h
+	geändert:       commands/ash/exec.c
+	geändert:       commands/ash/exec.h
+	geändert:       commands/ash/expand.c
+	geändert:       commands/ash/expand.h
+	geändert:       commands/ash/funcs/cmv
+	geändert:       commands/ash/funcs/dirs
+	geändert:       commands/ash/funcs/kill
+	geändert:       commands/ash/funcs/login
+	geändert:       commands/ash/funcs/newgrp
+	geändert:       commands/ash/funcs/popd
+	geändert:       commands/ash/funcs/pushd
+	geändert:       commands/ash/funcs/suspend
+	geändert:       commands/ash/init.h
+	geändert:       commands/ash/input.c
+	geändert:       commands/ash/input.h
+	geändert:       commands/ash/jobs.c
+	geändert:       commands/ash/jobs.h
+	geändert:       commands/ash/machdep.h
+	geändert:       commands/ash/mail.c
+	geändert:       commands/ash/mail.h
+	geändert:       commands/ash/main.c
+	geändert:       commands/ash/main.h
+	geändert:       commands/ash/memalloc.c
+	geändert:       commands/ash/memalloc.h
+	geändert:       commands/ash/miscbltin.c
+	geändert:       commands/ash/mkbuiltins
+	geändert:       commands/ash/mkinit.c
+	geändert:       commands/ash/mknodes.c
+	geändert:       commands/ash/mksignames.c
+	geändert:       commands/ash/mksyntax.c
+	geändert:       commands/ash/mktokens
+	geändert:       commands/ash/mystring.c
+	geändert:       commands/ash/mystring.h
+	geändert:       commands/ash/nodes.c.pat
+	geändert:       commands/ash/nodetypes
+	geändert:       commands/ash/options.c
+	geändert:       commands/ash/options.h
+	geändert:       commands/ash/output.c
+	geändert:       commands/ash/output.h
+	geändert:       commands/ash/parser.c
+	geändert:       commands/ash/parser.h
+	geändert:       commands/ash/redir.c
+	geändert:       commands/ash/redir.h
+	geändert:       commands/ash/shell.h
+	geändert:       commands/ash/show.c
+	gelöscht:       commands/ash/sys/cdefs.h
+	gelöscht:       commands/ash/test/malloc.c
+	geändert:       commands/ash/trap.c
+	geändert:       commands/ash/trap.h
+	geändert:       commands/ash/var.c
+	geändert:       commands/ash/var.h
+	gelöscht:       commands/awk/NOTE
+	geändert:       commands/bzip2-1.0.3/Makefile
+	geändert:       commands/de/de.c
+	geändert:       commands/de/de_diskio.c
+	geändert:       commands/de/de_recover.c
+	geändert:       commands/de/de_stdin.c
+	geändert:       commands/de/de_stdout.c
+	geändert:       commands/dhcpd/devices.c
+	geändert:       commands/elle/eesite.c
+	geändert:       commands/elle/sbproto.h
+	geändert:       commands/elvis/Makefile
+	geändert:       commands/i386/Makefile
+	geändert:       commands/ibm/Makefile
+	geändert:       commands/ibm/autopart.c
+	gelöscht:       commands/ibm/backup.c
+	geändert:       commands/ibm/postmort.c
+	gelöscht:       commands/ibm/readclock.c
+	gelöscht:       commands/ibm/readclock2
+	geändert:       commands/ibm/sdump.c
+	geändert:       commands/mdb/core.c
+	geändert:       commands/mdb/kernel.c
+	geändert:       commands/mdb/mdb.c
+	geändert:       commands/pax/tar.c
+	geändert:       commands/ps/Makefile
+	geändert:       commands/ps/ps.c
+	geändert:       commands/scripts/MAKEDEV.sh
+	geändert:       commands/scripts/Makefile
+	geändert:       commands/scripts/binpackage.sh
+	geändert:       commands/scripts/binsizes.sh
+	geändert:       commands/scripts/easypack.sh
+	geändert:       commands/scripts/makewhatis.sh
+	geändert:       commands/scripts/mkdep.sh
+	geändert:       commands/scripts/packman.sh
+	geändert:       commands/scripts/setup.sh
+	geändert:       commands/simple/Makefile
+	geändert:       commands/simple/badblocks.c
+	geändert:       commands/simple/cdprobe.c
+	geändert:       commands/simple/df.c
+	geändert:       commands/simple/fsck.c
+	geändert:       commands/simple/fsck1.c
+	geändert:       commands/simple/man.c
+	geändert:       commands/simple/mkfs.c
+	geändert:       commands/simple/mkswap.c
+	geändert:       commands/simple/mount.c
+	geändert:       commands/simple/readfs.c
+	geändert:       commands/simple/sysenv.c
+	geändert:       commands/simple/tar.c
+	geändert:       commands/simple/tcpd.c
+	geändert:       commands/simple/tcpstat.c
+	geändert:       commands/simple/top.c
+	geändert:       commands/simple/udpstat.c
+	geändert:       commands/simple/umount.c
+	gelöscht:       commands/syslogd/.depend
+	geändert:       drivers/Makefile
+	geändert:       drivers/at_wini/Makefile
+	geändert:       drivers/at_wini/at_wini.c
+	geändert:       drivers/at_wini/at_wini.h
+	geändert:       drivers/bios_wini/Makefile
+	geändert:       drivers/bios_wini/bios_wini.c
+	gelöscht:       drivers/cmos/Makefile
+	gelöscht:       drivers/cmos/cmos.c
+	geändert:       drivers/dp8390/Makefile
+	geändert:       drivers/dp8390/dp8390.c
+	geändert:       drivers/dp8390/dp8390.h
+	geändert:       drivers/dpeth/3c509.c
+	geändert:       drivers/dpeth/8390.c
+	geändert:       drivers/dpeth/Makefile
+	geändert:       drivers/dpeth/devio.c
+	geändert:       drivers/dpeth/dp.c
+	geändert:       drivers/dpeth/dp.h
+	geändert:       drivers/dpeth/netbuff.c
+	geändert:       drivers/floppy/Makefile
+	geändert:       drivers/floppy/floppy.c
+	geändert:       drivers/fxp/Makefile
+	geändert:       drivers/fxp/fxp.c
+	geändert:       drivers/lance/Makefile
+	geändert:       drivers/lance/lance.c
+	geändert:       drivers/lance/lance.h
+	geändert:       drivers/libdriver/Makefile
+	geändert:       drivers/libdriver/driver.c
+	geändert:       drivers/libdriver/driver.h
+	geändert:       drivers/libdriver/drvlib.c
+	geändert:       drivers/log/Makefile
+	geändert:       drivers/log/diag.c
+	geändert:       drivers/log/kputc.c
+	geändert:       drivers/log/log.c
+	geändert:       drivers/log/log.h
+	geändert:       drivers/memory/Makefile
+	geändert:       drivers/memory/memory.c
+	geändert:       drivers/memory/ramdisk/Makefile
+	geändert:       drivers/memory/ramdisk/proto
+	geändert:       drivers/memory/ramdisk/proto.sh
+	geändert:       drivers/memory/ramdisk/rc
+	geändert:       drivers/pci/Makefile
+	geändert:       drivers/pci/main.c
+	geändert:       drivers/pci/pci.c
+	geändert:       drivers/pci/pci.h
+	geändert:       drivers/printer/Makefile
+	geändert:       drivers/printer/printer.c
+	geändert:       drivers/random/Makefile
+	geändert:       drivers/random/main.c
+	gelöscht:       drivers/rescue/Makefile
+	gelöscht:       drivers/rescue/rescue.c
+	geändert:       drivers/rtl8139/Makefile
+	geändert:       drivers/rtl8139/rtl8139.c
+	geändert:       drivers/sb16/Makefile
+	geändert:       drivers/sb16/sb16_dsp.c
+	geändert:       drivers/sb16/sb16_mixer.c
+	geändert:       drivers/ti1225/Makefile
+	geändert:       drivers/tty/Makefile
+	geändert:       drivers/tty/console.c
+	geändert:       drivers/tty/keyboard.c
+	geändert:       drivers/tty/keymaps/Makefile
+	geändert:       drivers/tty/pty.c
+	geändert:       drivers/tty/rs232.c
+	geändert:       drivers/tty/tty.c
+	geändert:       drivers/tty/tty.h
+	geändert:       etc/Makefile
+	gelöscht:       etc/ast/.vimrc
+	geändert:       etc/binary_sizes
+	geändert:       etc/binary_sizes.xxl
+	geändert:       etc/motd
+	geändert:       etc/mtree/minix.tree
+	geändert:       etc/rc
+	geändert:       etc/services
+	geändert:       etc/usr/rc
+	geändert:       include/Makefile
+	geändert:       include/arpa/inet.h
+	geändert:       include/assert.h
+	geändert:       include/dirent.h
+	geändert:       include/env.h
+	geändert:       include/errno.h
+	geändert:       include/ibm/interrupt.h
+	gelöscht:       include/ibm/portio.h
+	geändert:       include/minix/bitmap.h
+	geändert:       include/minix/callnr.h
+	geändert:       include/minix/com.h
+	geändert:       include/minix/config.h
+	geändert:       include/minix/const.h
+	geändert:       include/minix/devio.h
+	geändert:       include/minix/ioctl.h
+	geändert:       include/minix/ipc.h
+	gelöscht:       include/minix/jmp_buf.h
+	geändert:       include/minix/paths.h
+	geändert:       include/minix/sys_config.h
+	geändert:       include/minix/syslib.h
+	geändert:       include/minix/type.h
+	geändert:       include/net/ioctl.h
+	geändert:       include/net/netlib.h
+	geändert:       include/setjmp.h
+	geändert:       include/signal.h
+	geändert:       include/stdio.h
+	geändert:       include/stdlib.h
+	geändert:       include/string.h
+	geändert:       include/sys/ioc_cmos.h
+	geändert:       include/sys/ioc_disk.h
+	geändert:       include/sys/ioc_memory.h
+	geändert:       include/sys/ioc_tty.h
+	geändert:       include/sys/ptrace.h
+	geändert:       include/sys/select.h
+	geändert:       include/sys/sigcontext.h
+	geändert:       include/sys/socket.h
+	geändert:       include/sys/stat.h
+	geändert:       include/sys/time.h
+	geändert:       include/sys/types.h
+	geändert:       include/sys/uio.h
+	geändert:       include/sys/utsname.h
+	geändert:       include/unistd.h
+	geändert:       kernel/Makefile
+	geändert:       kernel/clock.c
+	geändert:       kernel/config.h
+	geändert:       kernel/const.h
+	geändert:       kernel/debug.c
+	geändert:       kernel/debug.h
+	gelöscht:       kernel/exception.c
+	geändert:       kernel/glo.h
+	gelöscht:       kernel/i8259.c
+	geändert:       kernel/kernel.h
+	gelöscht:       kernel/klib.s
+	gelöscht:       kernel/klib386.s
+	gelöscht:       kernel/klib88.s
+	gelöscht:       kernel/kprintf.c
+	geändert:       kernel/main.c
+	gelöscht:       kernel/mpx.s
+	gelöscht:       kernel/mpx386.s
+	gelöscht:       kernel/mpx88.s
+	geändert:       kernel/priv.h
+	geändert:       kernel/proc.c
+	geändert:       kernel/proc.h
+	gelöscht:       kernel/protect.c
+	gelöscht:       kernel/protect.h
+	geändert:       kernel/proto.h
+	gelöscht:       kernel/sconst.h
+	geändert:       kernel/start.c
+	geändert:       kernel/system.c
+	geändert:       kernel/system.h
+	geändert:       kernel/system/Makefile
+	geändert:       kernel/system/do_copy.c
+	geändert:       kernel/system/do_devio.c
+	geändert:       kernel/system/do_endksig.c
+	geändert:       kernel/system/do_exec.c
+	geändert:       kernel/system/do_exit.c
+	geändert:       kernel/system/do_fork.c
+	geändert:       kernel/system/do_getinfo.c
+	geändert:       kernel/system/do_getksig.c
+	gelöscht:       kernel/system/do_int86.c
+	gelöscht:       kernel/system/do_iopenable.c
+	geändert:       kernel/system/do_kill.c
+	geändert:       kernel/system/do_newmap.c
+	geändert:       kernel/system/do_nice.c
+	geändert:       kernel/system/do_privctl.c
+	gelöscht:       kernel/system/do_sdevio.c
+	geändert:       kernel/system/do_segctl.c
+	geändert:       kernel/system/do_sigreturn.c
+	geändert:       kernel/system/do_sigsend.c
+	geändert:       kernel/system/do_trace.c
+	geändert:       kernel/system/do_umap.c
+	geändert:       kernel/system/do_vcopy.c
+	geändert:       kernel/system/do_vdevio.c
+	geändert:       kernel/system/do_vm.c
+	geändert:       kernel/table.c
+	geändert:       kernel/type.h
+	geändert:       kernel/utility.c
+	geändert:       lib/Makefile
+	geändert:       lib/Makefile.in
+	geändert:       lib/ack/i386/em/Makefile.in
+	gelöscht:       lib/ack/i386/em/em_adf4.s
+	gelöscht:       lib/ack/i386/em/em_adf8.s
+	gelöscht:       lib/ack/i386/em/em_cff4.s
+	gelöscht:       lib/ack/i386/em/em_cff8.s
+	gelöscht:       lib/ack/i386/em/em_cfi.s
+	gelöscht:       lib/ack/i386/em/em_cfu.s
+	gelöscht:       lib/ack/i386/em/em_cif4.s
+	gelöscht:       lib/ack/i386/em/em_cif8.s
+	gelöscht:       lib/ack/i386/em/em_cmf4.s
+	gelöscht:       lib/ack/i386/em/em_cmf8.s
+	gelöscht:       lib/ack/i386/em/em_cuf4.s
+	gelöscht:       lib/ack/i386/em/em_cuf8.s
+	gelöscht:       lib/ack/i386/em/em_dvf4.s
+	gelöscht:       lib/ack/i386/em/em_dvf8.s
+	gelöscht:       lib/ack/i386/em/em_fef4.s
+	gelöscht:       lib/ack/i386/em/em_fef8.s
+	gelöscht:       lib/ack/i386/em/em_fif4.s
+	gelöscht:       lib/ack/i386/em/em_fif8.s
+	gelöscht:       lib/ack/i386/em/em_mlf4.s
+	gelöscht:       lib/ack/i386/em/em_mlf8.s
+	gelöscht:       lib/ack/i386/em/em_ngf4.s
+	gelöscht:       lib/ack/i386/em/em_ngf8.s
+	gelöscht:       lib/ack/i386/em/em_sbf4.s
+	gelöscht:       lib/ack/i386/em/em_sbf8.s
+	geändert:       lib/ansi/Makefile.in
+	geändert:       lib/ansi/abort.c
+	gelöscht:       lib/ansi/asctime.c
+	gelöscht:       lib/ansi/ctime.c
+	geändert:       lib/ansi/errlist.c
+	gelöscht:       lib/ansi/gmtime.c
+	gelöscht:       lib/ansi/localtime.c
+	geändert:       lib/ansi/misc.c
+	gelöscht:       lib/ansi/mktime.c
+	gelöscht:       lib/ansi/strftime.c
+	geändert:       lib/ansi/system.c
+	gelöscht:       lib/ansi/tzset.c
+	geändert:       lib/editline/editline.c
+	geändert:       lib/generate.sh
+	geändert:       lib/gnu/rts/Makefile.in
+	gelöscht:       lib/gnu/rts/_longjmp.gs
+	gelöscht:       lib/gnu/rts/_setjmp.gs
+	geändert:       lib/gnu/rts/longjmp.gs
+	gelöscht:       lib/gnu/rts/setjmp.gs
+	gelöscht:       lib/i386/em/byte_order.h
+	gelöscht:       lib/i386/em/em_adf4.s
+	gelöscht:       lib/i386/em/em_adf8.s
+	gelöscht:       lib/i386/em/em_adi.s
+	gelöscht:       lib/i386/em/em_and.s
+	gelöscht:       lib/i386/em/em_blm.s
+	gelöscht:       lib/i386/em/em_cff4.s
+	gelöscht:       lib/i386/em/em_cff8.s
+	gelöscht:       lib/i386/em/em_cfi.s
+	gelöscht:       lib/i386/em/em_cfu.s
+	gelöscht:       lib/i386/em/em_cif4.s
+	gelöscht:       lib/i386/em/em_cif8.s
+	gelöscht:       lib/i386/em/em_cii.s
+	gelöscht:       lib/i386/em/em_cmf4.s
+	gelöscht:       lib/i386/em/em_cmf8.s
+	gelöscht:       lib/i386/em/em_cms.s
+	gelöscht:       lib/i386/em/em_com.s
+	gelöscht:       lib/i386/em/em_csa4.s
+	gelöscht:       lib/i386/em/em_csb4.s
+	gelöscht:       lib/i386/em/em_cuf4.s
+	gelöscht:       lib/i386/em/em_cuf8.s
+	gelöscht:       lib/i386/em/em_cuu.s
+	gelöscht:       lib/i386/em/em_dup.s
+	gelöscht:       lib/i386/em/em_dvf4.s
+	gelöscht:       lib/i386/em/em_dvf8.s
+	gelöscht:       lib/i386/em/em_dvi.s
+	gelöscht:       lib/i386/em/em_dvu.s
+	gelöscht:       lib/i386/em/em_error.s
+	gelöscht:       lib/i386/em/em_exg.s
+	gelöscht:       lib/i386/em/em_fat.s
+	gelöscht:       lib/i386/em/em_fef4.s
+	gelöscht:       lib/i386/em/em_fef8.s
+	gelöscht:       lib/i386/em/em_fif4.s
+	gelöscht:       lib/i386/em/em_fif8.s
+	gelöscht:       lib/i386/em/em_fp8087.s
+	gelöscht:       lib/i386/em/em_gto.s
+	gelöscht:       lib/i386/em/em_hol0.s
+	gelöscht:       lib/i386/em/em_iaar.s
+	gelöscht:       lib/i386/em/em_ilar.s
+	gelöscht:       lib/i386/em/em_inn.s
+	gelöscht:       lib/i386/em/em_ior.s
+	gelöscht:       lib/i386/em/em_isar.s
+	gelöscht:       lib/i386/em/em_lar4.s
+	gelöscht:       lib/i386/em/em_loi.s
+	gelöscht:       lib/i386/em/em_mlf4.s
+	gelöscht:       lib/i386/em/em_mlf8.s
+	gelöscht:       lib/i386/em/em_mli.s
+	gelöscht:       lib/i386/em/em_mon.s
+	gelöscht:       lib/i386/em/em_ngf4.s
+	gelöscht:       lib/i386/em/em_ngf8.s
+	gelöscht:       lib/i386/em/em_ngi.s
+	gelöscht:       lib/i386/em/em_nop.s
+	gelöscht:       lib/i386/em/em_print.s
+	gelöscht:       lib/i386/em/em_rck.s
+	gelöscht:       lib/i386/em/em_rmi.s
+	gelöscht:       lib/i386/em/em_rmu.s
+	gelöscht:       lib/i386/em/em_rol.s
+	gelöscht:       lib/i386/em/em_ror.s
+	gelöscht:       lib/i386/em/em_sar4.s
+	gelöscht:       lib/i386/em/em_sbf4.s
+	gelöscht:       lib/i386/em/em_sbf8.s
+	gelöscht:       lib/i386/em/em_sbi.s
+	gelöscht:       lib/i386/em/em_set.s
+	gelöscht:       lib/i386/em/em_sli.s
+	gelöscht:       lib/i386/em/em_sri.s
+	gelöscht:       lib/i386/em/em_sti.s
+	gelöscht:       lib/i386/em/em_stop.s
+	gelöscht:       lib/i386/em/em_trp.s
+	gelöscht:       lib/i386/em/em_unknown.s
+	gelöscht:       lib/i386/em/em_xor.s
+	gelöscht:       lib/i386/head/em_abs.h
+	gelöscht:       lib/i386/head/em_head.s
+	geändert:       lib/ip/accept.c
+	geändert:       lib/ip/domainname.c
+	geändert:       lib/ip/ruserok.c
+	geändert:       lib/ip/send.c
+	geändert:       lib/ip/sendto.c
+	geändert:       lib/ip/servxcheck.c
+	geändert:       lib/ip/strcasecmp.c
+	geändert:       lib/other/Makefile.in
+	gelöscht:       lib/other/_allocmem.c
+	geändert:       lib/other/_brk.c
+	geändert:       lib/other/_devctl.c
+	gelöscht:       lib/other/_freemem.c
+	geändert:       lib/other/_getsysinfo.c
+	geändert:       lib/other/_seekdir.c
+	geändert:       lib/other/fslib.c
+	geändert:       lib/other/fsversion.c
+	geändert:       lib/other/putenv.c
+	geändert:       lib/other/setenv.c
+	geändert:       lib/other/telldir.c
+	geändert:       lib/posix/Makefile.in
+	geändert:       lib/posix/_lstat.c
+	geändert:       lib/posix/_mount.c
+	geändert:       lib/posix/_opendir.c
+	geändert:       lib/posix/_readdir.c
+	geändert:       lib/posix/_select.c
+	geändert:       lib/posix/_sigreturn.c
+	gelöscht:       lib/posix/_sigsetjmp.c
+	gelöscht:       lib/posix/_umount.c
+	geändert:       lib/posix/_uname.c
+	geändert:       lib/posix/getloadavg.c
+	geändert:       lib/stdio/doprnt.c
+	geändert:       lib/syscall/Makefile.in
+	gelöscht:       lib/syscall/allocmem.s
+	gelöscht:       lib/syscall/freemem.s
+	geändert:       lib/syscall/getsysinfo.s
+	geändert:       lib/syslib/Makefile.in
+	geändert:       lib/syslib/panic.c
+	geändert:       lib/syslib/pci_dev_name.c
+	geändert:       lib/syslib/pci_reserve.c
+	geändert:       lib/syslib/pci_slot_name.c
+	geändert:       lib/syslib/sys_fork.c
+	geändert:       lib/syslib/sys_in.c
+	geändert:       lib/syslib/sys_out.c
+	geändert:       lib/syslib/sys_sdevio.c
+	geändert:       lib/syslib/sys_vinb.c
+	geändert:       lib/syslib/sys_vinl.c
+	geändert:       lib/syslib/sys_vinw.c
+	geändert:       lib/syslib/sys_voutb.c
+	geändert:       lib/syslib/sys_voutl.c
+	geändert:       lib/syslib/sys_voutw.c
+	geändert:       lib/sysutil/Makefile.in
+	geändert:       lib/sysutil/env_parse.c
+	geändert:       lib/sysutil/env_prefix.c
+	geändert:       lib/sysutil/kputc.c
+	geändert:       lib/sysutil/tickdelay.c
+	gelöscht:       lib/zlib-1.2.3/ChangeLog
+	gelöscht:       lib/zlib-1.2.3/FAQ
+	gelöscht:       lib/zlib-1.2.3/INDEX
+	gelöscht:       lib/zlib-1.2.3/Makefile.in
+	gelöscht:       lib/zlib-1.2.3/README
+	gelöscht:       lib/zlib-1.2.3/adler32.c
+	gelöscht:       lib/zlib-1.2.3/algorithm.txt
+	gelöscht:       lib/zlib-1.2.3/amiga/Makefile.pup
+	gelöscht:       lib/zlib-1.2.3/amiga/Makefile.sas
+	gelöscht:       lib/zlib-1.2.3/as400/bndsrc
+	gelöscht:       lib/zlib-1.2.3/as400/compile.clp
+	gelöscht:       lib/zlib-1.2.3/as400/readme.txt
+	gelöscht:       lib/zlib-1.2.3/as400/zlib.inc
+	gelöscht:       lib/zlib-1.2.3/compress.c
+	gelöscht:       lib/zlib-1.2.3/configure
+	gelöscht:       lib/zlib-1.2.3/contrib/README.contrib
+	gelöscht:       lib/zlib-1.2.3/contrib/ada/buffer_demo.adb
+	gelöscht:       lib/zlib-1.2.3/contrib/ada/mtest.adb
+	gelöscht:       lib/zlib-1.2.3/contrib/ada/read.adb
+	gelöscht:       lib/zlib-1.2.3/contrib/ada/readme.txt
+	gelöscht:       lib/zlib-1.2.3/contrib/ada/test.adb
+	gelöscht:       lib/zlib-1.2.3/contrib/ada/zlib-streams.adb
+	gelöscht:       lib/zlib-1.2.3/contrib/ada/zlib-streams.ads
+	gelöscht:       lib/zlib-1.2.3/contrib/ada/zlib-thin.adb
+	gelöscht:       lib/zlib-1.2.3/contrib/ada/zlib-thin.ads
+	gelöscht:       lib/zlib-1.2.3/contrib/ada/zlib.adb
+	gelöscht:       lib/zlib-1.2.3/contrib/ada/zlib.ads
+	gelöscht:       lib/zlib-1.2.3/contrib/ada/zlib.gpr
+	gelöscht:       lib/zlib-1.2.3/contrib/asm586/README.586
+	gelöscht:       lib/zlib-1.2.3/contrib/asm586/match.S
+	gelöscht:       lib/zlib-1.2.3/contrib/asm686/README.686
+	gelöscht:       lib/zlib-1.2.3/contrib/asm686/match.S
+	gelöscht:       lib/zlib-1.2.3/contrib/blast/Makefile
+	gelöscht:       lib/zlib-1.2.3/contrib/blast/README
+	gelöscht:       lib/zlib-1.2.3/contrib/blast/blast.c
+	gelöscht:       lib/zlib-1.2.3/contrib/blast/blast.h
+	gelöscht:       lib/zlib-1.2.3/contrib/blast/test.pk
+	gelöscht:       lib/zlib-1.2.3/contrib/blast/test.txt
+	gelöscht:       lib/zlib-1.2.3/contrib/delphi/ZLib.pas
+	gelöscht:       lib/zlib-1.2.3/contrib/delphi/ZLibConst.pas
+	gelöscht:       lib/zlib-1.2.3/contrib/delphi/readme.txt
+	gelöscht:       lib/zlib-1.2.3/contrib/delphi/zlibd32.mak
+	gelöscht:       lib/zlib-1.2.3/contrib/dotzlib/DotZLib.build
+	gelöscht:       lib/zlib-1.2.3/contrib/dotzlib/DotZLib.chm
+	gelöscht:       lib/zlib-1.2.3/contrib/dotzlib/DotZLib.sln
+	gelöscht:       lib/zlib-1.2.3/contrib/dotzlib/DotZLib/AssemblyInfo.cs
+	gelöscht:       lib/zlib-1.2.3/contrib/dotzlib/DotZLib/ChecksumImpl.cs
+	gelöscht:       lib/zlib-1.2.3/contrib/dotzlib/DotZLib/CircularBuffer.cs
+	gelöscht:       lib/zlib-1.2.3/contrib/dotzlib/DotZLib/CodecBase.cs
+	gelöscht:       lib/zlib-1.2.3/contrib/dotzlib/DotZLib/Deflater.cs
+	gelöscht:       lib/zlib-1.2.3/contrib/dotzlib/DotZLib/DotZLib.cs
+	gelöscht:       lib/zlib-1.2.3/contrib/dotzlib/DotZLib/DotZLib.csproj
+	gelöscht:       lib/zlib-1.2.3/contrib/dotzlib/DotZLib/GZipStream.cs
+	gelöscht:       lib/zlib-1.2.3/contrib/dotzlib/DotZLib/Inflater.cs
+	gelöscht:       lib/zlib-1.2.3/contrib/dotzlib/DotZLib/UnitTests.cs
+	gelöscht:       lib/zlib-1.2.3/contrib/dotzlib/LICENSE_1_0.txt
+	gelöscht:       lib/zlib-1.2.3/contrib/dotzlib/readme.txt
+	gelöscht:       lib/zlib-1.2.3/contrib/infback9/README
+	gelöscht:       lib/zlib-1.2.3/contrib/infback9/infback9.c
+	gelöscht:       lib/zlib-1.2.3/contrib/infback9/infback9.h
+	gelöscht:       lib/zlib-1.2.3/contrib/infback9/inffix9.h
+	gelöscht:       lib/zlib-1.2.3/contrib/infback9/inflate9.h
+	gelöscht:       lib/zlib-1.2.3/contrib/infback9/inftree9.c
+	gelöscht:       lib/zlib-1.2.3/contrib/infback9/inftree9.h
+	gelöscht:       lib/zlib-1.2.3/contrib/inflate86/inffas86.c
+	gelöscht:       lib/zlib-1.2.3/contrib/inflate86/inffast.S
+	gelöscht:       lib/zlib-1.2.3/contrib/iostream/test.cpp
+	gelöscht:       lib/zlib-1.2.3/contrib/iostream/zfstream.cpp
+	gelöscht:       lib/zlib-1.2.3/contrib/iostream/zfstream.h
+	gelöscht:       lib/zlib-1.2.3/contrib/iostream2/zstream.h
+	gelöscht:       lib/zlib-1.2.3/contrib/iostream2/zstream_test.cpp
+	gelöscht:       lib/zlib-1.2.3/contrib/iostream3/README
+	gelöscht:       lib/zlib-1.2.3/contrib/iostream3/TODO
+	gelöscht:       lib/zlib-1.2.3/contrib/iostream3/test.cc
+	gelöscht:       lib/zlib-1.2.3/contrib/iostream3/zfstream.cc
+	gelöscht:       lib/zlib-1.2.3/contrib/iostream3/zfstream.h
+	gelöscht:       lib/zlib-1.2.3/contrib/masm686/match.asm
+	gelöscht:       lib/zlib-1.2.3/contrib/masmx64/bld_ml64.bat
+	gelöscht:       lib/zlib-1.2.3/contrib/masmx64/gvmat64.asm
+	gelöscht:       lib/zlib-1.2.3/contrib/masmx64/gvmat64.obj
+	gelöscht:       lib/zlib-1.2.3/contrib/masmx64/inffas8664.c
+	gelöscht:       lib/zlib-1.2.3/contrib/masmx64/inffasx64.asm
+	gelöscht:       lib/zlib-1.2.3/contrib/masmx64/inffasx64.obj
+	gelöscht:       lib/zlib-1.2.3/contrib/masmx64/readme.txt
+	gelöscht:       lib/zlib-1.2.3/contrib/masmx86/bld_ml32.bat
+	gelöscht:       lib/zlib-1.2.3/contrib/masmx86/gvmat32.asm
+	gelöscht:       lib/zlib-1.2.3/contrib/masmx86/gvmat32.obj
+	gelöscht:       lib/zlib-1.2.3/contrib/masmx86/gvmat32c.c
+	gelöscht:       lib/zlib-1.2.3/contrib/masmx86/inffas32.asm
+	gelöscht:       lib/zlib-1.2.3/contrib/masmx86/inffas32.obj
+	gelöscht:       lib/zlib-1.2.3/contrib/masmx86/mkasm.bat
+	gelöscht:       lib/zlib-1.2.3/contrib/masmx86/readme.txt
+	gelöscht:       lib/zlib-1.2.3/contrib/minizip/ChangeLogUnzip
+	gelöscht:       lib/zlib-1.2.3/contrib/minizip/Makefile
+	gelöscht:       lib/zlib-1.2.3/contrib/minizip/crypt.h
+	gelöscht:       lib/zlib-1.2.3/contrib/minizip/ioapi.c
+	gelöscht:       lib/zlib-1.2.3/contrib/minizip/ioapi.h
+	gelöscht:       lib/zlib-1.2.3/contrib/minizip/iowin32.c
+	gelöscht:       lib/zlib-1.2.3/contrib/minizip/iowin32.h
+	gelöscht:       lib/zlib-1.2.3/contrib/minizip/miniunz.c
+	gelöscht:       lib/zlib-1.2.3/contrib/minizip/minizip.c
+	gelöscht:       lib/zlib-1.2.3/contrib/minizip/mztools.c
+	gelöscht:       lib/zlib-1.2.3/contrib/minizip/mztools.h
+	gelöscht:       lib/zlib-1.2.3/contrib/minizip/unzip.c
+	gelöscht:       lib/zlib-1.2.3/contrib/minizip/unzip.h
+	gelöscht:       lib/zlib-1.2.3/contrib/minizip/zip.c
+	gelöscht:       lib/zlib-1.2.3/contrib/minizip/zip.h
+	gelöscht:       lib/zlib-1.2.3/contrib/pascal/example.pas
+	gelöscht:       lib/zlib-1.2.3/contrib/pascal/readme.txt
+	gelöscht:       lib/zlib-1.2.3/contrib/pascal/zlibd32.mak
+	gelöscht:       lib/zlib-1.2.3/contrib/pascal/zlibpas.pas
+	gelöscht:       lib/zlib-1.2.3/contrib/puff/Makefile
+	gelöscht:       lib/zlib-1.2.3/contrib/puff/README
+	gelöscht:       lib/zlib-1.2.3/contrib/puff/puff.c
+	gelöscht:       lib/zlib-1.2.3/contrib/puff/puff.h
+	gelöscht:       lib/zlib-1.2.3/contrib/puff/zeros.raw
+	gelöscht:       lib/zlib-1.2.3/contrib/testzlib/testzlib.c
+	gelöscht:       lib/zlib-1.2.3/contrib/testzlib/testzlib.txt
+	gelöscht:       lib/zlib-1.2.3/contrib/untgz/Makefile
+	gelöscht:       lib/zlib-1.2.3/contrib/untgz/Makefile.msc
+	gelöscht:       lib/zlib-1.2.3/contrib/untgz/untgz.c
+	gelöscht:       lib/zlib-1.2.3/contrib/vstudio/readme.txt
+	gelöscht:       lib/zlib-1.2.3/contrib/vstudio/vc7/miniunz.vcproj
+	gelöscht:       lib/zlib-1.2.3/contrib/vstudio/vc7/minizip.vcproj
+	gelöscht:       lib/zlib-1.2.3/contrib/vstudio/vc7/testzlib.vcproj
+	gelöscht:       lib/zlib-1.2.3/contrib/vstudio/vc7/zlib.rc
+	gelöscht:       lib/zlib-1.2.3/contrib/vstudio/vc7/zlibstat.vcproj
+	gelöscht:       lib/zlib-1.2.3/contrib/vstudio/vc7/zlibvc.def
+	gelöscht:       lib/zlib-1.2.3/contrib/vstudio/vc7/zlibvc.sln
+	gelöscht:       lib/zlib-1.2.3/contrib/vstudio/vc7/zlibvc.vcproj
+	gelöscht:       lib/zlib-1.2.3/contrib/vstudio/vc8/miniunz.vcproj
+	gelöscht:       lib/zlib-1.2.3/contrib/vstudio/vc8/minizip.vcproj
+	gelöscht:       lib/zlib-1.2.3/contrib/vstudio/vc8/testzlib.vcproj
+	gelöscht:       lib/zlib-1.2.3/contrib/vstudio/vc8/testzlibdll.vcproj
+	gelöscht:       lib/zlib-1.2.3/contrib/vstudio/vc8/zlib.rc
+	gelöscht:       lib/zlib-1.2.3/contrib/vstudio/vc8/zlibstat.vcproj
+	gelöscht:       lib/zlib-1.2.3/contrib/vstudio/vc8/zlibvc.def
+	gelöscht:       lib/zlib-1.2.3/contrib/vstudio/vc8/zlibvc.sln
+	gelöscht:       lib/zlib-1.2.3/contrib/vstudio/vc8/zlibvc.vcproj
+	gelöscht:       lib/zlib-1.2.3/crc32.c
+	gelöscht:       lib/zlib-1.2.3/crc32.h
+	gelöscht:       lib/zlib-1.2.3/deflate.c
+	gelöscht:       lib/zlib-1.2.3/deflate.h
+	gelöscht:       lib/zlib-1.2.3/example.c
+	gelöscht:       lib/zlib-1.2.3/examples/README.examples
+	gelöscht:       lib/zlib-1.2.3/examples/fitblk.c
+	gelöscht:       lib/zlib-1.2.3/examples/gun.c
+	gelöscht:       lib/zlib-1.2.3/examples/gzappend.c
+	gelöscht:       lib/zlib-1.2.3/examples/gzjoin.c
+	gelöscht:       lib/zlib-1.2.3/examples/gzlog.c
+	gelöscht:       lib/zlib-1.2.3/examples/gzlog.h
+	gelöscht:       lib/zlib-1.2.3/examples/zlib_how.html
+	gelöscht:       lib/zlib-1.2.3/examples/zpipe.c
+	gelöscht:       lib/zlib-1.2.3/examples/zran.c
+	gelöscht:       lib/zlib-1.2.3/gzio.c
+	gelöscht:       lib/zlib-1.2.3/infback.c
+	gelöscht:       lib/zlib-1.2.3/inffast.c
+	gelöscht:       lib/zlib-1.2.3/inffast.h
+	gelöscht:       lib/zlib-1.2.3/inffixed.h
+	gelöscht:       lib/zlib-1.2.3/inflate.c
+	gelöscht:       lib/zlib-1.2.3/inflate.h
+	gelöscht:       lib/zlib-1.2.3/inftrees.c
+	gelöscht:       lib/zlib-1.2.3/inftrees.h
+	gelöscht:       lib/zlib-1.2.3/make_vms.com
+	gelöscht:       lib/zlib-1.2.3/minigzip.c
+	gelöscht:       lib/zlib-1.2.3/msdos/Makefile.bor
+	gelöscht:       lib/zlib-1.2.3/msdos/Makefile.dj2
+	gelöscht:       lib/zlib-1.2.3/msdos/Makefile.emx
+	gelöscht:       lib/zlib-1.2.3/msdos/Makefile.msc
+	gelöscht:       lib/zlib-1.2.3/msdos/Makefile.tc
+	gelöscht:       lib/zlib-1.2.3/old/Makefile.riscos
+	gelöscht:       lib/zlib-1.2.3/old/README
+	gelöscht:       lib/zlib-1.2.3/old/descrip.mms
+	gelöscht:       lib/zlib-1.2.3/old/os2/Makefile.os2
+	gelöscht:       lib/zlib-1.2.3/old/os2/zlib.def
+	gelöscht:       lib/zlib-1.2.3/old/visual-basic.txt
+	gelöscht:       lib/zlib-1.2.3/old/zlib.html
+	gelöscht:       lib/zlib-1.2.3/projects/README.projects
+	gelöscht:       lib/zlib-1.2.3/projects/visualc6/README.txt
+	gelöscht:       lib/zlib-1.2.3/projects/visualc6/example.dsp
+	gelöscht:       lib/zlib-1.2.3/projects/visualc6/minigzip.dsp
+	gelöscht:       lib/zlib-1.2.3/projects/visualc6/zlib.dsp
+	gelöscht:       lib/zlib-1.2.3/projects/visualc6/zlib.dsw
+	gelöscht:       lib/zlib-1.2.3/qnx/package.qpg
+	gelöscht:       lib/zlib-1.2.3/trees.c
+	gelöscht:       lib/zlib-1.2.3/trees.h
+	gelöscht:       lib/zlib-1.2.3/uncompr.c
+	gelöscht:       lib/zlib-1.2.3/win32/DLL_FAQ.txt
+	gelöscht:       lib/zlib-1.2.3/win32/Makefile.bor
+	gelöscht:       lib/zlib-1.2.3/win32/Makefile.emx
+	gelöscht:       lib/zlib-1.2.3/win32/Makefile.gcc
+	gelöscht:       lib/zlib-1.2.3/win32/Makefile.msc
+	gelöscht:       lib/zlib-1.2.3/win32/VisualC.txt
+	gelöscht:       lib/zlib-1.2.3/win32/zlib.def
+	gelöscht:       lib/zlib-1.2.3/win32/zlib1.rc
+	gelöscht:       lib/zlib-1.2.3/zconf.h
+	gelöscht:       lib/zlib-1.2.3/zconf.in.h
+	gelöscht:       lib/zlib-1.2.3/zlib.3
+	gelöscht:       lib/zlib-1.2.3/zlib.h
+	gelöscht:       lib/zlib-1.2.3/zutil.c
+	gelöscht:       lib/zlib-1.2.3/zutil.h
+	geändert:       man/Makefile
+	geändert:       man/man1/cut.1
+	geändert:       man/man1/date.1
+	geändert:       man/man1/du.1
+	geändert:       man/man1/ed.1
+	geändert:       man/man1/elvis.1
+	geändert:       man/man1/flex.1
+	geändert:       man/man1/flexdoc.1
+	geändert:       man/man1/grep.1
+	geändert:       man/man1/join.1
+	geändert:       man/man1/ps.1
+	geändert:       man/man1/sed.1
+	geändert:       man/man2/chmod.2
+	geändert:       man/man2/chown.2
+	geändert:       man/man5/TZ.5
+	geändert:       man/man8/fdisk.8
+	geändert:       man/man8/service.8
+	gelöscht:       man/man9/as.9
+	gelöscht:       man/man9/awk.9
+	gelöscht:       man/man9/de.9
+	gelöscht:       man/man9/dis88.9
+	gelöscht:       man/man9/elle.9
+	gelöscht:       man/man9/elvis.9
+	gelöscht:       man/man9/kermit.9
+	gelöscht:       man/man9/m4.9
+	gelöscht:       man/man9/macros.9
+	gelöscht:       man/man9/mined.9
+	geändert:       servers/Makefile
+	geändert:       servers/ds/Makefile
+	geändert:       servers/ds/main.c
+	geändert:       servers/ds/proto.h
+	geändert:       servers/ds/store.c
+	geändert:       servers/ds/store.h
+	geändert:       servers/inet/Makefile
+	geändert:       servers/inet/buf.c
+	geändert:       servers/inet/generic/eth.c
+	geändert:       servers/inet/inet.c
+	geändert:       servers/inet/inet_config.c
+	geändert:       servers/inet/inet_config.h
+	geändert:       servers/inet/mnx_eth.c
+	geändert:       servers/inet/osdep_eth.h
+	geändert:       servers/inet/qp.c
+	geändert:       servers/inet/qp.h
+	geändert:       servers/inet/sr.c
+	geändert:       servers/init/Makefile
+	geändert:       servers/is/Makefile
+	geändert:       servers/is/dmp_ds.c
+	geändert:       servers/is/dmp_fs.c
+	geändert:       servers/is/dmp_kernel.c
+	geändert:       servers/is/dmp_rs.c
+	geändert:       servers/is/inc.h
+	geändert:       servers/mfs/Makefile
+	geändert:       servers/mfs/cache.c
+	gelöscht:       servers/mfs/cache2.c
+	geändert:       servers/mfs/const.h
+	geändert:       servers/mfs/device.c
+	gelöscht:       servers/mfs/dmap.c
+	gelöscht:       servers/mfs/filedes.c
+	geändert:       servers/mfs/fproc.h
+	geändert:       servers/mfs/glo.h
+	geändert:       servers/mfs/inode.c
+	geändert:       servers/mfs/inode.h
+	geändert:       servers/mfs/link.c
+	gelöscht:       servers/mfs/lock.c
+	geändert:       servers/mfs/main.c
+	geändert:       servers/mfs/misc.c
+	geändert:       servers/mfs/mount.c
+	geändert:       servers/mfs/open.c
+	geändert:       servers/mfs/param.h
+	geändert:       servers/mfs/path.c
+	geändert:       servers/mfs/pipe.c
+	geändert:       servers/mfs/protect.c
+	geändert:       servers/mfs/proto.h
+	geändert:       servers/mfs/read.c
+	gelöscht:       servers/mfs/select.c
+	geändert:       servers/mfs/stadir.c
+	geändert:       servers/mfs/super.c
+	geändert:       servers/mfs/super.h
+	geändert:       servers/mfs/table.c
+	geändert:       servers/mfs/time.c
+	gelöscht:       servers/mfs/timers.c
+	geändert:       servers/mfs/utility.c
+	geändert:       servers/mfs/write.c
+	geändert:       servers/pm/Makefile
+	geändert:       servers/pm/alloc.c
+	geändert:       servers/pm/break.c
+	geändert:       servers/pm/const.h
+	geändert:       servers/pm/exec.c
+	geändert:       servers/pm/forkexit.c
+	geändert:       servers/pm/getset.c
+	geändert:       servers/pm/glo.h
+	geändert:       servers/pm/main.c
+	geändert:       servers/pm/misc.c
+	geändert:       servers/pm/mproc.h
+	geändert:       servers/pm/param.h
+	geändert:       servers/pm/proto.h
+	geändert:       servers/pm/signal.c
+	geändert:       servers/pm/table.c
+	geändert:       servers/pm/time.c
+	geändert:       servers/pm/trace.c
+	geändert:       servers/pm/utility.c
+	geändert:       servers/rs/Makefile
+	geändert:       servers/rs/inc.h
+	geändert:       servers/rs/main.c
+	geändert:       servers/rs/manager.c
+	geändert:       servers/rs/manager.h
+	geändert:       servers/rs/proto.h
+	geändert:       servers/rs/service.c
+	gelöscht:       servers/sm/Makefile
+	geändert:       test/Makefile
+	geändert:       test/test3.c
+	geändert:       tools/Makefile
+	geändert:       tools/chrootmake.sh
+	geändert:       tools/issue.install
+	geändert:       tools/mkboot
+	geändert:       tools/release.sh
+	geändert:       tools/release/cd/README.TXT
+
+Unversionierte Dateien:
+  (benutzen Sie "git add <Datei>...", um die Änderungen zum Commit vorzumerken)
+	commands/ash/alias.c
+	commands/ash/alias.h
+	commands/ash/arith.h
+	commands/ash/arith.y
+	commands/ash/arith_lex.h
+	commands/ash/arith_lex.l
+	commands/ash/bltin/myregexp.h
+	commands/ash/builtins
+	commands/ash/builtins.def
+	commands/ash/cd.h
+	commands/ash/complete.c
+	commands/ash/complete.h
+	commands/ash/errmsg.c
+	commands/ash/errmsg.h
+	commands/ash/histedit.c
+	commands/ash/myhistedit.h
+	commands/ash/setmode.c
+	commands/ash/show.h
+	commands/flex-2.5.4/
+	commands/ftp101/
+	commands/httpd0995/
+	commands/i386/acd.descr
+	commands/profile/
+	commands/scripts/readclock.sh
+	commands/scripts/unstack.sh
+	commands/sed/
+	commands/simple/dumpcore.c
+	commands/zoneinfo/
+	docs/
+	drivers/libdriver/mq.c
+	drivers/memory/allocmem.c
+	drivers/readclock/
+	etc/crontab
+	etc/drivers.conf
+	etc/make.conf
+	etc/rs.single
+	include/minix/ds.h
+	include/minix/mq.h
+	include/minix/portio.h
+	include/minix/profile.h
+	include/minix/rs.h
+	include/minix/safecopies.h
+	include/minix/sysinfo.h
+	include/minix/vfsif.h
+	include/netinet/if_ether.h
+	include/sys/jmp_buf.h
+	kernel/arch/
+	kernel/interrupt.c
+	kernel/profile.c
+	kernel/profile.h
+	kernel/system/do_cprofile.c
+	kernel/system/do_profbuf.c
+	kernel/system/do_safecopy.c
+	kernel/system/do_setgrant.c
+	kernel/system/do_sprofile.c
+	lib/ack/i386/em/disconnected/
+	lib/gnu/rts/__setjmp.gs
+	lib/other/_cprofile.c
+	lib/other/_getdents.c
+	lib/other/_lseek64.c
+	lib/other/_sbrk.c
+	lib/other/_sprofile.c
+	lib/other/_sysuname.c
+	lib/other/strlcat.c
+	lib/other/strlcpy.c
+	lib/posix/_fchmod.c
+	lib/posix/_fchown.c
+	lib/posix/_killpg.c
+	lib/posix/nice.c
+	lib/stdtime/
+	lib/syscall/cprofile.s
+	lib/syscall/fchmod.s
+	lib/syscall/fchown.s
+	lib/syscall/getdents.s
+	lib/syscall/killpg.s
+	lib/syscall/lseek64.s
+	lib/syscall/select.s
+	lib/syscall/sprofile.s
+	lib/syscall/sysuname.s
+	lib/syslib/ds.c
+	lib/syslib/pci_set_acl.c
+	lib/syslib/safecopies.c
+	lib/syslib/sys_cprof.c
+	lib/syslib/sys_profbuf.c
+	lib/syslib/sys_readbios.c
+	lib/syslib/sys_safecopy.c
+	lib/syslib/sys_setgrant.c
+	lib/syslib/sys_sprof.c
+	lib/syslib/sys_vsafecopy.c
+	lib/sysutil/profile.c
+	lib/sysutil/profile_extern.c
+	lib/sysutil/read_tsc.s
+	lib/sysutil/read_tsc_64.c
+	man/man1/dumpcore.1
+	man/man1/ftp.1
+	man/man1/mtools.1
+	man/man1/profile.1
+	man/man1/urlget.1
+	man/man1x/
+	man/man3/setjmp.3
+	man/man5/http_status.5
+	man/man5/httpd.conf.5
+	man/man8/httpd.8
+	man/man8/tcpd.8
+	servers/mfs/drivers.h
+	servers/mfs/inc.h
+	servers/mfs/queue.h
+	servers/pm/profile.c
+	servers/rs/exec.c
+	servers/vfs/
+	status.txt
+

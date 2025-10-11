@@ -27,6 +27,8 @@ libc_FILES=" \
 	_execv.c \
 	_execve.c \
 	_execvp.c \
+	_fchmod.c \
+	_fchown.c \
 	_fcntl.c \
 	_fork.c \
 	_fpathconf.c \
@@ -45,6 +47,7 @@ libc_FILES=" \
 	_ioctl.c \
 	_isatty.c \
 	_kill.c \
+	_killpg.c \
 	_link.c \
 	_lseek.c \
 	_lstat.c \
@@ -73,7 +76,6 @@ libc_FILES=" \
 	_sigprocmask.c \
 	_sigreturn.c \
 	_sigset.c \
-	_sigsetjmp.c \
 	_sigsuspend.c \
 	_sleep.c \
 	_stat.c \
@@ -90,7 +92,6 @@ libc_FILES=" \
 	_times.c \
 	_truncate.c \
 	_umask.c \
-	_umount.c \
 	_uname.c \
 	_unlink.c \
 	_utime.c \
@@ -100,6 +101,7 @@ libc_FILES=" \
 	getloadavg.c \
 	getopt.c \
 	gettimeofday.c \
+	nice.c \
 	priority.c \
 	usleep.c"
 

@@ -1,7 +1,7 @@
 
 ETC=/etc/
 USRETC=/usr/etc/
-FILES1=fstab group hostname.file inet.conf motd.install mtab passwd profile protocols rc services termcap ttytab utmp rc.cd binary_sizes binary_sizes.big binary_sizes.xxl rc.rescue syslog.conf rc.daemons.dist 
+FILES1=fstab group hostname.file inet.conf motd.install mtab passwd profile protocols rc services termcap ttytab utmp rc.cd binary_sizes binary_sizes.big binary_sizes.xxl rc.rescue syslog.conf rc.daemons.dist rs.single make.conf drivers.conf
 FILES2=shadow
 FILES3=daily dhcptags.conf rc
 
@@ -20,8 +20,9 @@ install::
 	@echo "Making devices.."
 	p=`pwd` && cd /dev && sh $$p/../commands/scripts/MAKEDEV.sh null 
 	p=`pwd` && cd /dev && sh $$p/../commands/scripts/MAKEDEV.sh std  2>/dev/null
+	install -o bin -g operator -m 755 crontab /usr/lib
 	@echo "Making user homedirs.."
-	for u in /usr/ast ~root; do (cd ast && tar cf - .[a-z]* ) | (cd $$u && tar xf - ); done
+	for u in /usr/ast ~root; do cp ast/.[aepv]* $$u ; done
 
 postinstall:
 	binsizes normal

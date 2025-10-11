@@ -54,7 +54,7 @@ typedef unsigned long sigset_t;
 #define SIGTTIN           22	/* background process wants to read */
 #define SIGTTOU           23	/* background process wants to write */
 
-#define _NSIG             23	/* number of signals used */
+#define _NSIG             24	/* highest signal number plus one */
 
 #ifdef _MINIX
 #define SIGIOT             SIGABRT /* for people who speak PDP-11 */
@@ -108,6 +108,7 @@ _PROTOTYPE( __sighandler_t signal, (int _sig, __sighandler_t _func)	);
 
 #ifdef _POSIX_SOURCE
 _PROTOTYPE( int kill, (pid_t _pid, int _sig)				);
+_PROTOTYPE( int killpg, (pid_t _pgrp, int _sig)				);
 _PROTOTYPE( int sigaction,
     (int _sig, const struct sigaction *_act, struct sigaction *_oact)	);
 _PROTOTYPE( int sigaddset, (sigset_t *_set, int _sig)			);

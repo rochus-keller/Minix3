@@ -24,9 +24,23 @@
 #define STACK_CHANGED      2	/* flag value when stack size changed */
 
 /*===========================================================================*
- *				do_brk  				     *
+ *				do_brk	 				     *
  *===========================================================================*/
 PUBLIC int do_brk()
+{
+/* Entry point to brk(addr) system call. real_brk() does the real work,
+ * as that is called from elsewhere too.
+ */
+  int r;
+  r = real_brk(mp, (vir_bytes) m_in.addr);
+  mp->mp_reply.reply_ptr = (r == OK ? m_in.addr : (char *) -1);
+  return r;
+}
+
+/*===========================================================================*
+ *				do_brk	 				     *
+ *===========================================================================*/
+PUBLIC int real_brk(struct mproc *rmp, vir_bytes v)
 {
 /* Perform the brk(addr) system call.
  *
@@ -34,30 +48,27 @@ PUBLIC int do_brk()
  * the stack pointer can grow beyond the base of the stack segment without
  * anybody noticing it.
  * The parameter, 'addr' is the new virtual address in D space.
+ *
+ * This call can also be performed on PM itself from brk() in misc.c.
  */
-
-  register struct mproc *rmp;
   int r;
-  vir_bytes v, new_sp;
+  vir_bytes new_sp;
   vir_clicks new_clicks;
 
-  rmp = mp;
-  v = (vir_bytes) m_in.addr;
   new_clicks = (vir_clicks) ( ((long) v + CLICK_SIZE - 1) >> CLICK_SHIFT);
   if (new_clicks < rmp->mp_seg[D].mem_vir) {
 	rmp->mp_reply.reply_ptr = (char *) -1;
 	return(ENOMEM);
   }
   new_clicks -= rmp->mp_seg[D].mem_vir;
-  if ((r=get_stack_ptr(who_e, &new_sp)) != OK) /* ask kernel for sp value */
+  if ((r=get_stack_ptr(rmp->mp_endpoint, &new_sp)) != OK) /* get sp value */
   	panic(__FILE__,"couldn't get stack pointer", r);
   r = adjust(rmp, new_clicks, new_sp);
-  rmp->mp_reply.reply_ptr = (r == OK ? m_in.addr : (char *) -1);
   return(r);			/* return new address or -1 */
 }
 
 /*===========================================================================*
- *				adjust  				     *
+ *				adjust					     *
  *===========================================================================*/
 PUBLIC int adjust(rmp, data_clicks, sp)
 register struct mproc *rmp;	/* whose memory is being adjusted? */
@@ -79,12 +90,13 @@ vir_bytes sp;			/* new value of sp */
   mem_sp = &rmp->mp_seg[S];	/* pointer to stack segment map */
   changed = 0;			/* set when either segment changed */
 
-  if (mem_sp->mem_len == 0) return(OK);	/* don't bother init */
-
   /* See if stack size has gone negative (i.e., sp too close to 0xFFFF...) */
   base_of_stack = (long) mem_sp->mem_vir + (long) mem_sp->mem_len;
   sp_click = sp >> CLICK_SHIFT;	/* click containing sp */
-  if (sp_click >= base_of_stack) return(ENOMEM);	/* sp too high */
+  if (sp_click >= base_of_stack)
+  {
+	return(ENOMEM);	/* sp too high */
+  }
 
   /* Compute size of gap between stack and data segments. */
   delta = (long) mem_sp->mem_vir - (long) sp_click;
@@ -94,7 +106,10 @@ vir_bytes sp;			/* new value of sp */
 #define SAFETY_BYTES  (384 * sizeof(char *))
 #define SAFETY_CLICKS ((SAFETY_BYTES + CLICK_SIZE - 1) / CLICK_SIZE)
   gap_base = mem_dp->mem_vir + data_clicks + SAFETY_CLICKS;
-  if (lower < gap_base) return(ENOMEM);	/* data and stack collided */
+  if (lower < gap_base)
+  {
+	return(ENOMEM);	/* data and stack collided */
+  }
 
   /* Update data length (but not data orgin) on behalf of brk() system call. */
   old_clicks = mem_dp->mem_len;

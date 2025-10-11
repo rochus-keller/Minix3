@@ -18,10 +18,6 @@
 #include <timers.h>		/* watchdog timer management */
 #include <errno.h>		/* return codes and error numbers */
 
-#if (CHIP == INTEL)
-#include <ibm/portio.h>		/* device I/O and toggle interrupts */ 
-#endif
-
 /* Important kernel header files. */
 #include "config.h"		/* configuration, MUST be first */
 #include "const.h"		/* constants, MUST be second */
@@ -29,6 +25,7 @@
 #include "proto.h"		/* function prototypes */
 #include "glo.h"		/* global variables */
 #include "ipc.h"		/* IPC constants */
+#include "profile.h"		/* system profiling */
 #include "debug.h"		/* debugging, MUST be last kernel header */
 
 #endif /* KERNEL_H */

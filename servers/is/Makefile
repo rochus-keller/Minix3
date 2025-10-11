@@ -1,6 +1,8 @@
 # Makefile for Information Server (IS)
 SERVER = is
 
+include /etc/make.conf
+
 # directories
 u = /usr
 i = $u/include
@@ -13,9 +15,10 @@ f = $u/src/servers/fs
 
 # programs, flags, etc.
 CC =	exec cc
-CFLAGS = -I$i
+CPPFLAGS=-I../../kernel/arch/$(ARCH)/include -I$i 
+CFLAGS = $(CPROFILE) $(CPPFLAGS)
 LDFLAGS = -i
-LIBS = -lsys -lsysutil 
+LIBS = -lsysutil -lsys
 
 OBJ = main.o dmp.o dmp_kernel.o dmp_pm.o dmp_fs.o dmp_rs.o dmp_ds.o 
 
@@ -34,7 +37,7 @@ clean:
 	rm -f $(SERVER) *.o *.bak 
 
 depend: 
-	/usr/bin/mkdep "$(CC) -E $(CPPFLAGS)" *.c > .depend
+	mkdep "$(CC) -E $(CPPFLAGS)" *.c > .depend
 
 # Include generated dependencies.
 include .depend

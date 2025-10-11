@@ -7,6 +7,7 @@
  * other kernel headers.
  */
 
+#include <ansi.h>
 #include "config.h"
 
 /* Enable prints such as
@@ -19,6 +20,7 @@
  * are disabled.
  */
 #define DEBUG_ENABLE_IPC_WARNINGS	0
+#define DEBUG_STACKTRACE		1
 
 /* It's interesting to measure the time spent withing locked regions, because
  * this is the time that the system is deaf to interrupts.
@@ -50,23 +52,5 @@ _PROTOTYPE( void timer_end, (int cat) );
 #define locktimestart(c, v)
 #define locktimeend(c)
 #endif /* DEBUG_TIME_LOCKS */
-
-/* This check makes sure that the scheduling queues are in a consistent state.
- * The check is run when the queues are updated with ready() and unready().
- */ 
-#if DEBUG_SCHED_CHECK 					
-_PROTOTYPE( void check_runqueues, (char *when) );
-#endif /* DEBUG_SCHED_CHECK */
-
-/* The timing and checking of kernel locking requires a redefine of the lock()
- * and unlock() macros. That's done here. This redefine requires that this 
- * header is included after the other kernel headers.
- */
-#if (DEBUG_TIME_LOCKS || DEBUG_LOCK_CHECK)
-#  undef lock
-#  define lock(c, v)	do { reallock(c, v); locktimestart(c, v); } while(0)
-#  undef unlock
-#  define unlock(c)	do { locktimeend(c); realunlock(c); } while(0)
-#endif
 
 #endif /* DEBUG_H */

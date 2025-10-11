@@ -6,9 +6,9 @@ g = generic
 # Programs, flags, and libraries
 CC =		cc
 CPPFLAGS =	-I. -D_MINIX
-CFLAGS =	$(OPT) $(CPPFLAGS)
+CFLAGS =	$(OPT) $(CPPFLAGS) $(CPROFILE)
 LDFLAGS =
-LIBS =		-lsys -lsysutil
+LIBS =          -lsysutil -lsys
 
 .c.o:
 	$(CC) $(CFLAGS) -o $@ -c $<
@@ -35,7 +35,7 @@ clean:
 	rm -f $(OBJ) inet *.bak
 
 depend: 
-	/usr/bin/mkdep "$(CC) -E $(CPPFLAGS)" *.c generic/*.c > .depend
+	mkdep "$(CC) -E $(CPPFLAGS)" *.c generic/*.c > .depend
 
 # Include generated dependencies.
 include .depend

@@ -10,26 +10,16 @@
  * struct proc, be sure to change sconst.h to match.
  */
 #include <minix/com.h>
-#include "protect.h"
 #include "const.h"
 #include "priv.h"
- 
+
 struct proc {
   struct stackframe_s p_reg;	/* process' registers saved in stack frame */
-
-#if (CHIP == INTEL)
-  reg_t p_ldt_sel;		/* selector in gdt with ldt base and limit */
-  struct segdesc_s p_ldt[2+NR_REMOTE_SEGS]; /* CS, DS and remote segments */
-#endif 
-
-#if (CHIP == M68000)
-/* M68000 specific registers and FPU details go here. */
-#endif 
-
+  struct segframe p_seg;	/* segment descriptors */
   proc_nr_t p_nr;		/* number of this process (for fast access) */
   struct priv *p_priv;		/* system privileges structure */
   short p_rts_flags;		/* process is runnable only if zero */
-  short p_misc_flags;		/* flags that do suspend the process */
+  short p_misc_flags;		/* flags that do not suspend the process */
 
   char p_priority;		/* current scheduling priority */
   char p_max_priority;		/* maximum scheduling priority */
@@ -52,7 +42,7 @@ struct proc {
 
   char p_name[P_NAME_LEN];	/* name of the process, including \0 */
 
-  int p_endpoint;		/* endpoint number, generation-aware */
+  endpoint_t p_endpoint;	/* endpoint number, generation-aware */
 
 #if DEBUG_SCHED_CHECK
   int p_ready, p_found;
@@ -61,15 +51,58 @@ struct proc {
 
 /* Bits for the runtime flags. A process is runnable iff p_rts_flags == 0. */
 #define SLOT_FREE	0x01	/* process slot is free */
-#define NO_MAP		0x02	/* keeps unmapped forked child from running */
+#define NO_PRIORITY     0x02	/* process has been stopped */
 #define SENDING		0x04	/* process blocked trying to send */
 #define RECEIVING	0x08	/* process blocked trying to receive */
 #define SIGNALED	0x10	/* set when new kernel signal arrives */
 #define SIG_PENDING	0x20	/* unready while signal being processed */
 #define P_STOP		0x40	/* set when process is being traced */
 #define NO_PRIV		0x80	/* keep forked system process from running */
-#define NO_PRIORITY    0x100	/* process has been stopped */
-#define NO_ENDPOINT    0x200	/* process cannot send or receive messages */
+#define NO_ENDPOINT    0x100	/* process cannot send or receive messages */
+
+/* These runtime flags can be tested and manipulated by these macros. */
+
+#define RTS_ISSET(rp, f) (((rp)->p_rts_flags & (f)) == (f))
+
+
+/* Set flag and dequeue if the process was runnable. */
+#define RTS_SET(rp, f)							\
+	do {								\
+		if(!(rp)->p_rts_flags) { dequeue(rp); }			\
+		(rp)->p_rts_flags |=  (f);				\
+	} while(0)
+
+/* Clear flag and enqueue if the process was not runnable but is now. */
+#define RTS_UNSET(rp, f) 						\
+	do {								\
+		int rts;						\
+		rts = (rp)->p_rts_flags;					\
+		(rp)->p_rts_flags &= ~(f);				\
+		if(rts && !(rp)->p_rts_flags) { enqueue(rp); }		\
+	} while(0)
+
+/* Set flag and dequeue if the process was runnable. */
+#define RTS_LOCK_SET(rp, f)						\
+	do {								\
+		if(!(rp)->p_rts_flags) { lock_dequeue(rp); }		\
+		(rp)->p_rts_flags |=  (f);				\
+	} while(0)
+
+/* Clear flag and enqueue if the process was not runnable but is now. */
+#define RTS_LOCK_UNSET(rp, f) 						\
+	do {								\
+		int rts;						\
+		rts = (rp)->p_rts_flags;					\
+		(rp)->p_rts_flags &= ~(f);				\
+		if(rts && !(rp)->p_rts_flags) { lock_enqueue(rp); }	\
+	} while(0)
+
+/* Set flags to this value. */
+#define RTS_LOCK_SETFLAGS(rp, f)					\
+	do {								\
+		if(!(rp)->p_rts_flags && (f)) { lock_dequeue(rp); }	\
+		(rp)->p_rts_flags = (f);					\
+	} while(0)
 
 /* Misc flags */
 #define REPLY_PENDING	0x01	/* reply to IPC_REQUEST is pending */

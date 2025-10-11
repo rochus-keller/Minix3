@@ -28,15 +28,14 @@ message *m_ptr;			/* pointer to request message */
    * process is already dead its flags will be reset. 
    */
   if(!isokendpt(m_ptr->SIG_ENDPT, &proc))
-    return EINVAL;
+	return EINVAL;
 
   rp = proc_addr(proc);
-  if (! (rp->p_rts_flags & SIG_PENDING)) return(EINVAL);
+  if (!RTS_ISSET(rp, SIG_PENDING)) return(EINVAL);
 
   /* PM has finished one kernel signal. Perhaps process is ready now? */
-  if (! (rp->p_rts_flags & SIGNALED)) 		/* new signal arrived */
-     if ((rp->p_rts_flags &= ~SIG_PENDING)==0)	/* remove pending flag */
-         lock_enqueue(rp);			/* ready if no flags */
+  if (!RTS_ISSET(rp, SIGNALED)) 		/* new signal arrived */
+	RTS_LOCK_UNSET(rp, SIG_PENDING);	/* remove pending flag */
   return(OK);
 }
 

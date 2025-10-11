@@ -22,8 +22,11 @@ libsys_FILES=" \
 	pci_next_dev.c \
 	pci_rescan_bus.c \
 	pci_reserve.c \
+	pci_set_acl.c \
 	pci_slot_name.c \
+	safecopies.c \
 	sys_abort.c \
+	sys_cprof.c \
 	sys_endsig.c \
 	sys_eniop.c \
 	sys_exec.c \
@@ -40,12 +43,18 @@ libsys_FILES=" \
 	sys_nice.c \
 	sys_out.c \
 	sys_physcopy.c \
+	sys_readbios.c \
+	sys_safecopy.c \
+	sys_vsafecopy.c \
+	sys_profbuf.c \
 	sys_sdevio.c \
 	sys_segctl.c \
 	sys_setalarm.c \
 	sys_sigreturn.c \
 	sys_sigsend.c \
 	sys_privctl.c \
+	sys_setgrant.c \
+	sys_sprof.c \
 	sys_times.c \
 	sys_trace.c \
 	sys_umap.c \
@@ -58,6 +67,7 @@ libsys_FILES=" \
 	sys_voutb.c \
 	sys_voutl.c \
 	sys_voutw.c \
-	taskcall.c"
+	taskcall.c \
+	ds.c"
 
 TYPE=both

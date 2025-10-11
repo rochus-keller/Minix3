@@ -61,6 +61,7 @@ elvprsv:	elvprsv.c
 
 install:	/usr/bin/elvis \
 		/bin/elvis \
+		/usr/bin/vi \
 		/usr/bin/ctags /usr/bin/ref /usr/bin/fmt \
 		/usr/bin/elvrec /usr/bin/elvprsv
 
@@ -69,6 +70,11 @@ install:	/usr/bin/elvis \
 
 /bin/elvis:	elvis
 	install -cs -o bin elvis $@
+
+/usr/bin/vi:	/usr/bin/elvis
+	if [ ! -x $@ ];	\
+	then	install -l $? $@ ;	\
+	fi
 
 /usr/bin/ctags:	ctags
 	install -cs -o bin ctags $@

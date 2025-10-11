@@ -2,6 +2,9 @@
 
 set -e
 
+XBIN=usr/xbin
+SRC=src
+
 PACKAGEDIR=/usr/bigports/Packages
 PACKAGESOURCEDIR=/usr/bigports/Sources
 secs=`expr 32 '*' 64`
@@ -47,8 +50,8 @@ disable=inet
 bios_wini=yes
 bios_remap_first=1
 ramimagedev=c0d7p0s0
-bootbig(1, Regular MINIX 3) { image=/boot/image/image; boot }
-bootsmall(2, Small MINIX 3 (<16MB)) {image=/boot/image/image_small; boot }
+bootbig(1, Regular MINIX 3) { image=/boot/image_big; boot }
+bootsmall(2, Small MINIX 3 (<16MB)) {image=/boot/image_small; boot }
 main() { trap 10000 boot ; menu; }
 save'	| $RELEASEDIR/usr/bin/edparams $TMPDISK3
 
@@ -64,7 +67,6 @@ usb_root_changes()
 		$RELEASEDIR/usr/mdec/bootblock boot/boot
 	echo \
 'bios_wini=yes
-disable=inet
 bios_remap_first=1
 rootdev=c0d7p0s0
 save'	| $RELEASEDIR/usr/bin/edparams $TMPDISK3
@@ -75,7 +77,6 @@ usr=/dev/c0d7p0s2
 ' > $RELEASEDIR/etc/fstab
 }
 
-COPYITEMS="usr/bin bin usr/lib"
 RELEASEDIR=/usr/r
 RELEASEPACKAGE=${RELEASEDIR}/usr/install/packages
 RELEASEPACKAGESOURCES=${RELEASEDIR}/usr/install/package-sources
@@ -85,21 +86,16 @@ CDFILES=/usr/tmp/cdreleasefiles
 sh tell_config OS_RELEASE . OS_VERSION >/tmp/rel.$$
 version_pretty=`sed 's/["      ]//g;/^$/d' </tmp/rel.$$`
 version=`sed 's/["      ]//g;/^$/d' </tmp/rel.$$ | tr . _`
-subfn="subreleaseno.$version"
-if [ -f "$subfn" ]
-then	sub="`cat $subfn`"
-else	sub=0
-fi
-echo "`expr $sub + 1`" >$subfn
-IMG_BASE=minix${version}_ide_build$sub
+IMG_BASE=minix${version}_ide
 BS=4096
 
 HDEMU=0
 COPY=0
-CVSTAG=HEAD
+SVNREV=""
+REVTAG=""
 PACKAGES=1
 
-while getopts "pchu?" c
+while getopts "pchu?r:" c
 do
 	case "$c" in
 	\?)
@@ -108,35 +104,27 @@ do
 	;;
 	h)
 		echo " * Making HD image"
-		IMG_BASE=minix${version}_bios_build$sub
+		IMG_BASE=minix${version}_bios
 		HDEMU=1
 		;;
 	c)
-		echo " * Copying, not CVS"
+		echo " * Copying, not SVN"
 		COPY=1
 		;;
 	p)
 		PACKAGES=0
 		;;
 	r)	
-		CVSTAG=$OPTARG
+		SVNREV=-r$OPTARG
 		;;
 	u)
 		echo " * Making live USB-stick image"
-		IMG_BASE=minix${version}_usb_build$sub
+		IMG_BASE=minix${version}_usb
 		HDEMU=1
 		USB=1
 		;;
 	esac
 done
-
-if [ "$USB" -ne 0 ]; then
-	IMG=${IMG_BASE}.img
-else
-	IMG=${IMG_BASE}.iso
-fi
-IMGBZ=${IMG}.bz2
-echo "Making $IMGBZ"
 
 USRMB=400
 
@@ -148,9 +136,7 @@ ROOTBLOCKS="`expr $ROOTKB \* 1024 / $BS`"
 
 if [ "$COPY" -ne 1 ]
 then
-	echo "Note: this script wants to do cvs operations, so it's necessary"
-	echo "to have \$CVSROOT set and cvs login done."
-	echo ""
+	echo "Note: this script wants to do svn operations."
 fi
 
 TD1=.td1
@@ -244,11 +230,17 @@ echo " * Mounting $TMPDISK as $RELEASEDIR/usr"
 mount $TMPDISK $RELEASEDIR/usr || exit
 mkdir -p $RELEASEDIR/tmp
 mkdir -p $RELEASEDIR/usr/tmp
+mkdir -p $RELEASEDIR/$XBIN
+mkdir -p $RELEASEDIR/usr/bin
+mkdir -p $RELEASEDIR/bin
 mkdir -p $RELEASEPACKAGE
 mkdir -p $RELEASEPACKAGESOURCES
 
-echo " * Transfering $COPYITEMS to $RELEASEDIR"
-( cd / && tar cf - $COPYITEMS ) | ( cd $RELEASEDIR && tar xf - ) || exit 1
+echo " * Transfering bootstrap dirs to $RELEASEDIR"
+cp -p /bin/* /usr/bin/* $RELEASEDIR/$XBIN
+cp -rp /usr/lib $RELEASEDIR/usr
+cp -rp /bin/bigsh /bin/sh /bin/echo $RELEASEDIR/bin
+cp -rp /usr/bin/make /usr/bin/install /usr/bin/yacc /usr/bin/flex $RELEASEDIR/usr/bin
 
 if [ -d $PACKAGEDIR -a -d $PACKAGESOURCEDIR -a $PACKAGES -ne 0 ]
 then	echo " * Indexing packages"
@@ -286,30 +278,54 @@ chmod -R u+w $RELEASEDIR/usr/lib
 
 if [ "$COPY" -ne 1 ]
 then
-	echo " * Doing new cvs export"
-	( cd $RELEASEDIR/usr && mkdir src && cvs export -r$CVSTAG src )
+	echo " * Doing new svn export"
+	REPO=https://gforge.cs.vu.nl/svn/minix/trunk/$SRC
+	REVISION="`svn info $SVNREV $REPO | grep '^Revision: ' | awk '{ print $2 }'`"
+	echo "Doing export of revision $REVISION from $REPO."
+	( cd $RELEASEDIR/usr && svn export -r$REVISION $REPO )
+	REVTAG=r$REVISION
+	echo "
+
+/* Added by release script  */
+#ifndef _SVN_REVISION
+#define _SVN_REVISION \"$REVISION\"
+#endif" >>$RELEASEDIR/usr/src/include/minix/sys_config.h
+
 else
 	( cd .. && make depend && make clean )
-	srcdir=/usr/src
-	( cd $srcdir && tar cf - . ) | ( cd $RELEASEDIR/usr && mkdir src && cd src && tar xf - )
+	srcdir=/usr/$SRC
+	( cd $srcdir && tar cf - . ) | ( cd $RELEASEDIR/usr && mkdir $SRC && cd $SRC && tar xf - )
+	REVTAG=copy
 fi
 
-echo " * Fixups for owners and modes of dirs and files"
-chown -R bin $RELEASEDIR/usr/src 
-chmod -R u+w $RELEASEDIR/usr/src 
-find $RELEASEDIR/usr/src -type d | xargs chmod 755
-find $RELEASEDIR/usr/src -type f | xargs chmod 644
-find $RELEASEDIR/usr/src -name configure | xargs chmod 755
-find $RELEASEDIR/usr/src/commands -name build | xargs chmod 755
-# Bug tracking system not for on cd
-rm -rf $RELEASEDIR/usr/src/doc/bugs
+if [ "$USB" -ne 0 ]; then
+	IMG=${IMG_BASE}_${REVTAG}.img
+else
+	IMG=${IMG_BASE}_${REVTAG}.iso
+fi
+IMGBZ=${IMG}.bz2
+echo "Making $IMGBZ"
 
-# Make sure the CD knows it's a CD
-date >$RELEASEDIR/CD
+echo " * Fixups for owners and modes of dirs and files"
+chown -R bin $RELEASEDIR/usr/$SRC 
+chmod -R u+w $RELEASEDIR/usr/$SRC 
+find $RELEASEDIR/usr/$SRC -type d | xargs chmod 755
+find $RELEASEDIR/usr/$SRC -type f | xargs chmod 644
+find $RELEASEDIR/usr/$SRC -name configure | xargs chmod 755
+find $RELEASEDIR/usr/$SRC/commands -name build | xargs chmod 755
+# Bug tracking system not for on cd
+rm -rf $RELEASEDIR/usr/$SRC/doc/bugs
+
+# Make sure the CD knows it's a CD, unless it's not
+if [ "$USB" -eq 0 ]
+then	date >$RELEASEDIR/CD
+fi
 echo " * Chroot build"
-chroot $RELEASEDIR "/bin/sh -x /usr/src/tools/chrootmake.sh" || exit 1
+chroot $RELEASEDIR "PATH=/$XBIN sh -x /usr/$SRC/tools/chrootmake.sh" || exit 1
 echo " * Chroot build done"
-# The build process leaves some file in src as root.
+echo " * Removing bootstrap files"
+rm -rf $RELEASEDIR/$XBIN
+# The build process leaves some file in $SRC as root.
 chown -R bin $RELEASEDIR/usr/src*
 cp issue.install $RELEASEDIR/etc/issue
 
@@ -325,8 +341,6 @@ echo $version_pretty >$RELEASEDIR/etc/version
 echo " * Counting files"
 extrakb=`du -s $RELEASEDIR/usr/install | awk '{ print $1 }'`
 expr `df $TMPDISK | tail -1 | awk '{ print $4 }'` - $extrakb >$RELEASEDIR/.usrkb
-du -s $RELEASEDIR/usr/src.* | awk '{ t += $1 } END { print t }' >$RELEASEDIR/.extrasrckb
-( for d in $RELEASEDIR/usr/src.*; do find $d; done) | wc -l >$RELEASEDIR/.extrasrcfiles
 find $RELEASEDIR/usr | fgrep -v /install/ | wc -l >$RELEASEDIR/.usrfiles
 find $RELEASEDIR -xdev | wc -l >$RELEASEDIR/.rootfiles
 echo " * Zeroing remainder of temporary areas"
@@ -343,10 +357,11 @@ umount $TMPDISK3 || exit
 (cd ../boot && make)
 (cd .. && make depend)
 make clean
-make image || exit 1
+SVNVAR=EXTRA_OPTS=-D_SVN_REVISION='\\\"'$REVISION'\\\"'
+make "$SVNVAR" image || exit 1
 mv image image_big
 make clean
-make image_small || exit 1
+make "$SVNVAR" image_small || exit 1
 dd if=$TMPDISK3 of=$ROOTIMAGE bs=$BS count=$ROOTBLOCKS
 # Prepare image and image_small for cdfdboot
 mv image_big image

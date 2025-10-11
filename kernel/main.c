@@ -7,10 +7,6 @@
  * The entries into this file are:
  *   main:	    	MINIX main program
  *   prepare_shutdown:	prepare to take MINIX down
- *
- * Changes:
- *   Nov 24, 2004   simplified main() with system image  (Jorrit N. Herder)
- *   Aug 20, 2004   new prepare_shutdown() and shutdown()  (Jorrit N. Herder)
  */
 #include "kernel.h"
 #include <signal.h>
@@ -24,7 +20,7 @@
 
 /* Prototype declarations for PRIVATE functions. */
 FORWARD _PROTOTYPE( void announce, (void));	
-FORWARD _PROTOTYPE( void shutdown, (timer_t *tp));
+FORWARD _PROTOTYPE( void shutdown, (timer_t *));	
 
 /*===========================================================================*
  *				main                                         *
@@ -38,12 +34,9 @@ PUBLIC void main()
   register int i, s;
   int hdrindex;			/* index to array of a.out headers */
   phys_clicks text_base;
-  vir_clicks text_clicks, data_clicks;
+  vir_clicks text_clicks, data_clicks, st_clicks;
   reg_t ktsb;			/* kernel task stack base */
   struct exec e_hdr;		/* for a copy of an a.out header */
-
-  /* Initialize the interrupt controller. */
-  intr_init(1);
 
   /* Clear the process table. Anounce each slot as empty and set up mappings 
    * for proc_addr() and proc_nr() macros. Do the same for the table with 
@@ -73,6 +66,8 @@ PUBLIC void main()
   ktsb = (reg_t) t_stack;
 
   for (i=0; i < NR_BOOT_PROCS; ++i) {
+	int ci;
+	bitchunk_t fv;
 	ip = &image[i];				/* process' attributes */
 	rp = proc_addr(ip->proc_nr);		/* get process pointer */
 	ip->endpoint = rp->p_endpoint;		/* ipc endpoint */
@@ -84,7 +79,23 @@ PUBLIC void main()
 	(void) get_priv(rp, (ip->flags & SYS_PROC));    /* assign structure */
 	priv(rp)->s_flags = ip->flags;			/* process flags */
 	priv(rp)->s_trap_mask = ip->trap_mask;		/* allowed traps */
-	priv(rp)->s_call_mask = ip->call_mask;		/* kernel call mask */
+
+	/* Initialize call mask bitmap from unordered set.
+	 * A single SYS_ALL_CALLS is a special case - it
+	 * means all calls are allowed.
+	 */
+	if(ip->nr_k_calls == 1 && ip->k_calls[0] == SYS_ALL_CALLS)
+		fv = ~0;		/* fill call mask */
+	else
+		fv = 0;			/* clear call mask */
+
+	for(ci = 0; ci < CALL_MASK_SIZE; ci++) 	/* fill or clear call mask */
+		priv(rp)->s_k_call_mask[ci] = fv;
+	if(!fv)			/* not all full? enter calls bit by bit */
+		for(ci = 0; ci < ip->nr_k_calls; ci++)
+			SET_BIT(priv(rp)->s_k_call_mask,
+				ip->k_calls[ci]-KERNEL_CALL);
+
 	priv(rp)->s_ipc_to.chunk[0] = ip->ipc_to;	/* restrict targets */
 	if (iskerneln(proc_nr(rp))) {		/* part of the kernel? */ 
 		if (ip->stksize > 0) {		/* HARDWARE stack size is 0 */
@@ -93,8 +104,6 @@ PUBLIC void main()
 		}
 		ktsb += ip->stksize;	/* point to high end of stack */
 		rp->p_reg.sp = ktsb;	/* this task's initial stack ptr */
-		text_base = kinfo.code_base >> CLICK_SHIFT;
-					/* processes that are in the kernel */
 		hdrindex = 0;		/* all use the first a.out header */
 	} else {
 		hdrindex = 1 + i-NR_TASKS;	/* servers, drivers, INIT */
@@ -108,14 +117,21 @@ PUBLIC void main()
 	/* Convert addresses to clicks and build process memory map */
 	text_base = e_hdr.a_syms >> CLICK_SHIFT;
 	text_clicks = (e_hdr.a_text + CLICK_SIZE-1) >> CLICK_SHIFT;
-	if (!(e_hdr.a_flags & A_SEP)) text_clicks = 0;	   /* common I&D */
-	data_clicks = (e_hdr.a_total + CLICK_SIZE-1) >> CLICK_SHIFT;
+	data_clicks = (e_hdr.a_data+e_hdr.a_bss + CLICK_SIZE-1) >> CLICK_SHIFT;
+	st_clicks= (e_hdr.a_total + CLICK_SIZE-1) >> CLICK_SHIFT;
+	if (!(e_hdr.a_flags & A_SEP))
+	{
+		data_clicks= (e_hdr.a_text+e_hdr.a_data+e_hdr.a_bss +
+			CLICK_SIZE-1) >> CLICK_SHIFT;
+		text_clicks = 0;	   /* common I&D */
+	}
 	rp->p_memmap[T].mem_phys = text_base;
 	rp->p_memmap[T].mem_len  = text_clicks;
 	rp->p_memmap[D].mem_phys = text_base + text_clicks;
 	rp->p_memmap[D].mem_len  = data_clicks;
-	rp->p_memmap[S].mem_phys = text_base + text_clicks + data_clicks;
-	rp->p_memmap[S].mem_vir  = data_clicks;	/* empty - stack is in data */
+	rp->p_memmap[S].mem_phys = text_base + text_clicks + st_clicks;
+	rp->p_memmap[S].mem_vir  = st_clicks;
+	rp->p_memmap[S].mem_len  = 0;
 
 	/* Set initial register values.  The processor status word for tasks 
 	 * is different from that of other processes because tasks can
@@ -134,29 +150,19 @@ PUBLIC void main()
 	}
 	
 	/* Set ready. The HARDWARE task is never ready. */
-	if (rp->p_nr != HARDWARE) {
-		rp->p_rts_flags = 0;		/* runnable if no flags */
-		lock_enqueue(rp);		/* add to scheduling queues */
-	} else {
-		rp->p_rts_flags = NO_MAP;	/* prevent from running */
-	}
+	if (rp->p_nr == HARDWARE) RTS_LOCK_SET(rp, NO_PRIORITY);
+	RTS_LOCK_UNSET(rp, SLOT_FREE); /* remove SLOT_FREE and schedule */
 
 	/* Code and data segments must be allocated in protected mode. */
 	alloc_segments(rp);
   }
 
-#if ENABLE_BOOTDEV 
-  /* Expect an image of the boot device to be loaded into memory as well. 
-   * The boot device is the last module that is loaded into memory, and, 
-   * for example, can contain the root FS (useful for embedded systems). 
-   */
-  hdrindex ++;
-  phys_copy(aout + hdrindex * A_MINHDR,vir2phys(&e_hdr),(phys_bytes) A_MINHDR);
-  if (e_hdr.a_flags & A_IMG) {
-  	kinfo.bootdev_base = e_hdr.a_syms; 
-  	kinfo.bootdev_size = e_hdr.a_data; 
-  }
-#endif
+#if SPROFILE
+  sprofiling = 0;      /* we're not profiling until instructed to */
+#endif /* SPROFILE */
+#if CPROFILE
+  cprof_procs_no = 0;  /* init nr of hash table slots used */
+#endif /* CPROFILE */
 
   /* MINIX is now ready. All boot image processes are on the ready queue.
    * Return to the assembly code to start running the current process. 
@@ -173,13 +179,11 @@ PRIVATE void announce(void)
 {
   /* Display the MINIX startup banner. */
   kprintf("\nMINIX %s.%s. "
+#ifdef _SVN_REVISION
+	"(" _SVN_REVISION ")\n"
+#endif
       "Copyright 2006, Vrije Universiteit, Amsterdam, The Netherlands\n",
       OS_RELEASE, OS_VERSION);
-#if (CHIP == INTEL)
-  /* Real mode, or 16/32-bit protected mode? */
-  kprintf("Executing in %s mode.\n\n",
-      machine.protected ? "32-bit protected" : "real");
-#endif
 }
 
 /*===========================================================================*
@@ -216,6 +220,7 @@ int how;
   tmr_arg(&shutdown_timer)->ta_int = how;
   set_timer(&shutdown_timer, get_uptime() + HZ, shutdown);
 }
+
 /*===========================================================================*
  *				shutdown 				     *
  *===========================================================================*/
@@ -226,30 +231,8 @@ timer_t *tp;
  * down MINIX. How to shutdown is in the argument: RBT_HALT (return to the
  * monitor), RBT_MONITOR (execute given code), RBT_RESET (hard reset). 
  */
-  int how = tmr_arg(tp)->ta_int;
-  u16_t magic; 
-
-  /* Now mask all interrupts, including the clock, and stop the clock. */
-  outb(INT_CTLMASK, ~0); 
+  intr_init(INTS_ORIG);
   clock_stop();
-
-  if (mon_return && how != RBT_RESET) {
-	/* Reinitialize the interrupt controllers to the BIOS defaults. */
-	intr_init(0);
-	outb(INT_CTLMASK, 0);
-	outb(INT2_CTLMASK, 0);
-
-	/* Return to the boot monitor. Set the program if not already done. */
-	if (how != RBT_MONITOR) phys_copy(vir2phys(""), kinfo.params_base, 1); 
-	level0(monitor);
-  }
-
-  /* Reset the system by jumping to the reset address (real mode), or by
-   * forcing a processor shutdown (protected mode). First stop the BIOS 
-   * memory test by setting a soft reset flag. 
-   */
-  magic = STOP_MEM_CHECK;
-  phys_copy(vir2phys(&magic), SOFT_RESET_FLAG_ADDR, SOFT_RESET_FLAG_SIZE);
-  level0(reset);
+  arch_shutdown(tmr_arg(tp)->ta_int);
 }
 

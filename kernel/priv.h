@@ -12,12 +12,11 @@
  *   Jul 01, 2005	Created.  (Jorrit N. Herder)	
  */
 #include <minix/com.h>
-#include "protect.h"
 #include "const.h"
 #include "type.h"
 
 /* Max. number of I/O ranges that can be assigned to a process */
-#define NR_IO_RANGE	10
+#define NR_IO_RANGE	32
 
 /* Max. number of device memory ranges that can be assigned to a process */
 #define NR_MEM_RANGE	10
@@ -33,7 +32,10 @@ struct priv {
   short s_trap_mask;		/* allowed system call traps */
   sys_map_t s_ipc_from;		/* allowed callers to receive from */
   sys_map_t s_ipc_to;		/* allowed destination processes */
-  long s_call_mask;		/* allowed kernel calls */
+
+  /* allowed kernel calls */
+#define CALL_MASK_SIZE BITMAP_CHUNKS(NR_SYS_CALLS)
+  bitchunk_t s_k_call_mask[CALL_MASK_SIZE];  
 
   sys_map_t s_notify_pending;  	/* bit map with pending notifications */
   irq_id_t s_int_pending;	/* pending hardware interrupts */
@@ -51,6 +53,8 @@ struct priv {
 
   int s_nr_irq;			/* allowed IRQ lines */
   int s_irq_tab[NR_IRQ];
+  vir_bytes s_grant_table;	/* grant table address of process, or 0 */
+  int s_grant_entries;		/* no. of entries, or 0 */
 };
 
 /* Guard word for task stacks. */

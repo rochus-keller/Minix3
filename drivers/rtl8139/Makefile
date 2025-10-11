@@ -12,9 +12,9 @@ d = ..
 # programs, flags, etc.
 MAKE = exec make
 CC =	exec cc
-CFLAGS = -I$i
+CFLAGS = -I$i $(CPROFILE)
 LDFLAGS = -i
-LIBS = -lsys -lsysutil -ltimers
+LIBS = -lsysutil -lsys -ltimers
 
 OBJ = rtl8139.o 
 
@@ -22,7 +22,7 @@ OBJ = rtl8139.o
 all build:	$(DRIVER)
 $(DRIVER):	$(OBJ) 
 	$(CC) -o $@ $(LDFLAGS) $(OBJ) $(LIBS)
-	install -S 50kw $(DRIVER)
+	install -S 64kw $(DRIVER)
 
 # install with other drivers
 install:	/usr/sbin/$(DRIVER)
@@ -34,7 +34,7 @@ clean:
 	rm -f $(DRIVER) *.o *.bak 
 
 depend: 
-	/usr/bin/mkdep "$(CC) -E $(CPPFLAGS)" *.c > .depend
+	mkdep "$(CC) -E $(CPPFLAGS)" *.c > .depend
 
 # Include generated dependencies.
 include .depend

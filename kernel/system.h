@@ -173,7 +173,26 @@ _PROTOTYPE( int do_setalarm, (message *m_ptr) );
 #define do_setalarm do_unused
 #endif
 
+_PROTOTYPE( int do_safecopy, (message *m_ptr) );	
+_PROTOTYPE( int do_vsafecopy, (message *m_ptr) );	
 _PROTOTYPE( int do_iopenable, (message *m_ptr) );	
+_PROTOTYPE( int do_setgrant, (message *m_ptr) );	
+_PROTOTYPE( int do_readbios, (message *m_ptr) );	
+
+_PROTOTYPE( int do_sprofile, (message *m_ptr) );
+#if ! SPROFILE
+#define do_sprofile do_unused
+#endif
+
+_PROTOTYPE( int do_cprofile, (message *m_ptr) );
+#if ! CPROFILE
+#define do_cprofile do_unused
+#endif
+
+_PROTOTYPE( int do_profbuf, (message *m_ptr) );
+#if ! CPROFILE
+#define do_profbuf do_unused
+#endif
 
 #endif	/* SYSTEM_H */
 

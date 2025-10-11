@@ -8,9 +8,6 @@
 
 #include "../system.h"
 #include <signal.h>
-#if (CHIP == INTEL)
-#include "../protect.h"
-#endif
 
 #include <minix/endpoint.h>
 
@@ -23,12 +20,13 @@ PUBLIC int do_fork(m_ptr)
 register message *m_ptr;	/* pointer to request message */
 {
 /* Handle sys_fork().  PR_ENDPT has forked.  The child is PR_SLOT. */
-#if (CHIP == INTEL)
+#if (_MINIX_CHIP == _CHIP_INTEL)
   reg_t old_ldt_sel;
 #endif
   register struct proc *rpc;		/* child process pointer */
   struct proc *rpp;			/* parent process pointer */
-  int i, gen;
+  struct mem_map *map_ptr;	/* virtual address of map inside caller (PM) */
+  int i, gen, r;
   int p_proc;
 
   if(!isokendpt(m_ptr->PR_ENDPT, &p_proc))
@@ -37,12 +35,14 @@ register message *m_ptr;	/* pointer to request message */
   rpc = proc_addr(m_ptr->PR_SLOT);
   if (isemptyp(rpp) || ! isemptyp(rpc)) return(EINVAL);
 
+  map_ptr= (struct mem_map *) m_ptr->PR_MEM_PTR;
+
   /* Copy parent 'proc' struct to child. And reinitialize some fields. */
   gen = _ENDPOINT_G(rpc->p_endpoint);
-#if (CHIP == INTEL)
-  old_ldt_sel = rpc->p_ldt_sel;		/* backup local descriptors */
+#if (_MINIX_CHIP == _CHIP_INTEL)
+  old_ldt_sel = rpc->p_seg.p_ldt_sel;	/* backup local descriptors */
   *rpc = *rpp;				/* copy 'proc' struct */
-  rpc->p_ldt_sel = old_ldt_sel;		/* restore descriptors */
+  rpc->p_seg.p_ldt_sel = old_ldt_sel;	/* restore descriptors */
 #else
   *rpc = *rpp;				/* copy 'proc' struct */
 #endif
@@ -50,11 +50,6 @@ register message *m_ptr;	/* pointer to request message */
 	gen = 1;			/* generation number wraparound */
   rpc->p_nr = m_ptr->PR_SLOT;		/* this was obliterated by copy */
   rpc->p_endpoint = _ENDPOINT(gen, rpc->p_nr);	/* new endpoint of slot */
-
-  /* Only one in group should have SIGNALED, child doesn't inherit tracing. */
-  rpc->p_rts_flags |= NO_MAP;		/* inhibit process from running */
-  rpc->p_rts_flags &= ~(SIGNALED | SIG_PENDING | P_STOP);
-  sigemptyset(&rpc->p_pending);
 
   rpc->p_reg.retreg = 0;	/* child sees pid = 0 to know it is child */
   rpc->p_user_time = 0;		/* set all the accounting times to 0 */
@@ -79,7 +74,14 @@ register message *m_ptr;	/* pointer to request message */
   /* Calculate endpoint identifier, so caller knows what it is. */
   m_ptr->PR_ENDPT = rpc->p_endpoint;
 
-  return(OK);
+  /* Install new map */
+  r = newmap(rpc, map_ptr);
+
+  /* Only one in group should have SIGNALED, child doesn't inherit tracing. */
+  RTS_LOCK_UNSET(rpc, (SIGNALED | SIG_PENDING | P_STOP));
+  sigemptyset(&rpc->p_pending);
+
+  return r;
 }
 
 #endif /* USE_FORK */

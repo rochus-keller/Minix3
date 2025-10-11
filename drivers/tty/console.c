@@ -83,6 +83,13 @@ PRIVATE unsigned scr_width;	/* # characters on a line */
 PRIVATE unsigned scr_lines;	/* # lines on the screen */
 PRIVATE unsigned scr_size;	/* # characters on the screen */
 
+PRIVATE int disabled_vc = -1;	/* Virtual console that was active when 
+				 * disable_console was called.
+				 */
+PRIVATE int disabled_sm;	/* Scroll mode to be restored when re-enabling
+				 * console
+				 */
+
 /* Per console data. */
 typedef struct console {
   tty_t *c_tty;			/* associated TTY struct */
@@ -133,9 +140,11 @@ FORWARD _PROTOTYPE( void set_6845, (int reg, unsigned val)		);
 FORWARD _PROTOTYPE( void get_6845, (int reg, unsigned *val)		);
 FORWARD _PROTOTYPE( void stop_beep, (timer_t *tmrp)			);
 FORWARD _PROTOTYPE( void cons_org0, (void)				);
+FORWARD _PROTOTYPE( void disable_console, (void)			);
+FORWARD _PROTOTYPE( void reenable_console, (void)			);
 FORWARD _PROTOTYPE( int ga_program, (struct sequence *seq)		);
 FORWARD _PROTOTYPE( int cons_ioctl, (tty_t *tp, int)			);
-PRIVATE _PROTOTYPE( void ser_putc, (char c)				);
+FORWARD _PROTOTYPE( void ser_putc, (char c)				);
 
 /*===========================================================================*
  *				cons_write				     *
@@ -167,13 +176,20 @@ int try;
    */
   do {
 	if (count > sizeof(buf)) count = sizeof(buf);
-	if ((result = sys_vircopy(tp->tty_outproc, D, tp->tty_out_vir, 
+	if(tp->tty_out_safe) {
+	   if ((result = sys_safecopyfrom(tp->tty_outproc, tp->tty_out_vir_g,
+		tp->tty_out_vir_offset, (vir_bytes) buf, count, D)) != OK)
+		break;
+	    tp->tty_out_vir_offset += count;
+	} else {
+	   if ((result = sys_vircopy(tp->tty_outproc, D, tp->tty_out_vir_g, 
 			SELF, D, (vir_bytes) buf, (vir_bytes) count)) != OK)
 		break;
+	    tp->tty_out_vir_g += count;
+	}
 	tbuf = buf;
 
 	/* Update terminal data structure. */
-	tp->tty_out_vir += count;
 	tp->tty_outcum += count;
 	tp->tty_outleft -= count;
 
@@ -777,7 +793,7 @@ PRIVATE void beep()
  *===========================================================================*/
 PUBLIC void do_video(message *m)
 {
-	int i, n, r, ops, watch;
+	int i, n, r, ops, watch, safe = 0;
 	unsigned char c;
 
 	/* Execute the requested device driver function. */
@@ -785,12 +801,15 @@ PUBLIC void do_video(message *m)
 	switch (m->m_type) {
 	    case DEV_OPEN:
 		/* Should grant IOPL */
+		disable_console();
 		r= OK;
 		break;
 	    case DEV_CLOSE:
+		reenable_console();
 		r= OK;
 		break;
-	    case DEV_IOCTL:
+	    case DEV_IOCTL_S:
+		safe=1;
 		if (m->TTY_REQUEST == MIOCMAP || m->TTY_REQUEST == MIOCUNMAP)
 		{
 			int r, do_map;
@@ -799,18 +818,30 @@ PUBLIC void do_video(message *m)
 			do_map= (m->REQUEST == MIOCMAP);	/* else unmap */
 
 			/* Get request structure */
-			r= sys_vircopy(m->IO_ENDPT, D,
+			if(safe) {
+	   		   r = sys_safecopyfrom(m->IO_ENDPT,
+				(vir_bytes)m->ADDRESS, 0, (vir_bytes) &mapreq,
+				sizeof(mapreq), D);
+			} else {
+			  r= sys_vircopy(m->IO_ENDPT, D,
 				(vir_bytes)m->ADDRESS,
 				SELF, D, (vir_bytes)&mapreq, sizeof(mapreq));
+			}
 			if (r != OK)
 			{
 				tty_reply(TASK_REPLY, m->m_source, m->IO_ENDPT,
 					r);
 				return;
 			}
-			r= sys_vm_map(m->IO_ENDPT, do_map,
-				(phys_bytes)mapreq.base, mapreq.size,
-				mapreq.offset);
+
+			/* In safe ioctl mode, the POSITION field contains
+			 * the endpt number of the original requestor.
+			 * IO_ENDPT is always FS.
+			 */
+
+			r= sys_vm_map(safe ? m->POSITION : m->IO_ENDPT,
+			  do_map, (phys_bytes)mapreq.base, mapreq.size,
+			  mapreq.offset);
 			tty_reply(TASK_REPLY, m->m_source, m->IO_ENDPT, r);
 			return;
 		}
@@ -916,14 +947,14 @@ tty_t *tp;
   if (! vdu_initialized++) {
 
 	/* How about error checking? What to do on failure??? */
-  	s=sys_vircopy(SELF, BIOS_SEG, (vir_bytes) VDU_SCREEN_COLS_ADDR,
-  		SELF, D, (vir_bytes) &bios_columns, VDU_SCREEN_COLS_SIZE);
-  	s=sys_vircopy(SELF, BIOS_SEG, (vir_bytes) VDU_CRT_BASE_ADDR, 
-  		SELF, D, (vir_bytes) &bios_crtbase, VDU_CRT_BASE_SIZE);
-  	s=sys_vircopy(SELF, BIOS_SEG, (vir_bytes) VDU_SCREEN_ROWS_ADDR, 
-  		SELF, D, (vir_bytes) &bios_rows, VDU_SCREEN_ROWS_SIZE);
-  	s=sys_vircopy(SELF, BIOS_SEG, (vir_bytes) VDU_FONTLINES_ADDR, 
-  		SELF, D, (vir_bytes) &bios_fontlines, VDU_FONTLINES_SIZE);
+  	s=sys_readbios(VDU_SCREEN_COLS_ADDR, &bios_columns,
+		VDU_SCREEN_COLS_SIZE);
+  	s=sys_readbios(VDU_CRT_BASE_ADDR, &bios_crtbase,
+		VDU_CRT_BASE_SIZE);
+  	s=sys_readbios( VDU_SCREEN_ROWS_ADDR, &bios_rows,
+		VDU_SCREEN_ROWS_SIZE);
+  	s=sys_readbios(VDU_FONTLINES_ADDR, &bios_fontlines,
+		VDU_FONTLINES_SIZE);
 
   	vid_port = bios_crtbase;
   	scr_width = bios_columns;
@@ -991,7 +1022,9 @@ int c;
   return;
 #endif
 
+#if 0
   if (panicing)
+#endif
 	cons_putk(c);
   if (c != 0) {
       kmess.km_buf[kmess.km_next] = c;	/* put normal char in buffer */
@@ -1055,20 +1088,27 @@ message *m;
 /*===========================================================================*
  *				do_diagnostics				     *
  *===========================================================================*/
-PUBLIC void do_diagnostics(m_ptr)
+PUBLIC void do_diagnostics(m_ptr, safe)
 message *m_ptr;			/* pointer to request message */
+int safe;
 {
 /* Print a string for a server. */
   char c;
   vir_bytes src;
-  int count;
+  int count, offset = 0;
   int result = OK;
-  int proc_nr = m_ptr->DIAG_ENDPT;
-  if (proc_nr == SELF) proc_nr = m_ptr->m_source;
+  int proc_nr = m_ptr->m_source;
 
-  src = (vir_bytes) m_ptr->DIAG_PRINT_BUF;
+  src = (vir_bytes) m_ptr->DIAG_PRINT_BUF_G;
   for (count = m_ptr->DIAG_BUF_COUNT; count > 0; count--) {
-	if (sys_vircopy(proc_nr, D, src++, SELF, D, (vir_bytes) &c, 1) != OK) {
+	int r;
+	if(safe) {
+	   r = sys_safecopyfrom(proc_nr, src, offset, (vir_bytes) &c, 1, D);
+	} else {
+	   r = sys_vircopy(proc_nr, D, src+offset, SELF, D, (vir_bytes) &c, 1);
+	}
+	offset++;
+	if(r != OK) {
 		result = EFAULT;
 		break;
 	}
@@ -1093,6 +1133,26 @@ message *m_ptr;			/* pointer to request message */
   r= OK;
   if (sys_vircopy(SELF, D, (vir_bytes)&kmess, m_ptr->m_source, D,
 	dst, sizeof(kmess)) != OK) {
+	r = EFAULT;
+  }
+  m_ptr->m_type = r;
+  send(m_ptr->m_source, m_ptr);
+}
+
+/*===========================================================================*
+ *				do_get_kmess_s				     *
+ *===========================================================================*/
+PUBLIC void do_get_kmess_s(m_ptr)
+message *m_ptr;			/* pointer to request message */
+{
+/* Provide the log device with debug output */
+  cp_grant_id_t gid;
+  int r;
+
+  gid = m_ptr->GETKM_GRANT;
+  r= OK;
+  if (sys_safecopyto(m_ptr->m_source, gid, 0, (vir_bytes)&kmess, sizeof(kmess),
+	D) != OK) {
 	r = EFAULT;
   }
   m_ptr->m_type = r;
@@ -1164,6 +1224,37 @@ PRIVATE void cons_org0()
 }
 
 /*===========================================================================*
+ *				disable_console				     *
+ *===========================================================================*/
+PRIVATE void disable_console()
+{
+	if (disabled_vc != -1)
+		return;
+	
+	disabled_vc = ccurrent;
+	disabled_sm = softscroll;
+
+	cons_org0();
+	softscroll = 1;
+	select_console(0);
+
+	/* Should also disable further output to virtual consoles */
+}
+
+/*===========================================================================*
+ *				reenable_console			     *
+ *===========================================================================*/
+PRIVATE void reenable_console()
+{
+	if (disabled_vc == -1)
+		return;
+
+	softscroll = disabled_sm;
+	select_console(disabled_vc);
+	disabled_vc = -1;
+}
+
+/*===========================================================================*
  *				select_console				     *
  *===========================================================================*/
 PUBLIC void select_console(int cons_line)
@@ -1209,7 +1300,7 @@ message *m;
   if (!machine.vdu_ega) return(ENOTTY);
   result = ga_program(seq1);	/* bring font memory into view */
 
-  result = sys_physcopy(m->IO_ENDPT, D, (vir_bytes) m->ADDRESS, 
+  result = sys_physcopy(m->IO_ENDPT, GRANT_SEG, (vir_bytes) m->ADDRESS, 
   	NONE, PHYS_SEG, (phys_bytes) GA_VIDEO_ADDRESS, (phys_bytes)GA_FONT_SIZE);
 
   result = ga_program(seq2);	/* restore */

@@ -13,9 +13,9 @@ f = $u/src/servers/fs
 
 # programs, flags, etc.
 CC =	exec cc
-CFLAGS = -I$i
+CFLAGS = -I$i $(CPROFILE)
 LDFLAGS = -i
-LIBS = -lsys -lsysutil 
+LIBS = -lsysutil -lsys
 
 OBJ = main.o store.o 
 
@@ -35,7 +35,7 @@ clean:
 	rm -f $(SERVER) *.o *.bak 
 
 depend: 
-	/usr/bin/mkdep "$(CC) -E $(CPPFLAGS)" *.c > .depend
+	mkdep "$(CC) -E $(CPPFLAGS)" *.c > .depend
 
 # Include generated dependencies.
 include .depend

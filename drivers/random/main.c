@@ -25,11 +25,11 @@ extern int errno;			/* error number for PM calls */
 
 FORWARD _PROTOTYPE( char *r_name, (void) );
 FORWARD _PROTOTYPE( struct device *r_prepare, (int device) );
-FORWARD _PROTOTYPE( int r_transfer, (int proc_nr, int opcode, off_t position,
-					iovec_t *iov, unsigned nr_req) );
+FORWARD _PROTOTYPE( int r_transfer, (int proc_nr, int opcode, u64_t position,
+				iovec_t *iov, unsigned nr_req, int safe) );
 FORWARD _PROTOTYPE( int r_do_open, (struct driver *dp, message *m_ptr) );
 FORWARD _PROTOTYPE( void r_init, (void) );
-FORWARD _PROTOTYPE( int r_ioctl, (struct driver *dp, message *m_ptr) );
+FORWARD _PROTOTYPE( int r_ioctl, (struct driver *dp, message *m_ptr, int safe) );
 FORWARD _PROTOTYPE( void r_geometry, (struct partition *entry) );
 FORWARD _PROTOTYPE( void r_random, (struct driver *dp, message *m_ptr) );
 
@@ -92,18 +92,21 @@ int device;
 /*===========================================================================*
  *				r_transfer				     *
  *===========================================================================*/
-PRIVATE int r_transfer(proc_nr, opcode, position, iov, nr_req)
+PRIVATE int r_transfer(proc_nr, opcode, position, iov, nr_req, safe)
 int proc_nr;			/* process doing the request */
 int opcode;			/* DEV_GATHER or DEV_SCATTER */
-off_t position;			/* offset on device to read or write */
+u64_t position;			/* offset on device to read or write */
 iovec_t *iov;			/* pointer to read or write request vector */
 unsigned nr_req;		/* length of request vector */
+int safe;			/* safe copies? */
 {
 /* Read or write one the driver's minor devices. */
   unsigned count, left, chunk;
   vir_bytes user_vir;
   struct device *dv;
   unsigned long dv_size;
+  int r;
+  size_t vir_offset = 0;
 
   /* Get minor device number and check for /dev/null. */
   dv = &m_geom[m_device];
@@ -119,21 +122,45 @@ unsigned nr_req;		/* length of request vector */
 
 	/* Random number generator. Character instead of block device. */
 	case RANDOM_DEV:
-	    if (opcode == DEV_GATHER && !random_isseeded())
+	    if (opcode == DEV_GATHER_S && !random_isseeded())
 		    return(EAGAIN);
 	    left = count;
 	    while (left > 0) {
 	    	chunk = (left > RANDOM_BUF_SIZE) ? RANDOM_BUF_SIZE : left;
- 	        if (opcode == DEV_GATHER) {
+ 	        if (opcode == DEV_GATHER_S) {
 		    random_getbytes(random_buf, chunk);
-	    	    sys_vircopy(SELF, D, (vir_bytes) random_buf, 
-	    	        proc_nr, D, user_vir, chunk);
- 	        } else if (opcode == DEV_SCATTER) {
-	    	    sys_vircopy(proc_nr, D, user_vir, 
+		    if(safe) {
+			r= sys_safecopyto(proc_nr, user_vir, vir_offset,
+				(vir_bytes) random_buf, chunk, D);
+			if (r != OK)
+			{
+				printf(
+		"random: sys_safecopyto failed for proc %d, grant %d\n",
+					proc_nr, user_vir);
+				return r;
+			}
+		    } else {
+	    	      sys_vircopy(SELF, D, (vir_bytes) random_buf, 
+	    	        proc_nr, D, user_vir + vir_offset, chunk);
+		    }
+ 	        } else if (opcode == DEV_SCATTER_S) {
+		    if(safe) {
+			r= sys_safecopyfrom(proc_nr, user_vir, vir_offset,
+				(vir_bytes) random_buf, chunk, D);
+			if (r != OK)
+			{
+				printf(
+		"random: sys_safecopyfrom failed for proc %d, grant %d\n",
+					proc_nr, user_vir);
+				return r;
+			}
+		    } else {
+	    	      sys_vircopy(proc_nr, D, user_vir + vir_offset, 
 	    	        SELF, D, (vir_bytes) random_buf, chunk);
-	    	        random_putbytes(random_buf, chunk);
+		    }
+	    	    random_putbytes(random_buf, chunk);
  	        }
- 	        user_vir += chunk;
+ 	        vir_offset += chunk;
 	    	left -= chunk;
 	    }
 	    break;
@@ -144,9 +171,8 @@ unsigned nr_req;		/* length of request vector */
 	}
 
 	/* Book the number of bytes transferred. */
-	position += count;
-	iov->iov_addr += count;
-  	if ((iov->iov_size -= count) == 0) { iov++; nr_req--; }
+	position= add64u(position, count);
+  	if ((iov->iov_size -= count) == 0) { iov++; nr_req--; vir_offset = 0; }
 
   }
   return(OK);
@@ -179,9 +205,10 @@ PRIVATE void r_init()
 /*===========================================================================*
  *				r_ioctl					     *
  *===========================================================================*/
-PRIVATE int r_ioctl(dp, m_ptr)
+PRIVATE int r_ioctl(dp, m_ptr, safe)
 struct driver *dp;			/* pointer to driver structure */
 message *m_ptr;				/* pointer to control message */
+int safe;				/* safe i/o? */
 {
   struct device *dv;
   if ((dv = r_prepare(m_ptr->DEVICE)) == NIL_DEV) return(ENXIO);
@@ -189,7 +216,7 @@ message *m_ptr;				/* pointer to control message */
   switch (m_ptr->REQUEST) {
 
     default:
-  	return(do_diocntl(&r_dtab, m_ptr));
+  	return(do_diocntl(&r_dtab, m_ptr, safe));
   }
   return(OK);
 }

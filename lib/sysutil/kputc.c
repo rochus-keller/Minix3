@@ -9,6 +9,10 @@
 
 #include "sysutil.h"
 
+static char print_buf[80];	/* output is buffered here */
+
+int kputc_use_private_grants= 0;
+
 /*===========================================================================*
  *				kputc					     *
  *===========================================================================*/
@@ -17,21 +21,52 @@ int c;
 {
 /* Accumulate another character.  If 0 or buffer full, print it. */
   static int buf_count;		/* # characters in the buffer */
-  static char print_buf[80];	/* output is buffered here */
   message m;
 
   if ((c == 0 && buf_count > 0) || buf_count == sizeof(print_buf)) {
+#define PRINTPROCS (sizeof(procs)/sizeof(procs[0]))
 	int procs[] = OUTPUT_PROCS_ARRAY;
+	static int firstprint = 1;
+	static cp_grant_id_t printgrants[PRINTPROCS];
 	int p;
+
+	if (kputc_use_private_grants)
+	{
+		for (p= 0; p<PRINTPROCS; p++)
+			printgrants[p]= GRANT_INVALID;
+		firstprint= 0;
+	}
+	if(firstprint) {
+		for(p = 0; procs[p] != NONE; p++) {
+			printgrants[p] = GRANT_INVALID;
+		}
+
+		firstprint = 0;
+
+		/* First time? Initialize grant table;
+		 * Grant printing processes read copy access to our
+		 * print buffer forever. (So buffer can't be on stack!)
+		 */
+		for(p = 0; procs[p] != NONE; p++) {
+			printgrants[p] = cpf_grant_direct(procs[p],
+				(vir_bytes) print_buf,
+				sizeof(print_buf), CPF_READ);
+		}
+	}
 
 	for(p = 0; procs[p] != NONE; p++) {
 		/* Send the buffer to this output driver. */
 		m.DIAG_BUF_COUNT = buf_count;
-		m.DIAG_PRINT_BUF = print_buf;
-		m.DIAG_ENDPT = SELF;
-		m.m_type = DIAGNOSTICS;
+		if(GRANT_VALID(printgrants[p])) {
+			m.m_type = DIAGNOSTICS_S;
+			m.DIAG_PRINT_BUF_G = (char *) printgrants[p];
+		} else {
+			m.m_type = DIAGNOSTICS;
+			m.DIAG_PRINT_BUF_G = print_buf;
+		}
 		(void) _sendrec(procs[p], &m);
 	}
+
 	buf_count = 0;
 
 	/* If the output fails, e.g., due to an ELOCKED, do not retry output

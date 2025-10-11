@@ -10,9 +10,9 @@ d = ..
 
 # programs, flags, etc.
 CC =	exec cc
-CFLAGS = -I$i
+CFLAGS = -I$i $(CPROFILE)
 LDFLAGS = -i
-LIBS = -lsys -lsysutil
+LIBS = -lsysutil -lsys
 
 
 # build local binary
@@ -34,7 +34,7 @@ clean:
 	rm -f *.o *.bak sb16 sb16_dsp sb16_mixer
 
 depend: 
-	/usr/bin/mkdep "$(CC) -E $(CPPFLAGS)" *.c > .depend
+	mkdep "$(CC) -E $(CPPFLAGS)" *.c > .depend
 
 # Include generated dependencies.
 include .depend

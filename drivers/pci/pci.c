@@ -13,6 +13,7 @@ Created:	Jan 2000 by Philip Homburg <philip@cs.vu.nl>
 #include <ibm/pci.h>
 #include <sys/vm.h>
 #include <minix/com.h>
+#include <minix/rs.h>
 #include <minix/syslib.h>
 
 #include "pci.h"
@@ -42,7 +43,7 @@ Created:	Jan 2000 by Philip Homburg <philip@cs.vu.nl>
 
 #define BAM_NR		6	/* Number of base-address registers */
 
-PRIVATE int debug= 0;
+int debug= 0;
 
 PRIVATE struct pcibus
 {
@@ -146,6 +147,7 @@ FORWARD _PROTOTYPE( void pcii_wreg32, (int busind, int devind, int port,
 FORWARD _PROTOTYPE( u16_t pcii_rsts, (int busind)			);
 FORWARD _PROTOTYPE( void pcii_wsts, (int busind, U16_t value)		);
 FORWARD _PROTOTYPE( void print_capabilities, (int devind)		);
+FORWARD _PROTOTYPE( int visible, (struct rs_pci *aclp, int devind)	);
 
 /*===========================================================================*
  *			helper functions for I/O			     *
@@ -241,26 +243,34 @@ int *devindp;
 	}
 	if (devind >= nr_pcidev)
 		return 0;
+#if 0
 	if (pcidev[devind].pd_inuse)
 		return 0;
+#endif
 	*devindp= devind;
 	return 1;
 }
 
 /*===========================================================================*
- *				pci_first_dev				     *
+ *				pci_first_dev_a				     *
  *===========================================================================*/
-PUBLIC int pci_first_dev(devindp, vidp, didp)
+PUBLIC int pci_first_dev_a(aclp, devindp, vidp, didp)
+struct rs_pci *aclp;
 int *devindp;
 u16_t *vidp;
 u16_t *didp;
 {
-	int devind;
+	int i, devind;
 
 	for (devind= 0; devind < nr_pcidev; devind++)
 	{
-		if (!pcidev[devind].pd_inuse)
-			break;
+#if 0
+		if (pcidev[devind].pd_inuse)
+			continue;
+#endif
+		if (!visible(aclp, devind))
+			continue;
+		break;
 	}
 	if (devind >= nr_pcidev)
 		return 0;
@@ -273,7 +283,8 @@ u16_t *didp;
 /*===========================================================================*
  *				pci_next_dev				     *
  *===========================================================================*/
-PUBLIC int pci_next_dev(devindp, vidp, didp)
+PUBLIC int pci_next_dev_a(aclp, devindp, vidp, didp)
+struct rs_pci *aclp;
 int *devindp;
 u16_t *vidp;
 u16_t *didp;
@@ -282,8 +293,13 @@ u16_t *didp;
 
 	for (devind= *devindp+1; devind < nr_pcidev; devind++)
 	{
-		if (!pcidev[devind].pd_inuse)
-			break;
+#if 0
+		if (pcidev[devind].pd_inuse)
+			continue;
+#endif
+		if (!visible(aclp, devind))
+			continue;
+		break;
 	}
 	if (devind >= nr_pcidev)
 		return 0;
@@ -296,7 +312,7 @@ u16_t *didp;
 /*===========================================================================*
  *				pci_reserve3				     *
  *===========================================================================*/
-PUBLIC void pci_reserve3(devind, proc, name)
+PUBLIC int pci_reserve3(devind, proc, name)
 int devind;
 int proc;
 char *name;
@@ -307,7 +323,8 @@ char *name;
 	struct mem_range mr;
 
 	assert(devind <= nr_pcidev);
-	assert(!pcidev[devind].pd_inuse);
+	if(pcidev[devind].pd_inuse)
+		return EBUSY;
 	pcidev[devind].pd_inuse= 1;
 	strcpy(pcidev[devind].pd_name, name);
 
@@ -366,8 +383,11 @@ char *name;
 				proc, r);
 		}
 	}
+
+	return OK;
 }
 
+#if 0
 /*===========================================================================*
  *				pci_release				     *
  *===========================================================================*/
@@ -385,6 +405,7 @@ char *name;
 		pcidev[i].pd_inuse= 0;
 	}
 }
+#endif
 
 /*===========================================================================*
  *				pci_ids					     *
@@ -710,7 +731,7 @@ printf("probe_bus(%d)\n", busind);
 				if (qemu_pci)
 				{
 					printf(
-			"pci: ignoring bad value 0x%x in sts for QEMU\n",
+			"PCI: ignoring bad value 0x%x in sts for QEMU\n",
 					sts & (PSR_SSE|PSR_RMAS|PSR_RTAS));
 				}
 				else
@@ -941,7 +962,7 @@ int devind;
 			if (debug)
 			{
 				printf(
-	"primary channel is not in native mode, clearing BARs 2 and 3\n");
+	"secondary channel is not in native mode, clearing BARs 2 and 3\n");
 			}
 			clear_23= 1;
 		}
@@ -961,7 +982,10 @@ int devind;
 				continue;	/* Skip */
 			}
 			if (i == j)
+			{
+				j++;
 				continue;	/* No need to copy */
+			}
 			pcidev[devind].pd_bar[j]=
 				pcidev[devind].pd_bar[i];
 			j++;
@@ -1214,7 +1238,7 @@ PRIVATE void complete_bars()
 		base= strtoul(cp, &next, 16);
 		if (next == cp || *next != ':')
 		{
-			printf("pci: bad memory environment string '%s'\n",
+			printf("PCI: bad memory environment string '%s'\n",
 				memstr);
 			panic(NULL, NULL, NO_NUM);
 		}
@@ -1222,7 +1246,7 @@ PRIVATE void complete_bars()
 		size= strtoul(cp, &next, 16);
 		if (next == cp || (*next != ',' && *next != '\0'))
 		{
-			printf("pci: bad memory environment string '%s'\n",
+			printf("PCI: bad memory environment string '%s'\n",
 				memstr);
 			panic(NULL, NULL, NO_NUM);
 		}
@@ -1277,7 +1301,7 @@ PRIVATE void complete_bars()
 	/* Should check main memory size */
 	if (memgap_high < memgap_low)
 	{
-		printf("pci: bad memory gap: [0x%x .. 0x%x>\n",
+		printf("PCI: bad memory gap: [0x%x .. 0x%x>\n",
 			memgap_low, memgap_high);
 		panic(NULL, NULL, NO_NUM);
 	}
@@ -2426,6 +2450,48 @@ int devind;
 			capptr, type, str);
 		capptr= next;
 	}
+}
+
+
+/*===========================================================================*
+ *				visible					     *
+ *===========================================================================*/
+PRIVATE int visible(aclp, devind)
+struct rs_pci *aclp;
+int devind;
+{
+	int i;
+	u32_t class_id;
+
+	if (!aclp)
+		return TRUE;	/* Should be changed when ACLs become
+				 * mandatory.
+				 */
+	/* Check whether the caller is allowed to get this device. */
+	for (i= 0; i<aclp->rsp_nr_device; i++)
+	{
+		if (aclp->rsp_device[i].vid == pcidev[devind].pd_vid &&
+			aclp->rsp_device[i].did == pcidev[devind].pd_did)
+		{
+			return TRUE;
+		}
+	}
+	if (!aclp->rsp_nr_class)
+		return FALSE;
+
+	class_id= (pcidev[devind].pd_baseclass << 16) |
+		(pcidev[devind].pd_subclass << 8) |
+		pcidev[devind].pd_infclass;
+	for (i= 0; i<aclp->rsp_nr_class; i++)
+	{
+		if (aclp->rsp_class[i].class ==
+			(class_id & aclp->rsp_class[i].mask))
+		{
+			return TRUE;
+		}
+	}
+
+	return FALSE;
 }
 
 /*

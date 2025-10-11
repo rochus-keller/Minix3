@@ -10,6 +10,9 @@ EXTERN int procs_in_use;	/* how many processes are marked as IN_USE */
 EXTERN char monitor_params[128*sizeof(char *)];	/* boot monitor parameters */
 EXTERN struct kinfo kinfo;	/* kernel information */
 
+/* Misc.c */
+extern struct utsname uts_val;	/* uname info */
+
 /* The parameters of the call are kept here. */
 EXTERN message m_in;		/* the incoming message itself is kept here. */
 EXTERN int who_p, who_e;	/* caller's proc number, endpoint */
@@ -20,3 +23,11 @@ extern char core_name[];	/* file name where core images are produced */
 EXTERN sigset_t core_sset;	/* which signals cause core images */
 EXTERN sigset_t ign_sset;	/* which signals are by default ignored */
 
+EXTERN time_t boottime;		/* time when the system was booted (for
+				 * reporting to FS)
+				 */
+EXTERN int report_reboot;	/* During reboot to report to FS that we are 
+				 * rebooting.
+				 */
+EXTERN int abort_flag;
+EXTERN char monitor_code[256];		

@@ -22,26 +22,6 @@ USRKB="`cat /.usrkb`"
 TOTALMB="`expr 3 + $USRKB / 1024 + $ROOTMB`"
 ROOTFILES="`cat /.rootfiles`"
 USRFILES="`cat /.usrfiles`"
-EXTRASRCFILES="`cat /.extrasrcfiles`"
-EXTRASRCKB="`cat /.extrasrckb`"
-
-# Install size without extra sources (rounded up)
-NOSRCMB="`expr $TOTALMB - $EXTRASRCKB / 1024`"
-NOSRCUSRFILES="`expr $USRFILES - $EXTRASRCFILES`"
-
-if [ "$EXTRASRCKB" -lt 1 ]
-then	 
-	echo "Are you really running from CD?"
-	echo "Something wrong with the extra-source-kb on CD."
-	exit 1
-fi
-
-if [ "$EXTRASRCFILES" -lt 1 ]
-then	 
-	echo "Are you really running from CD?"
-	echo "Something wrong with the extra-source-files estimate on CD."
-	exit 1
-fi
 
 if [ "$TOTALMB" -lt 1 ]
 then	 
@@ -92,11 +72,6 @@ warn()
 # No options.
 while getopts '' opt; do usage; done
 shift `expr $OPTIND - 1`
-
-if [ ! -f /CD ]
-then	echo "Please run setup from the CD, not from a live system."
-	exit 1
-fi
 
 if [ "$USER" != root ]
 then	echo "Please run setup as root."
@@ -204,29 +179,34 @@ done
 # end Step 2
 
 # begin Step 3
-step3=""
-while [ "$step3" != ok ]
-do
-	echo ""
-	echo " --- Step 3: Select minimal or full distribution -----------------------"
-	echo ""
-	echo "You can install MINIX as (M)inimal or (F)ull. (M)inimal"
-	echo "includes only the binary system and basic system sources."
-	echo "(F)ull also includes commands sources."
-	echo ""
-	echo "Please select:"
-	echo "  (M)inimal install (only basic sources) ($NOSRCMB MB required)"
-	echo "  (F)ull install (full install) ($TOTALMB MB required)"
-	echo " "
-	echo -n "Basic (M)inimal or (F)ull install? [F] "
-	read conf
-	case "$conf" in
-	"") 	step3="ok"; nobigsource="" ;;
-	[Ff]*)	step3="ok"; nobigsource="" ;;
-	[Mm]*)	step3="ok"; nobigsource="1"; TOTALMB=$NOSRCMB; USRFILES=$NOSRCUSRFILES ;;
-	esac
-done
+#step3=""
+#while [ "$step3" != ok ]
+#do
+#	echo ""
+#	echo " --- Step 3: Select minimal or full distribution -----------------------"
+#	echo ""
+#	echo "You can install MINIX as (M)inimal or (F)ull. (M)inimal"
+#	echo "includes only the binary system and basic system sources."
+#	echo "(F)ull also includes commands sources."
+#	echo ""
+#	echo "Please select:"
+#	echo "  (M)inimal install (only basic sources) ($NOSRCMB MB required)"
+#	echo "  (F)ull install (full install) ($TOTALMB MB required)"
+#	echo " "
+#	echo -n "Basic (M)inimal or (F)ull install? [F] "
+#	read conf
+#	case "$conf" in
+#	"") 	step3="ok"; nobigsource="" ;;
+#	[Ff]*)	step3="ok"; nobigsource="" ;;
+#	[Mm]*)	step3="ok"; nobigsource="1"; TOTALMB=$NOSRCMB; USRFILES=$NOSRCUSRFILES ;;
+#	esac
+#done
 # end Step 3
+
+echo ""
+echo " --- Step 3: Selecting full distribution -------------------------------"
+echo ""
+nobigsource=""
 
 # begin Step 4
 step4=""
@@ -296,6 +276,11 @@ Please finish the name of the primary partition you have created:
 		echo "selection to install MINIX."
 		echo ""
 		confirmation=""
+
+		if [ ! -b "/dev/$primary" ]
+		then	echo "/dev/$primary is not a block device."
+		fi
+
 		while [ -z "$confirmation" -o "$confirmation" != yes -a "$confirmation" != no ]
 		do
 			echo -n "Are you sure you want to continue? Please enter 'yes' or 'no': "
@@ -334,7 +319,7 @@ Please finish the name of the primary partition you have created:
 	fi
 
 	if [ ! -b "/dev/$primary" ]
-	then	echo "/dev/$primary is not a block device."
+	then	echo Doing step 4 again.
 		step4=""
 	else
 		devsize="`devsize /dev/$primary`"
@@ -554,24 +539,13 @@ echo ""
 mount /dev/$usr /mnt >/dev/null || exit		# Mount the intended /usr.
 
 (cd /usr || exit 1
- if [ "$nobigsource" = 1 ]
- then	list="`ls | fgrep -v src. | fgrep -v install`"
- else	list="`ls | fgrep -v install`"
- fi
+ list="`ls | fgrep -v install`"
  for d in $list
  do	
  	cpdir -v $d /mnt/$d
  done
 ) | progressbar "$USRFILES" || exit	# Copy the usr floppy.
 
-if [ -d /mnt/src.commands ]
-then	mv /mnt/src.commands /mnt/src/commands
-fi
-
-if [ -d /mnt/src.contrib ]
-then	mv /mnt/src.contrib /mnt/src/contrib
-fi
-					# Set inet.conf to correct driver
 if [ -n "$driver" ]
 then	echo "$driverargs" >$MYLOCALRC
 fi
@@ -611,7 +585,7 @@ mount /dev/$usr /mnt >/dev/null || exit
 # Make bootable.
 installboot -d /dev/$root /usr/mdec/bootblock /boot/boot >/dev/null || exit
 
-edparams /dev/$root "rootdev=$root; ramimagedev=$root; minix(1,Start MINIX 3 (requires at least 16 MB RAM)) { image=/boot/image_big; boot; }; smallminix(2,Start Small MINIX 3 (intended for 8 MB RAM systems)) { image=/boot/image_small; boot; }; newminix(3,Start Custom MINIX 3) { unset image; boot }; main() { echo By default, MINIX 3 will automatically load in 3 seconds.; echo Press ESC to enter the monitor for special configuration.; trap 3000 boot; menu; }; save" || exit
+edparams /dev/$root "rootdev=$root; ramimagedev=$root; minix(1,Start MINIX 3) { image=/boot/image_big; boot; }; smallminix(2,Start Small MINIX 3 (uses less memory)) { image=/boot/image_small; boot; }; newminix(3,Start Custom MINIX 3) { unset image; boot }; main() { echo By default, MINIX 3 will automatically load in 3 seconds.; echo Press ESC to enter the monitor for special configuration.; trap 3000 boot; menu; }; save" || exit
 pfile="/mnt/src/tools/fdbootparams"
 echo "rootdev=$root; ramimagedev=$root; save" >$pfile
 # Save name of CD drive

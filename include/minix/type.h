@@ -13,6 +13,7 @@
 typedef unsigned int vir_clicks; 	/*  virtual addr/length in clicks */
 typedef unsigned long phys_bytes;	/* physical addr/length in bytes */
 typedef unsigned int phys_clicks;	/* physical addr/length in clicks */
+typedef int endpoint_t;			/* process identifier */
 
 #if (_MINIX_CHIP == _CHIP_INTEL)
 typedef unsigned int vir_bytes;	/* virtual addresses and lengths in bytes */
@@ -72,6 +73,11 @@ typedef struct {
   vir_bytes iov_size;		/* sizeof an I/O buffer */
 } iovec_t;
 
+typedef struct {
+  int iov_grant;		/* grant ID of an I/O buffer */
+  vir_bytes iov_size;		/* sizeof an I/O buffer */
+} iovec_s_t;
+
 /* PM passes the address of a structure of this type to KERNEL when
  * sys_sendsig() is invoked as part of the signal catching mechanism.
  * The structure contain all the information that KERNEL needs to build
@@ -110,10 +116,10 @@ struct kinfo {
 };
 
 /* Load data accounted every this no. of seconds. */
-#define _LOAD_UNIT_SECS		 6 
+#define _LOAD_UNIT_SECS		 6 	/* Changing this breaks ABI. */
 
 /* Load data history is kept for this long. */
-#define _LOAD_HISTORY_MINUTES	15
+#define _LOAD_HISTORY_MINUTES	15	/* Changing this breaks ABI. */
 #define _LOAD_HISTORY_SECONDS	(60*_LOAD_HISTORY_MINUTES)
 
 /* We need this many slots to store the load history. */
@@ -130,7 +136,7 @@ struct machine {
   int pc_at;
   int ps_mca;
   int processor;
-  int protected;
+  int padding;	/* used to be protected */
   int vdu_ega;
   int vdu_vga;
 };
@@ -145,6 +151,29 @@ struct mem_range
 {
 	phys_bytes mr_base;	/* Lowest memory address in range */
 	phys_bytes mr_limit;	/* Highest memory address in range */
+};
+
+/* For EXEC_NEWMEM */
+struct exec_newmem
+{
+	vir_bytes text_bytes;
+	vir_bytes data_bytes;
+	vir_bytes bss_bytes;
+	vir_bytes tot_bytes;
+	vir_bytes args_bytes;
+	int sep_id;
+	dev_t st_dev;
+	ino_t st_ino;
+	time_t st_ctime;
+	uid_t new_uid;
+	gid_t new_gid;
+	char progname[16];	/* Should be at least PROC_NAME_LEN */
+};
+
+/* Memory chunks. */
+struct memory {
+	phys_bytes	base;
+	phys_bytes	size;
 };
 
 #endif /* _TYPE_H */

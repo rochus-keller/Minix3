@@ -4,6 +4,7 @@
 #include <timers.h>
 #include <ibm/interrupt.h>
 #include <minix/endpoint.h>
+#include <minix/sys_config.h>
 #include "../../kernel/const.h"
 #include "../../kernel/config.h"
 #include "../../kernel/debug.h"
@@ -136,24 +137,6 @@ PUBLIC void irqtab_dmp()
   struct irq_hook irq_hooks[NR_IRQ_HOOKS];
   int irq_actids[NR_IRQ_VECTORS];
   struct irq_hook *e;	/* irq tab entry */
-  char *irq[] = {
-  	"clock",	/* 00 */
-  	"keyboard",	/* 01 */
-  	"cascade",	/* 02 */
-  	"rs232",	/* 03 */
-  	"rs232",	/* 04 */
-  	"NIC(eth)",	/* 05 */
-  	"floppy",	/* 06 */
-  	"printer",	/* 07 */
-  	"",	/* 08 */
-  	"",	/* 09 */
-  	"",	/* 10 */
-  	"",	/* 11 */
-  	"",	/* 12 */
-  	"",	/* 13 */
-  	"at_wini_0",	/* 14 */
-  	"at_wini_1",	/* 15 */
-  };
 
   if ((r = sys_getirqhooks(irq_hooks)) != OK) {
       report("IS","warning: couldn't get copy of irq hooks", r);
@@ -172,7 +155,7 @@ PUBLIC void irqtab_dmp()
 #endif
 
   printf("IRQ policies dump shows use of kernel's IRQ hooks.\n");
-  printf("-h.id- -proc.nr- -IRQ vector (nr.)- -policy- -notify id-\n");
+  printf("-h.id- -proc.nr- -irq nr- -policy- -notify id-\n");
   for (i=0; i<NR_IRQ_HOOKS; i++) {
   	e = &irq_hooks[i];
   	printf("%3d", i);
@@ -181,7 +164,7 @@ PUBLIC void irqtab_dmp()
   	    continue;
   	}
   	printf("%10d  ", e->proc_nr_e); 
-  	printf("    %9.9s (%02d) ", irq[e->irq], e->irq); 
+  	printf("    (%02d) ", e->irq); 
   	printf("  %s", (e->policy & IRQ_REENABLE) ? "reenable" : "    -   ");
   	printf("   %d", e->notify_id);
 	if (irq_actids[e->irq] & (1 << i))
@@ -292,7 +275,6 @@ PUBLIC void kenv_dmp()
     printf("- pc_at:      %3d\n", machine.pc_at); 
     printf("- ps_mca:     %3d\n", machine.ps_mca); 
     printf("- processor:  %3d\n", machine.processor); 
-    printf("- protected:  %3d\n", machine.protected); 
     printf("- vdu_ega:    %3d\n", machine.vdu_ega); 
     printf("- vdu_vga:    %3d\n\n", machine.vdu_vga); 
     printf("Kernel info structure:\n");
@@ -353,8 +335,7 @@ PUBLIC void privileges_dmp()
   register struct proc *rp;
   static struct proc *oldrp = BEG_PROC_ADDR;
   register struct priv *sp;
-  static char ipc_to[NR_SYS_PROCS + 1 + NR_SYS_PROCS/8];
-  int r, i,j, n = 0;
+  int r, i, n = 0;
 
   /* First obtain a fresh copy of the current process and system table. */
   if ((r = sys_getprivtab(priv)) != OK) {
@@ -366,7 +347,7 @@ PUBLIC void privileges_dmp()
       return;
   }
 
-  printf("\n--nr-id-name---- -flags- -traps- -ipc_to mask------------------------ \n");
+  printf("\n--nr-id-name---- -flags- -traps- grants -ipc_to-- -system calls--\n");
 
   for (rp = oldrp; rp < END_PROC_ADDR; rp++) {
 	if (isemptyp(rp)) continue;
@@ -380,17 +361,20 @@ PUBLIC void privileges_dmp()
         if (r == -1 && ! (rp->p_rts_flags & SLOT_FREE)) {
 	    sp = &priv[USER_PRIV_ID];
         }
-	printf("(%02u) %-7.7s %s   %s  ",
+	printf("(%02u) %-7.7s %s   %s %7d",
 	       sp->s_id, rp->p_name,
-	       s_flags_str(sp->s_flags), s_traps_str(sp->s_trap_mask) 
-        );
-        for (i=j=0; i < NR_SYS_PROCS; i++, j++) {
-       	    ipc_to[j] = get_sys_bit(sp->s_ipc_to, i) ? '1' : '0';
-       	    if (i % 8 == 7) ipc_to[++j] = ' ';
+	       s_flags_str(sp->s_flags), s_traps_str(sp->s_trap_mask),
+		sp->s_grant_entries);
+        for (i=0; i < NR_SYS_PROCS; i += BITCHUNK_BITS) {
+	    printf(" %04x", get_sys_bits(sp->s_ipc_to, i));
        	}
-        ipc_to[j] = '\0';
 
-	printf(" %s \n", ipc_to);
+	printf(" ");
+        for (i=0; i < NR_SYS_CALLS; i += BITCHUNK_BITS) {
+	    printf(" %04x", sp->s_k_call_mask[i/BITCHUNK_BITS]);
+       	}
+	printf("\n");
+
   }
   if (rp == END_PROC_ADDR) rp = BEG_PROC_ADDR; else printf("--more--\r");
   oldrp = rp;
@@ -449,13 +433,14 @@ PUBLIC void sendmask_dmp()
 PRIVATE char *p_rts_flags_str(int flags)
 {
 	static char str[10];
-	str[0] = (flags & NO_MAP) ? 'M' : '-';
+	str[0] = (flags & NO_PRIORITY) ? 's' : '-';
 	str[1] = (flags & SENDING)  ? 'S' : '-';
 	str[2] = (flags & RECEIVING)    ? 'R' : '-';
 	str[3] = (flags & SIGNALED)    ? 'I' : '-';
 	str[4] = (flags & SIG_PENDING)    ? 'P' : '-';
 	str[5] = (flags & P_STOP)    ? 'T' : '-';
-	str[6] = '\0';
+	str[6] = (flags & NO_PRIV) ? 'p' : '-';
+	str[7] = '\0';
 
 	return str;
 }
@@ -479,7 +464,7 @@ PUBLIC void proctab_dmp()
       return;
   }
 
-  printf("\n-nr-----gen---endpoint--name--- -prior-quant- -user---sys----size-rts flags-\n");
+  printf("\n-nr-----gen---endpoint-name--- -prior-quant- -user----sys----size-rts flags\n");
 
   for (rp = oldrp; rp < END_PROC_ADDR; rp++) {
 	if (isemptyp(rp)) continue;
@@ -492,7 +477,7 @@ PUBLIC void proctab_dmp()
 	else if (proc_nr(rp) < 0) 	printf("[%2d] ", proc_nr(rp));
 	else 				printf(" %2d  ", proc_nr(rp));
 	printf(" %5d %10d ", _ENDPOINT_G(rp->p_endpoint), rp->p_endpoint);
-	printf(" %-8.8s %02u/%02u %02d/%02u %6lu%6lu %6uK %s",
+	printf("%-8.8s %02u/%02u %02d/%02u %6lu %6lu %5uK %s",
 	       rp->p_name,
 	       rp->p_priority, rp->p_max_priority,
 	       rp->p_ticks_left, rp->p_quantum_size, 

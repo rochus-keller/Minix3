@@ -11,19 +11,54 @@
  *   do_svrctl: process manager control
  */
 
+#define brk _brk
+
 #include "pm.h"
 #include <minix/callnr.h>
 #include <signal.h>
 #include <sys/svrctl.h>
 #include <sys/resource.h>
+#include <sys/utsname.h>
 #include <minix/com.h>
 #include <minix/config.h>
+#include <minix/sysinfo.h>
 #include <minix/type.h>
 #include <string.h>
+#include <archconst.h>
+#include <archtypes.h>
 #include <lib.h>
 #include "mproc.h"
 #include "param.h"
 #include "../../kernel/proc.h"
+
+PUBLIC struct utsname uts_val = {
+  "Minix",		/* system name */
+  "noname",		/* node/network name */
+  OS_RELEASE,		/* O.S. release (e.g. 1.5) */
+  OS_VERSION,		/* O.S. version (e.g. 10) */
+  "xyzzy",		/* machine (cpu) type (filled in later) */
+#if __i386
+  "i386",		/* architecture */
+#else
+#error			/* oops, no 'uname -mk' */
+#endif
+};
+
+PRIVATE char *uts_tbl[] = {
+  uts_val.arch,
+  NULL,			/* No kernel architecture */
+  uts_val.machine,
+  NULL,			/* No hostname */
+  uts_val.nodename,
+  uts_val.release,
+  uts_val.version,
+  uts_val.sysname,
+  NULL,			/* No bus */			/* No bus */
+};
+
+#if ENABLE_SYSCALL_STATS
+PUBLIC unsigned long calls_stats[NCALLS];
+#endif
 
 /*===========================================================================*
  *				do_allocmem				     *
@@ -32,6 +67,16 @@ PUBLIC int do_allocmem()
 {
   vir_clicks mem_clicks;
   phys_clicks mem_base;
+
+  /* This call is dangerous. Memory will be lost of the requesting process
+   * forgets about it.
+   */
+  if (mp->mp_effuid != 0)
+  {
+	printf("PM: unauthorized call of do_allocmem by proc %d\n",
+		mp->mp_endpoint);
+	return EPERM;
+  }
 
   mem_clicks = (m_in.memsize + CLICK_SIZE -1 ) >> CLICK_SHIFT;
   mem_base = alloc_mem(mem_clicks);
@@ -47,6 +92,16 @@ PUBLIC int do_freemem()
 {
   vir_clicks mem_clicks;
   phys_clicks mem_base;
+
+  /* This call is dangerous. Even memory belonging to other processes can
+   * be freed.
+   */
+  if (mp->mp_effuid != 0)
+  {
+	printf("PM: unauthorized call of do_freemem by proc %d\n",
+		mp->mp_endpoint);
+	return EPERM;
+  }
 
   mem_clicks = (m_in.memsize + CLICK_SIZE -1 ) >> CLICK_SHIFT;
   mem_base = (m_in.membase + CLICK_SIZE -1 ) >> CLICK_SHIFT;
@@ -65,6 +120,15 @@ PUBLIC int do_procstat()
    * Future use might include the FS requesting for process status of
    * any user process. 
    */
+  
+  /* This call should be removed, or made more general. */
+  if (mp->mp_effuid != 0)
+  {
+	printf("PM: unauthorized call of do_procstat by proc %d\n",
+		mp->mp_endpoint);
+	return EPERM;
+  }
+
   if (m_in.stat_nr == SELF) {
       mp->mp_reply.sig_set = mp->mp_sigpending;
       sigemptyset(&mp->mp_sigpending);
@@ -74,6 +138,70 @@ PUBLIC int do_procstat()
   }
   return(OK);
 }
+
+/*===========================================================================*
+ *				do_sysuname				     *
+ *===========================================================================*/
+PUBLIC int do_sysuname()
+{
+/* Set or get uname strings. */
+
+  int r;
+  size_t n;
+  char *string;
+#if 0 /* for updates */
+  char tmp[sizeof(uts_val.nodename)];
+  static short sizes[] = {
+	0,	/* arch, (0 = read-only) */
+	0,	/* kernel */
+	0,	/* machine */
+	0,	/* sizeof(uts_val.hostname), */
+	sizeof(uts_val.nodename),
+	0,	/* release */
+	0,	/* version */
+	0,	/* sysname */
+  };
+#endif
+
+  if ((unsigned) m_in.sysuname_field >= _UTS_MAX) return(EINVAL);
+
+  string = uts_tbl[m_in.sysuname_field];
+  if (string == NULL)
+	return EINVAL;	/* Unsupported field */
+
+  switch (m_in.sysuname_req) {
+  case _UTS_GET:
+	/* Copy an uname string to the user. */
+	n = strlen(string) + 1;
+	if (n > m_in.sysuname_len) n = m_in.sysuname_len;
+	r = sys_vircopy(SELF, D, (phys_bytes) string, 
+		mp->mp_endpoint, D, (phys_bytes) m_in.sysuname_value,
+		(phys_bytes) n);
+	if (r < 0) return(r);
+	break;
+
+#if 0	/* no updates yet */
+  case _UTS_SET:
+	/* Set an uname string, needs root power. */
+	len = sizes[m_in.sysuname_field];
+	if (mp->mp_effuid != 0 || len == 0) return(EPERM);
+	n = len < m_in.sysuname_len ? len : m_in.sysuname_len;
+	if (n <= 0) return(EINVAL);
+	r = sys_vircopy(mp->mp_endpoint, D, (phys_bytes) m_in.sysuname_value,
+		SELF, D, (phys_bytes) tmp, (phys_bytes) n);
+	if (r < 0) return(r);
+	tmp[n-1] = 0;
+	strcpy(string, tmp);
+	break;
+#endif
+
+  default:
+	return(EINVAL);
+  }
+  /* Return the number of bytes moved. */
+  return(n);
+}
+
 
 /*===========================================================================*
  *				do_getsysinfo			       	     *
@@ -89,6 +217,17 @@ PUBLIC int do_getsysinfo()
   static struct pm_mem_info pmi;
   int s, r;
   size_t holesize;
+
+  /* This call leaks important information (the contents of registers).
+   * harmless data (such as the load should get their own calls)
+   */
+  if (mp->mp_effuid != 0)
+  {
+	printf("PM: unauthorized call of do_getsysinfo by proc %d '%s'\n",
+		mp->mp_endpoint, mp->mp_name);
+	sig_proc(mp, SIGEMT);
+	return EPERM;
+  }
 
   switch(m_in.info_what) {
   case SI_KINFO:			/* kernel info is obtained via PM */
@@ -124,6 +263,12 @@ PUBLIC int do_getsysinfo()
         src_addr = (vir_bytes) &loadinfo;
         len = sizeof(struct loadinfo);
         break;
+#if ENABLE_SYSCALL_STATS
+  case SI_CALL_STATS:
+  	src_addr = (vir_bytes) calls_stats;
+  	len = sizeof(calls_stats);
+  	break; 
+#endif
   default:
   	return(EINVAL);
   }
@@ -135,6 +280,37 @@ PUBLIC int do_getsysinfo()
 }
 
 /*===========================================================================*
+ *				do_getsysinfo_up		       	     *
+ *===========================================================================*/
+PUBLIC int do_getsysinfo_up()
+{
+  vir_bytes src_addr, dst_addr;
+  struct loadinfo loadinfo;
+  size_t len, real_len;
+  int s;
+
+  switch(m_in.SIU_WHAT) {
+  case SIU_LOADINFO:			/* loadinfo is obtained via PM */
+        sys_getloadinfo(&loadinfo);
+        src_addr = (vir_bytes) &loadinfo;
+        real_len = sizeof(struct loadinfo);
+        break;
+  default:
+  	return(EINVAL);
+  }
+
+  /* Let application know what the length was. */
+  len = real_len;
+  if(len > m_in.SIU_LEN)
+	len = m_in.SIU_LEN;
+
+  dst_addr = (vir_bytes) m_in.SIU_WHERE;
+  if (OK != (s=sys_datacopy(SELF, src_addr, who_e, dst_addr, len)))
+  	return(s);
+  return(real_len);
+}
+
+/*===========================================================================*
  *				do_getprocnr			             *
  *===========================================================================*/
 PUBLIC int do_getprocnr()
@@ -143,6 +319,14 @@ PUBLIC int do_getprocnr()
   static char search_key[PROC_NAME_LEN+1];
   int key_len;
   int s;
+
+  /* This call should be moved to DS. */
+  if (mp->mp_effuid != 0)
+  {
+	printf("PM: unauthorized call of do_procstat by proc %d\n",
+		mp->mp_endpoint);
+	return EPERM;
+  }
 
   if (m_in.pid >= 0) {			/* lookup process by pid */
   	for (rmp = &mproc[0]; rmp < &mproc[NR_PROCS]; rmp++) {
@@ -179,10 +363,7 @@ PUBLIC int do_getprocnr()
  *===========================================================================*/
 PUBLIC int do_reboot()
 {
-  char monitor_code[256];		
-  vir_bytes code_addr;
-  int code_size;
-  int abort_flag;
+  int r;
 
   /* Check permission to abort the system. */
   if (mp->mp_effuid != SUPER_USER) return(EPERM);
@@ -197,10 +378,10 @@ PUBLIC int do_reboot()
 	if((r = sys_datacopy(who_e, (vir_bytes) m_in.reboot_code,
 		SELF, (vir_bytes) monitor_code, m_in.reboot_strlen)) != OK)
 		return r;
-	code_addr = (vir_bytes) monitor_code;
 	monitor_code[m_in.reboot_strlen] = '\0';
-	code_size = m_in.reboot_strlen + 1;
   }
+  else
+	monitor_code[0] = '\0';
 
   /* Order matters here. When FS is told to reboot, it exits all its
    * processes, and then would be confused if they're exited again by
@@ -209,12 +390,11 @@ PUBLIC int do_reboot()
 
   check_sig(-1, SIGKILL); 		/* kill all users except init */
   sys_nice(INIT_PROC_NR, PRIO_STOP);	/* stop init, but keep it around */
-  tell_fs(REBOOT, 0, 0, 0);		/* tell FS to synchronize */
 
-  /* Ask the kernel to abort. All system services, including the PM, will 
-   * get a HARD_STOP notification. Await the notification in the main loop.
-   */
-  sys_abort(abort_flag, PM_PROC_NR, code_addr, code_size);
+  report_reboot= 1;
+  r= notify(FS_PROC_NR);
+  if (r != OK) panic("pm", "do_reboot: unable to notify FS", r);
+  
   return(SUSPEND);			/* don't reply to caller */
 }
 
@@ -388,42 +568,18 @@ PUBLIC int do_svrctl()
 }
 
 /*===========================================================================*
- *				_read_pm				     *
+ *				_brk				             *
  *===========================================================================*/
-PUBLIC ssize_t _read_pm(fd, buffer, nbytes, seg, ep)
-int fd;
-void *buffer;
-size_t nbytes;
-int seg;
-int ep;
+
+extern char *_brksize;
+PUBLIC int brk(brk_addr)
+char *brk_addr;
 {
-  message m;
-
-  m.m1_i1 = _PM_SEG_FLAG | fd;
-  m.m1_i2 = nbytes;
-  m.m1_p1 = (char *) buffer;
-  m.m1_p2 = (char *) seg;
-  m.m1_p3 = (char *) ep;
-  return(_syscall(FS_PROC_NR, READ, &m));
-}
-
-/*===========================================================================*
- *				_write_pm				     *
- *===========================================================================*/
-PUBLIC ssize_t _write_pm(fd, buffer, nbytes, seg, ep)
-int fd;
-void *buffer;
-size_t nbytes;
-int seg;
-int ep;
-{
-  message m;
-
-  m.m1_i1 = _PM_SEG_FLAG | fd;
-  m.m1_i2 = nbytes;
-  m.m1_p1 = (char *) buffer;
-  m.m1_p2 = (char *) seg;
-  m.m1_p3 = (char *) ep;
-  return(_syscall(FS_PROC_NR, WRITE, &m));
+/* PM wants to call brk() itself. */
+	if(real_brk(&mproc[PM_PROC_NR], (vir_bytes) brk_addr) != OK) {
+		return -1;
+	}
+	_brksize = brk_addr;
+	return 0;
 }
 

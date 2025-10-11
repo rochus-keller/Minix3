@@ -8,12 +8,13 @@ MDEC=	/usr/mdec
 # Specify the programs that are part of the system image.
 PROGRAMS=	../kernel/kernel \
 	../servers/pm/pm \
-	../servers/fs/fs \
+	../servers/vfs/vfs \
 	../servers/rs/rs \
 	../servers/ds/ds \
 	../drivers/tty/tty \
 	../drivers/memory/memory \
 	../drivers/log/log \
+	../servers/mfs/mfs \
 	../servers/init/init
 
 usage:	
@@ -48,13 +49,13 @@ fresh:
 all: services image
 
 image:  includes
-	cd ../kernel && $(MAKE) 
+	cd ../kernel && $(MAKE) EXTRA_OPTS=$(EXTRA_OPTS)
 	cd ../servers && $(MAKE) image
 	cd ../drivers && $(MAKE) image
 	installboot -image $@ $(PROGRAMS)
 
 image_small:  includes
-	cd ../kernel && $(MAKE) 
+	cd ../kernel && $(MAKE) EXTRA_OPTS=$(EXTRA_OPTS)
 	cd ../servers && $(MAKE) EXTRA_OPTS=-D_MINIX_SMALL=1 image
 	cd ../drivers && $(MAKE) EXTRA_OPTS=$(EXTRA_OPTS) image
 	installboot -image $@ $(PROGRAMS)

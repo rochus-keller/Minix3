@@ -11,9 +11,9 @@ d = ..
 
 # programs, flags, etc.
 CC =	exec cc
-CFLAGS = -I$i
+CFLAGS = -I$i $(CPROFILE)
 LDFLAGS = -i 
-LIBS = -lsys -lsysutil -ltimers
+LIBS = -lsysutil  -lsys -ltimers
 
 OBJ = ti1225.o
 
@@ -21,7 +21,7 @@ OBJ = ti1225.o
 all build:	$(DRIVER)
 $(DRIVER):	$(OBJ) 
 	$(CC) -o $@ $(LDFLAGS) $(OBJ) $(LIBS)
-	install -S 4096 $(DRIVER)
+	install -S 8k $(DRIVER)
 
 # install with other drivers
 install:	/usr/sbin/$(DRIVER)
@@ -33,7 +33,7 @@ clean:
 	rm -f *.o *.bak $(DRIVER)
 
 depend: 
-	/usr/bin/mkdep "$(CC) -E $(CPPFLAGS)" *.c > .depend
+	mkdep "$(CC) -E $(CPPFLAGS)" *.c > .depend
 
 # Include generated dependencies.
 include .depend

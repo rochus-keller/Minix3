@@ -20,7 +20,6 @@ message *m_ptr;			/* pointer to request message */
   register struct proc *rp;	/* process whose map is to be loaded */
   struct mem_map *map_ptr;	/* virtual address of map inside caller (PM) */
   phys_bytes src_phys;		/* physical address of map at the PM */
-  int old_flags;		/* value of flags before modification */
   int proc;
 
   map_ptr = (struct mem_map *) m_ptr->PR_MEM_PTR;
@@ -28,20 +27,29 @@ message *m_ptr;			/* pointer to request message */
   if (iskerneln(proc)) return(EPERM);
   rp = proc_addr(proc);
 
+  return newmap(rp, map_ptr);
+}
+
+
+/*===========================================================================*
+ *				newmap					     *
+ *===========================================================================*/
+PUBLIC int newmap(rp, map_ptr)
+struct proc *rp;		/* process whose map is to be loaded */
+struct mem_map *map_ptr;	/* virtual address of map inside caller (PM) */
+{
+/* Fetch the memory map from PM. */
+  phys_bytes src_phys;		/* physical address of map at the PM */
+  int proc;
+
   /* Copy the map from PM. */
   src_phys = umap_local(proc_addr(who_p), D, (vir_bytes) map_ptr, 
       sizeof(rp->p_memmap));
   if (src_phys == 0) return(EFAULT);
-  phys_copy(src_phys,vir2phys(rp->p_memmap),(phys_bytes)sizeof(rp->p_memmap));
+  phys_copy(src_phys,vir2phys(rp->p_memmap),
+	(phys_bytes)sizeof(rp->p_memmap));
 
-#if (CHIP != M68000)
   alloc_segments(rp);
-#else
-  pmmu_init_proc(rp);
-#endif
-  old_flags = rp->p_rts_flags;	/* save the previous value of the flags */
-  rp->p_rts_flags &= ~NO_MAP;
-  if (old_flags != 0 && rp->p_rts_flags == 0) lock_enqueue(rp);
 
   return(OK);
 }

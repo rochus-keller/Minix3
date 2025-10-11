@@ -38,22 +38,9 @@ message *m_ptr;			/* pointer to request message */
   if (src_phys == 0) return(EFAULT);
   phys_copy(src_phys, vir2phys(&sc), (phys_bytes) sizeof(struct sigcontext));
 
-  /* Make sure that this is not just a jump buffer. */
-  if ((sc.sc_flags & SC_SIGCONTEXT) == 0) return(EINVAL);
-
-  /* Fix up only certain key registers if the compiler doesn't use
-   * register variables within functions containing setjmp.
-   */
-  if (sc.sc_flags & SC_NOREGLOCALS) {
-      rp->p_reg.retreg = sc.sc_retreg;
-      rp->p_reg.fp = sc.sc_fp;
-      rp->p_reg.pc = sc.sc_pc;
-      rp->p_reg.sp = sc.sc_sp;
-      return(OK);
-  }
   sc.sc_psw  = rp->p_reg.psw;
 
-#if (CHIP == INTEL)
+#if (_MINIX_CHIP == _CHIP_INTEL)
   /* Don't panic kernel if user gave bad selectors. */
   sc.sc_cs = rp->p_reg.cs;
   sc.sc_ds = rp->p_reg.ds;
@@ -65,7 +52,11 @@ message *m_ptr;			/* pointer to request message */
 #endif
 
   /* Restore the registers. */
+#if _MINIX_CHIP == _CHIP_POWERPC
+  memcpy(&rp->p_reg, &sc.sc_regs, sizeof(struct stackframe_s));
+#else
   memcpy(&rp->p_reg, &sc.sc_regs, sizeof(struct sigregs));
+#endif
   return(OK);
 }
 #endif /* USE_SIGRETURN */

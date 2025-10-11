@@ -17,11 +17,13 @@
 FORWARD _PROTOTYPE(void init_server, (void)				);
 FORWARD _PROTOTYPE(void sig_handler, (void)				);
 FORWARD _PROTOTYPE(void get_work, (message *m)				);
-FORWARD _PROTOTYPE(void reply, (int whom, int result)			);
+FORWARD _PROTOTYPE(void reply, (int whom, message *m_out)		);
 
 /* Data buffers to retrieve info during initialization. */
 PRIVATE struct boot_image image[NR_BOOT_PROCS];
 PUBLIC struct dmap dmap[NR_DEVICES];
+
+long rs_verbose = 0;
 
 /*===========================================================================*
  *				main                                         *
@@ -81,10 +83,12 @@ PUBLIC int main(void)
        */
       else {	
           switch(call_nr) {
-          case RS_UP: 		result = do_up(&m); 		break;
+          case RS_UP: 		result = do_up(&m, FALSE, 0); break;
+          case RS_UP_COPY:	result = do_up(&m, TRUE, 0); break;
+	  case RS_START:	result = do_start(&m);		break;
           case RS_DOWN: 	result = do_down(&m); 		break;
           case RS_REFRESH: 	result = do_refresh(&m); 	break;
-          case RS_RESCUE: 	result = do_rescue(&m); 	break;
+          case RS_RESTART: 	result = do_restart(&m); 	break;
           case RS_SHUTDOWN: 	result = do_shutdown(&m); 	break;
           case GETSYSINFO: 	result = do_getsysinfo(&m); 	break;
           default: 
@@ -95,7 +99,8 @@ PUBLIC int main(void)
 
           /* Finally send reply message, unless disabled. */
           if (result != EDONTREPLY) {
-              reply(who_e, result);
+	      m.m_type = result;
+              reply(who_e, &m);
           }
       }
   }
@@ -127,13 +132,13 @@ PRIVATE void init_server(void)
   if ((s = getsysinfo(FS_PROC_NR, SI_DMAP_TAB, dmap)) < 0)
       panic("RS","warning: couldn't get copy of dmap table", errno);
   
+#if 0
   /* Now initialize the table with the processes in the system image. 
    * Prepend /sbin/ to the binaries so that we can actually find them. 
    */
   for (s=0; s< NR_BOOT_PROCS; s++) {
       ip = &image[s];
       if (ip->proc_nr >= 0) {
-          nr_in_use ++;
           rproc[s].r_flags = RS_IN_USE;
           rproc[s].r_proc_nr_e = ip->endpoint;
           rproc[s].r_pid = getnpid(ip->proc_nr);
@@ -147,11 +152,14 @@ PRIVATE void init_server(void)
           rproc[s].r_argv[1] = NULL;
       }
   }
+#endif
 
   /* Set alarm to periodically check driver status. */
   if (OK != (s=sys_setalarm(RS_DELTA_T, 0)))
       panic("RS", "couldn't set alarm", s);
 
+  /* See if we run in verbose mode. */
+  env_parse("rs_verbose", "d", 0, &rs_verbose, 0, 1); 
 }
 
 /*===========================================================================*
@@ -185,17 +193,18 @@ message *m_in;				/* pointer to message */
 /*===========================================================================*
  *				reply					     *
  *===========================================================================*/
-PRIVATE void reply(who, result)
+PRIVATE void reply(who, m_out)
 int who;                           	/* replyee */
-int result;                           	/* report result */
+message *m_out;                         /* reply message */
 {
-    message m_out;			/* reply message */
+    /*message m_out;*/			/* reply message */
     int s;				/* send status */
 
-    m_out.m_type = result;  		/* build reply message */
-    if (OK != (s=send(who, &m_out)))    /* send the message */
+    /*m_out.m_type = result;*/    	/* build reply message */
+    if (OK != (s=send(who, m_out)))     /* send the message */
         panic("RS", "unable to send reply", s);
 }
+
 
 
 

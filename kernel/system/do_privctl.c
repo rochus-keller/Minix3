@@ -8,6 +8,7 @@
 #include "../system.h"
 #include "../ipc.h"
 #include <signal.h>
+#include <string.h>
 
 #if USE_PRIVCTL
 
@@ -27,11 +28,11 @@ message *m_ptr;			/* pointer to request message */
   register struct priv *sp;
   int proc_nr;
   int priv_id;
-  int old_flags;
   int i;
   phys_bytes caller_phys, kernel_phys;
   struct io_range io_range;
   struct mem_range mem_range;
+  struct priv priv;
 
   /* Check whether caller is allowed to make this call. Privileged proceses 
    * can only update the privileges of processes that are inhibited from 
@@ -40,13 +41,14 @@ message *m_ptr;			/* pointer to request message */
    */
   caller_ptr = proc_addr(who_p);
   if (! (priv(caller_ptr)->s_flags & SYS_PROC)) return(EPERM); 
-  if(!isokendpt(m_ptr->PR_ENDPT, &proc_nr)) return(EINVAL);
+  if(m_ptr->PR_ENDPT == SELF) proc_nr = who_p;
+  else if(!isokendpt(m_ptr->PR_ENDPT, &proc_nr)) return(EINVAL);
   rp = proc_addr(proc_nr);
 
   switch(m_ptr->CTL_REQUEST)
   {
   case SYS_PRIV_INIT:
-	if (! (rp->p_rts_flags & NO_PRIV)) return(EPERM);
+	if (! RTS_ISSET(rp, NO_PRIV)) return(EPERM);
 
 	/* Make sure this process has its own privileges structure. This may
 	 * fail, since there are only a limited number of system processes.
@@ -79,18 +81,76 @@ message *m_ptr;			/* pointer to request message */
 	    }
 	}
 
-	/* No I/O resources, no memory resources, no IRQs */
+	/* No I/O resources, no memory resources, no IRQs, no grant table */
 	priv(rp)->s_nr_io_range= 0;
 	priv(rp)->s_nr_mem_range= 0;
 	priv(rp)->s_nr_irq= 0;
+	priv(rp)->s_grant_table= 0;
+	priv(rp)->s_grant_entries= 0;
+
+	if (m_ptr->CTL_ARG_PTR)
+	{
+		/* Copy privilege structure from caller */
+		caller_phys = umap_local(caller_ptr, D,
+			(vir_bytes) m_ptr->CTL_ARG_PTR, sizeof(priv));
+		if (caller_phys == 0)
+			return EFAULT;
+		kernel_phys = vir2phys(&priv);
+		phys_copy(caller_phys, kernel_phys, sizeof(priv));
+
+		/* Copy the call mask */
+		for (i= 0; i<CALL_MASK_SIZE; i++)
+			priv(rp)->s_k_call_mask[i]= priv.s_k_call_mask[i];
+
+		/* Copy IRQs */
+		if (priv.s_nr_irq < 0 || priv.s_nr_irq > NR_IRQ)
+			return EINVAL;
+		priv(rp)->s_nr_irq= priv.s_nr_irq;
+		for (i= 0; i<priv.s_nr_irq; i++)
+		{
+			priv(rp)->s_irq_tab[i]= priv.s_irq_tab[i];
+#if 0
+			kprintf("do_privctl: adding IRQ %d for %d\n",
+				priv(rp)->s_irq_tab[i], rp->p_endpoint);
+#endif
+		}
+
+		priv(rp)->s_flags |= CHECK_IRQ;	/* Check requests for IRQs */
+
+		/* Copy I/O ranges */
+		if (priv.s_nr_io_range < 0 || priv.s_nr_io_range > NR_IO_RANGE)
+			return EINVAL;
+		priv(rp)->s_nr_io_range= priv.s_nr_io_range;
+		for (i= 0; i<priv.s_nr_io_range; i++)
+		{
+			priv(rp)->s_io_tab[i]= priv.s_io_tab[i];
+#if 0
+			kprintf("do_privctl: adding I/O range [%x..%x] for %d\n",
+				priv(rp)->s_io_tab[i].ior_base,
+				priv(rp)->s_io_tab[i].ior_limit,
+				rp->p_endpoint);
+#endif
+		}
+
+		/* Check requests for IRQs */
+		priv(rp)->s_flags |= CHECK_IO_PORT;
+
+		memcpy(priv(rp)->s_k_call_mask, priv.s_k_call_mask,
+			sizeof(priv(rp)->s_k_call_mask));
+	}
 
 	/* Done. Privileges have been set. Allow process to run again. */
-	old_flags = rp->p_rts_flags;		/* save value of the flags */
-	rp->p_rts_flags &= ~NO_PRIV; 		
-	if (old_flags != 0 && rp->p_rts_flags == 0) lock_enqueue(rp);
+	RTS_LOCK_UNSET(rp, NO_PRIV);
 	return(OK);
+  case SYS_PRIV_USER:
+	/* Make this process an ordinary user process. */
+	if (!RTS_ISSET(rp, NO_PRIV)) return(EPERM);
+	if ((i=get_priv(rp, 0)) != OK) return(i);
+	RTS_LOCK_UNSET(rp, NO_PRIV);
+	return(OK);
+
   case SYS_PRIV_ADD_IO:
-	if (rp->p_rts_flags & NO_PRIV)
+	if (RTS_ISSET(rp, NO_PRIV))
 		return(EPERM);
 
 	/* Only system processes get I/O resources? */
@@ -116,7 +176,7 @@ message *m_ptr;			/* pointer to request message */
 	return OK;
 
   case SYS_PRIV_ADD_MEM:
-	if (rp->p_rts_flags & NO_PRIV)
+	if (RTS_ISSET(rp, NO_PRIV))
 		return(EPERM);
 
 	/* Only system processes get memory resources? */
@@ -144,7 +204,7 @@ message *m_ptr;			/* pointer to request message */
 	return OK;
 
   case SYS_PRIV_ADD_IRQ:
-	if (rp->p_rts_flags & NO_PRIV)
+	if (RTS_ISSET(rp, NO_PRIV))
 		return(EPERM);
 
 	/* Only system processes get IRQs? */
@@ -160,7 +220,6 @@ message *m_ptr;			/* pointer to request message */
 	priv(rp)->s_nr_irq++;
 
 	return OK;
-
   default:
 	kprintf("do_privctl: bad request %d\n", m_ptr->CTL_REQUEST);
 	return EINVAL;

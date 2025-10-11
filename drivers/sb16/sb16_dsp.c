@@ -101,10 +101,14 @@ PUBLIC void main()
 		switch(mess.m_type) {
 			case DEV_OPEN:		r = dsp_open();	break;
 			case DEV_CLOSE:		r = dsp_close(); break;
+#ifdef DEV_IOCTL
 			case DEV_IOCTL:		r = dsp_ioctl(&mess); break;
+#endif
+#ifdef DEV_READ
 
 			case DEV_READ:		r = EINVAL; break; /* Not yet implemented */
 			case DEV_WRITE:		dsp_write(&mess); continue; /* don't reply */
+#endif
 			
 			case DEV_STATUS:	dsp_status(&mess); continue; /* don't reply */
 			case HARD_INT:		dsp_hardware_msg(); continue; /* don't reply */
@@ -226,7 +230,7 @@ message *m_ptr;
 
 	if(DmaBusy < 0) { /* Dma tranfer not yet started */
 
-		DmaMode = DEV_WRITE;           /* Dma mode is writing */
+		DmaMode = DEV_WRITE_S;           /* Dma mode is writing */
 		sys_datacopy(m_ptr->IO_ENDPT, (vir_bytes)m_ptr->ADDRESS, SELF, (vir_bytes)DmaPtr, (phys_bytes)DspFragmentSize);
 		dsp_dma_setup(DmaPhys, DspFragmentSize * DMA_NR_OF_BUFFERS);
 		dsp_setup();
@@ -578,13 +582,13 @@ int count;
 		pv_set(pvb[1], DMA8_CLEAR, 0x00);		       /* Clear flip flop */
 
 		/* set DMA mode */
-		pv_set(pvb[2], DMA8_MODE, (DmaMode == DEV_WRITE ? DMA8_AUTO_PLAY : DMA8_AUTO_REC)); 
+		pv_set(pvb[2], DMA8_MODE, (DmaMode == DEV_WRITE_S ? DMA8_AUTO_PLAY : DMA8_AUTO_REC)); 
 
-		pv_set(pvb[3], DMA8_ADDR, address >>  0);        /* Low_byte of address */
-		pv_set(pvb[4], DMA8_ADDR, address >>  8);        /* High byte of address */
-		pv_set(pvb[5], DMA8_PAGE, address >> 16);        /* 64K page number */
-		pv_set(pvb[6], DMA8_COUNT, count >> 0);          /* Low byte of count */
-		pv_set(pvb[7], DMA8_COUNT, count >> 8);          /* High byte of count */
+		pv_set(pvb[3], DMA8_ADDR, (address >>  0) & 0xff);        /* Low_byte of address */
+		pv_set(pvb[4], DMA8_ADDR, (address >>  8) & 0xff);        /* High byte of address */
+		pv_set(pvb[5], DMA8_PAGE, (address >> 16) & 0xff);        /* 64K page number */
+		pv_set(pvb[6], DMA8_COUNT, (count >> 0) & 0xff);          /* Low byte of count */
+		pv_set(pvb[7], DMA8_COUNT, (count >> 8) & 0xff);          /* High byte of count */
 		pv_set(pvb[8], DMA8_MASK, SB_DMA_8);	       /* Enable DMA channel */
 
 		sys_voutb(pvb, 9);
@@ -596,13 +600,13 @@ int count;
 		pv_set(pvb[1], DMA16_CLEAR, 0x00);                  /* Clear flip flop */
 
 		/* Set dma mode */
-		pv_set(pvb[2], DMA16_MODE, (DmaMode == DEV_WRITE ? DMA16_AUTO_PLAY : DMA16_AUTO_REC));        
+		pv_set(pvb[2], DMA16_MODE, (DmaMode == DEV_WRITE_S ? DMA16_AUTO_PLAY : DMA16_AUTO_REC));        
 
 		pv_set(pvb[3], DMA16_ADDR, (address >> 1) & 0xFF);  /* Low_byte of address */
 		pv_set(pvb[4], DMA16_ADDR, (address >> 9) & 0xFF);  /* High byte of address */
 		pv_set(pvb[5], DMA16_PAGE, (address >> 16) & 0xFE); /* 128K page number */
-		pv_set(pvb[6], DMA16_COUNT, count >> 1);            /* Low byte of count */
-		pv_set(pvb[7], DMA16_COUNT, count >> 9);            /* High byte of count */
+		pv_set(pvb[6], DMA16_COUNT, (count >> 1) & 0xff);            /* Low byte of count */
+		pv_set(pvb[7], DMA16_COUNT, (count >> 9) & 0xff);            /* High byte of count */
 		pv_set(pvb[8], DMA16_MASK, SB_DMA_16 & 3);          /* Enable DMA channel */
 
 		sys_voutb(pvb, 9);
@@ -619,7 +623,7 @@ PRIVATE void dsp_setup()
 	dsp_set_speed(DspSpeed);
 
 	/* Put the speaker on */
-	if(DmaMode == DEV_WRITE) {
+	if(DmaMode == DEV_WRITE_S) {
 		dsp_command (DSP_CMD_SPKON); /* put speaker on */
 
 		/* Program DSP with dma mode */

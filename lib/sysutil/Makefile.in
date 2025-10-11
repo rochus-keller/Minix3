@@ -16,6 +16,10 @@ libsysutil_FILES=" \
 	env_prefix.c \
 	fkey_ctl.c \
 	report.c \
-	taskcall.c"
+	taskcall.c \
+	read_tsc.s \
+	read_tsc_64.c \
+	profile_extern.c \
+	profile.c"
 
 TYPE=both

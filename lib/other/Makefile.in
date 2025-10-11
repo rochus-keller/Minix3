@@ -5,19 +5,23 @@ CFLAGS="-O -D_MINIX -D_POSIX_SOURCE -I../../servers"
 LIBRARIES=libc
 
 libc_FILES=" \
-	_allocmem.c \
 	_brk.c \
+	_sbrk.c \
+	_cprofile.c \
 	_devctl.c \
 	__pm_findproc.c \
-	_freemem.c \
+	_getdents.c \
 	_getnpid.c \
 	_getsigset.c \
 	_getnprocnr.c \
 	_getpprocnr.c \
 	_getprocnr.c \
 	_getsysinfo.c \
+	_lseek64.c \
 	_reboot.c \
 	_seekdir.c \
+	_sysuname.c \
+	_sprofile.c \
 	_svrctl.c \
 	asynchio.c \
 	basename.c \
@@ -66,6 +70,8 @@ libc_FILES=" \
 	settimeofday.c \
 	stderr.c \
 	strdup.c \
+	strlcat.c \
+	strlcpy.c \
 	strtok_r.c \
 	swab.c \
 	sys_eniop.c \

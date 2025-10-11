@@ -1,36 +1,56 @@
 # Makefile for ash.
 
-SRCS=	builtins.c cd.c dirent.c error.c eval.c exec.c expand.c input.c \
+SRCS=	alias.c builtins.c cd.c error.c eval.c exec.c expand.c histedit.c \
+	input.c \
 	jobs.c mail.c main.c memalloc.c miscbltin.c mystring.c nodes.c \
-	options.c parser.c redir.c show.c signames.c syntax.c trap.c \
+	options.c parser.c redir.c setmode.c show.c signames.c syntax.c \
+	trap.c \
 	output.c var.c
 
-OBJS=	builtins.o cd.o dirent.o error.o eval.o exec.o expand.o input.o \
+OBJS=	alias.o builtins.o cd.o error.o eval.o exec.o expand.o histedit.o \
+	input.o \
 	jobs.o mail.o main.o memalloc.o miscbltin.o mystring.o nodes.o \
-	options.o parser.o redir.o show.o signames.o syntax.o trap.o \
+	options.o parser.o redir.o setmode.o show.o signames.o syntax.o \
+	trap.o \
 	output.o var.o init.o \
-	bltin/echo.o bltin/expr.o bltin/operators.o bltin/regexp.o
+	bltin/echo.o bltin/expr.o bltin/operators.o bltin/regexp.o \
+	arith.o arith_lex.o
 
-#
-# Set READLINE in shell.h and add -ledit to LIBS if you want to use the
-# editline package by Simmule Turner and Rich Salz.  (The big, bloated
-# and GPL contaminated FSF readline should work too.)
-#
-CPPFLAGS= -DSHELL -I. -D_MINIX -D_POSIX_SOURCE
-CFLAGS=	-wo -i $(CPPFLAGS)
-LIBS=	-ledit
-CC = exec cc
+LEX=flex
+YACC=/usr/bin/yacc
+.c.o:
+	$(CC) $(CFLAGS) -c $< -o $@
+
+# Enable this line to disable command line editing
+#EDIT=-DNO_HISTORY
+# Enable this line to use the editline library instead of libedit
+EDIT=-DEDITLINE
+EDITLIB=-ledit
+
+FLEXLIB=-lfl
+
+# Enable this line if your system does not have a <paths.h>
+NO_PATHS_H=-DNO_PATHS_H 
+
+# Enable this if you don't want job control
+NO_JOBS=-DJOBS=0
+MKB_NO_JOBS=-j
+
+CPPFLAGS= -DSHELL -I. -D_MINIX $(EDIT) $(NO_PATHS_H) $(NO_JOBS)
+CFLAGS=	$(OPT) $(CPPFLAGS)
+LIBS=	$(EDITLIB) $(FLEXLIB)
 
 CLEANFILES= $(OBJS) \
-	builtins.c builtins.h init.c mkinit mknodes mksignames mksyntax \
-	nodes.c nodes.h signames.c signames.h syntax.c syntax.h token.def \
+	arith.c arith_y.h arith_lex.c builtins.c builtins.h init.c \
+	mkinit mknodes mksignames mksyntax \
+	nodes.c nodes.h signames.c signames.h syntax.c syntax.h token.h \
 	bltin/operators.h bltin/operators.c
 
 all:	sh
 
 sh:	$(OBJS)
-	$(CC) $(CFLAGS) -o sh $(OBJS) $(LIBS)
-	install -S 100k sh
+	$(CC) $(CFLAGS) -fnone -o sh $(OBJS) $(LIBS)
+	install -S 136k sh
 
 install:	/usr/bin/ash /usr/bin/sh /bin/sh /bin/bigsh
 
@@ -44,7 +64,7 @@ install:	/usr/bin/ash /usr/bin/sh /bin/sh /bin/bigsh
 	install -lcs $? $@
 
 /bin/bigsh:	/usr/bin/ash
-	install -S 1500000 -lcs $? $@
+	install -S 6600k -lcs $? $@
 
 clean:
 	rm -f $(CLEANFILES) sh core
@@ -54,11 +74,18 @@ parser.o: token.def
 token.def: mktokens
 	sh mktokens
 
-builtins.c builtins.h: builtins.table shell.h
-	sh mkbuiltins shell.h builtins.table
+arith.c:	arith.y
+	$(YACC) -d $?
+	mv y.tab.c $@
+	mv y.tab.h arith_y.h
 
-init.o: mkinit $(SRCS)
-	./mkinit '$(CC) -c $(CFLAGS) init.c' $(SRCS)
+arith_lex.c:	arith_lex.l
+
+builtins.c builtins.h: builtins.def shell.h
+	sh mkbuiltins $(MKB_NO_JOBS) . shell.h builtins.def
+
+init.c: mkinit $(SRCS)
+	./mkinit $(SRCS)
 
 mkinit: mkinit.c
 	$(CC) $(CFLAGS) mkinit.c -o $@
@@ -81,20 +108,8 @@ syntax.c syntax.h: mksyntax
 mksyntax: mksyntax.c parser.h
 	$(CC) $(CFLAGS) mksyntax.c -o $@
 
-bltin/operators.h:	bltin/mkexpr bltin/binary_op bltin/unary_op
-	cd bltin && sh mkexpr
-
-bltin/echo.o:	bltin/echo.c
-	cd bltin && $(CC) -I.. $(CFLAGS) -c echo.c
-
-bltin/expr.o:	bltin/expr.c
-	cd bltin && $(CC) -I.. $(CFLAGS) -c expr.c
-
-bltin/operators.o:	bltin/operators.c
-	cd bltin && $(CC) -I.. $(CFLAGS) -c operators.c
-
-bltin/regexp.o:	bltin/regexp.c
-	cd bltin && $(CC) -I.. $(CFLAGS) -c regexp.c
+bltin/operators.h:	bltin/mkexpr bltin/unary_op bltin/binary_op
+	cd bltin && sh mkexpr unary_op binary_op
 
 # Dependencies you say?  This will have to do.
 $(OBJS): error.h eval.h exec.h expand.h init.h input.h \
@@ -103,3 +118,6 @@ $(OBJS): error.h eval.h exec.h expand.h init.h input.h \
 	builtins.h nodes.h signames.h syntax.h
 
 bltin/expr.o bltin/operators.o:	bltin/operators.h
+
+#
+# $PchId: Makefile,v 1.4 2006/05/22 12:40:46 philip Exp $

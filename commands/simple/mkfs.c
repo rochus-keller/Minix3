@@ -23,7 +23,7 @@
 #include <minix/const.h>
 #include <minix/type.h>
 #include <minix/minlib.h>
-#include "../../servers/fs/const.h"
+#include "../../servers/mfs/const.h"
 #if (MACHINE == IBM_PC)
 #include <minix/partition.h>
 #include <minix/u64.h>
@@ -35,8 +35,9 @@
 
 #undef EXTERN
 #define EXTERN			/* get rid of EXTERN by making it null */
-#include "../../servers/fs/type.h"
-#include "../../servers/fs/super.h"
+#include "../../servers/mfs/super.h"
+#include "../../servers/mfs/type.h"
+#include "../../servers/mfs/inode.h"
 #include <minix/fslib.h>
 
 #ifndef max
@@ -317,12 +318,6 @@ char *argv[];
 	simple = 1;
   }
 
-  if(ULONG_MAX / block_size <= blocks-1) {
-  	fprintf(stderr, "Warning: too big for filesystem to currently\n");
-  	fprintf(stderr, "run on (max 4GB), truncating.\n");
-  	blocks = ULONG_MAX / block_size;
-  }
-
   nrblocks = blocks;
   nrinodes = inodes;
 
@@ -337,7 +332,7 @@ char *argv[];
 	testb = (short *) alloc_block();
 
 	/* Try writing the last block of partition or diskette. */
-	if(lseek(fd, (off_t) (blocks - 1) * block_size, SEEK_SET) < 0) {
+	if(lseek64(fd, mul64u(blocks - 1, block_size), SEEK_SET, NULL) < 0) {
 		pexit("couldn't seek to last block to test size (1)");
 	}
 	testb[0] = 0x3245;
@@ -349,7 +344,7 @@ char *argv[];
 		pexit("File system is too big for minor device (write)");
 	}
 	sync();			/* flush write, so if error next read fails */
-	if(lseek(fd, (off_t) (blocks - 1) * block_size, SEEK_SET) < 0) {
+	if(lseek64(fd, mul64u(blocks - 1, block_size), SEEK_SET, NULL) < 0) {
 		pexit("couldn't seek to last block to test size (2)");
 	}
 	testb[0] = 0;
@@ -358,9 +353,11 @@ char *argv[];
 	if (nread != block_size || testb[0] != 0x3245 || testb[1] != 0x11FF ||
 		testb[block_size-1] != 0x1F2F) {
 		if(nread < 0) perror("read");
+printf("nread = %d\n", nread);
+printf("testb = 0x%x 0x%x 0x%x\n", testb[0], testb[1], testb[block_size-1]);
 		pexit("File system is too big for minor device (read)");
 	}
-	lseek(fd, (off_t) (blocks - 1) * block_size, SEEK_SET);
+	lseek64(fd, mul64u(blocks - 1, block_size), SEEK_SET, NULL);
 	testb[0] = 0;
 	testb[1] = 0;
 	if (write(fd, (char *) testb, block_size) != block_size)
@@ -497,7 +494,7 @@ ino_t inodes;
 		sup->s_magic = SUPER_V3;
   		sup->s_block_size = block_size;
   		sup->s_disk_version = 0;
-#define MAX_MAX_SIZE 	((unsigned long) 0xffffffff)
+#define MAX_MAX_SIZE 	((unsigned long) LONG_MAX)
   		if(MAX_MAX_SIZE/block_size < zo) {
 	  		sup->s_max_size = MAX_MAX_SIZE;
   		}
@@ -1536,7 +1533,7 @@ char *buf;
 	copy(zero, buf, block_size);
 	return;
   }
-  lseek(fd, (off_t) n * block_size, SEEK_SET);
+  lseek64(fd, mul64u(n, block_size), SEEK_SET, NULL);
   k = read(fd, buf, block_size);
   if (k != block_size) {
 	pexit("get_block couldn't read");
@@ -1569,7 +1566,7 @@ char *buf;
   (void) read_and_set(n);
 
   /* XXX - check other lseeks too. */
-  if (lseek(fd, (off_t) n * block_size, SEEK_SET) == (off_t) -1) {
+  if (lseek64(fd, mul64u(n, block_size), SEEK_SET, NULL) == (off_t) -1) {
 	pexit("put_block couldn't seek");
   }
   if (write(fd, buf, block_size) != block_size) {

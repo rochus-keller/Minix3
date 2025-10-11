@@ -3,7 +3,7 @@
 
 /* Minix release and version numbers. */
 #define OS_RELEASE "3"
-#define OS_VERSION "1.2"
+#define OS_VERSION "1.3"
 
 /* This file sets configuration parameters for the MINIX kernel, FS, and PM.
  * It is divided up into two main sections.  The first section contains
@@ -71,7 +71,7 @@
 #define ENABLE_CACHE2      0
 
 /* Enable or disable swapping processes to disk. */
-#define ENABLE_SWAP	   1
+#define ENABLE_SWAP	   0
 
 /* Include or exclude an image of /dev/boot in the boot image. 
  * Please update the makefile in /usr/src/tools/ as well.
@@ -80,10 +80,6 @@
 
 /* DMA_SECTORS may be increased to speed up DMA based drivers. */
 #define DMA_SECTORS        1	/* DMA buffer size (must be >= 1) */
-
-/* Include or exclude backwards compatibility code. */
-#define ENABLE_BINCOMPAT   0	/* for binaries using obsolete calls */
-#define ENABLE_SRCCOMPAT   0	/* for sources using obsolete calls */
 
 /* Which processes should receive diagnostics from the kernel and system? 
  * Directly sending it to TTY only displays the output. Sending it to the
@@ -102,6 +98,9 @@
 #define NR_CONS            4	/* # system consoles (1 to 8) */
 #define	NR_RS_LINES	   4	/* # rs232 terminals (0 to 4) */
 #define	NR_PTYS		   32	/* # pseudo terminals (0 to 64) */
+
+/* This feature enable the counting of system calls in PM and FS */
+#define ENABLE_SYSCALL_STATS	0
 
 /*===========================================================================*
  *	There are no user-settable parameters after this line		     *
@@ -127,5 +126,9 @@
 /* _ASKDEV and _FASTLOAD are defined in sys_config.h. */
 #define ASKDEV _ASKDEV
 #define FASTLOAD _FASTLOAD
+
+/* Enable or disable system profiling. */
+#define SPROFILE          1    /* statistical profiling */
+#define CPROFILE          0    /* call profiling */
 
 #endif /* _CONFIG_H */

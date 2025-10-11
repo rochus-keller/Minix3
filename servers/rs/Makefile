@@ -2,6 +2,8 @@
 SERVER = rs
 UTIL = service
 
+include /etc/make.conf
+
 # directories
 u = /usr
 i = $u/include
@@ -11,13 +13,13 @@ b = $i/ibm
 
 # programs, flags, etc.
 CC =	exec cc
-CFLAGS = -I$i
+CPPFLAGS = -I../../kernel/arch/$(ARCH)/include
+CFLAGS = -I$i $(CPROFILE) $(CPPFLAGS)
 LDFLAGS = -i
-UTIL_LIBS = -lsys 
 LIBS = -lsys -lsysutil 
 
 UTIL_OBJ = service.o
-OBJ = main.o manager.o 
+OBJ = exec.o main.o manager.o 
 
 # build local binary
 all build:	$(SERVER) $(UTIL)
@@ -25,7 +27,7 @@ $(UTIL):	$(UTIL_OBJ)
 	$(CC) -o $@ $(LDFLAGS) $(UTIL_OBJ) $(UTIL_LIBS)
 $(SERVER):	$(OBJ)
 	$(CC) -o $@ $(LDFLAGS) $(OBJ) $(LIBS)
-	install -S 16k $@
+	install -S 120k $@
 
 # install with other servers
 install:	/bin/$(UTIL) /usr/sbin/$(SERVER)
@@ -39,7 +41,7 @@ clean:
 	rm -f $(UTIL) $(SERVER) *.o *.bak 
 
 depend: 
-	/usr/bin/mkdep "$(CC) -E $(CPPFLAGS)" *.c > .depend
+	mkdep "$(CC) -E $(CPPFLAGS)" *.c > .depend
 
 # Include generated dependencies.
 include .depend

@@ -139,6 +139,7 @@ static void check_dev(int type, int ifno)
 			if (ifno == ifdefault) check_ln(device, dvp->defname);
 		}
 	}
+	check_mknod(IPSTAT_DEV, IPSTAT_MODE, IPSTAT_MINOR);
 }
 
 static int cfg_fd;
@@ -359,7 +360,7 @@ void *alloc(size_t size)
 {
 	/* Allocate memory on the heap with sbrk(). */
 
-	return sbrk((size + (sizeof(char *) - 1)) & ~(sizeof(char *) - 1));
+	return malloc(size);
 }
 
 /*

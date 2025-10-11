@@ -47,6 +47,7 @@
 #define SI_DATA_STORE	   5	/* get copy of data store */
 #define SI_LOADINFO	   6	/* get copy of load average structure */
 #define SI_KPROC_TAB	   7	/* copy of kernel process table */
+#define SI_CALL_STATS	   8	/* system call statistics */
 
 /* NULL must be defined in <unistd.h> according to POSIX Sec. 2.7.1. */
 #define NULL    ((void *)0)
@@ -96,6 +97,7 @@ _PROTOTYPE( unsigned int alarm, (unsigned int _seconds)			);
 _PROTOTYPE( int chdir, (const char *_path)				);
 _PROTOTYPE( int fchdir, (int fd)					);
 _PROTOTYPE( int chown, (const char *_path, _mnx_Uid_t _owner, _mnx_Gid_t _group)	);
+_PROTOTYPE( int fchown, (int fd, _mnx_Uid_t _owner, _mnx_Gid_t _group)	);
 _PROTOTYPE( int close, (int _fd)					);
 _PROTOTYPE( char *ctermid, (char *_s)					);
 _PROTOTYPE( char *cuserid, (char *_s)					);
@@ -144,6 +146,7 @@ _PROTOTYPE( int unlink, (const char *_path)				);
 _PROTOTYPE( ssize_t write, (int _fd, const void *_buf, size_t _n)	);
 _PROTOTYPE( int truncate, (const char *_path, off_t _length)		);
 _PROTOTYPE( int ftruncate, (int _fd, off_t _length)			);
+_PROTOTYPE( int nice, (int _incr)					);
 
 /* Open Group Base Specifications Issue 6 (not complete) */
 _PROTOTYPE( int symlink, (const char *path1, const char *path2)		);
@@ -157,8 +160,13 @@ _PROTOTYPE( int usleep, (useconds_t _useconds)				);
 #ifndef _TYPE_H
 #include <minix/type.h>
 #endif
+
+extern int optreset;	/* Reset getopt state */
+
 _PROTOTYPE( int brk, (char *_addr)					);
 _PROTOTYPE( int chroot, (const char *_name)				);
+_PROTOTYPE( int lseek64, (int _fd, u64_t _offset, int _whence,
+						u64_t *_newpos)		);
 _PROTOTYPE( int mknod, (const char *_name, _mnx_Mode_t _mode, Dev_t _addr)	);
 _PROTOTYPE( int mknod4, (const char *_name, _mnx_Mode_t _mode, Dev_t _addr,
 	    long _size)							);
@@ -185,9 +193,11 @@ _PROTOTYPE( int allocmem, (phys_bytes size, phys_bytes *base)		);
 _PROTOTYPE( int freemem, (phys_bytes size, phys_bytes base)		);
 #define DEV_MAP 1
 #define DEV_UNMAP 2
-#define mapdriver(driver, device, style) devctl(DEV_MAP, driver, device, style)
+#define mapdriver(driver, device, style, force) \
+	devctl(DEV_MAP, driver, device, style, force)
 #define unmapdriver(device) devctl(DEV_UNMAP, 0, device, 0)
-_PROTOTYPE( int devctl, (int ctl_req, int driver, int device, int style));
+_PROTOTYPE( int devctl, (int ctl_req, int driver, int device, int style, 
+	int force)							);
 
 /* For compatibility with other Unix systems */
 _PROTOTYPE( int getpagesize, (void)					);

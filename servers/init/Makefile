@@ -19,7 +19,7 @@ OBJ = 	init.o
 all build:	$(SERVER)
 $(SERVER):	$(OBJ)
 	$(CC) $(CFLAGS) -o $@ $(LDFLAGS) $(OBJ) -lsysutil
-	install -S 192w $@
+	install -S 8k $@
 
 # install with other servers
 install:	/usr/sbin/$(SERVER)
@@ -31,7 +31,7 @@ clean:
 	rm -f $(SERVER) *.o *.bak 
 
 depend: 
-	/usr/bin/mkdep "$(CC) -E $(CPPFLAGS)" *.c > .depend
+	mkdep "$(CC) -E $(CPPFLAGS)" *.c > .depend
 
 # Include generated dependencies.
 include .depend

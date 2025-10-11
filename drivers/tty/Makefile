@@ -1,6 +1,8 @@
 # Makefile for terminal driver (TTY)
 DRIVER = tty
 
+include /etc/make.conf
+
 # directories
 u = /usr
 i = $u/include
@@ -12,9 +14,10 @@ d = ..
 # programs, flags, etc.
 MAKE = exec make
 CC =	exec cc
-CFLAGS = -I$i
+CPPFLAGS = -I$i -I../../kernel/arch/$(ARCH)/include
+CFLAGS = $(CPPFLAGS)
 LDFLAGS = -i
-LIBS = -lsys -lsysutil -ltimers
+LIBS = -lsysutil -lsys -ltimers
 
 OBJ = tty.o console.o vidcopy.o keyboard.o pty.o rs232.o 
 
@@ -22,7 +25,7 @@ OBJ = tty.o console.o vidcopy.o keyboard.o pty.o rs232.o
 all build:	$(DRIVER)
 $(DRIVER):	$(OBJ) 
 	$(CC) -o $@ $(LDFLAGS) $(OBJ) $(LIBS)
-	install -S 256w $(DRIVER)
+	install -S 8k $(DRIVER)
 
 # install with other drivers
 install:	
@@ -37,7 +40,7 @@ clean:
 	rm -f $(DRIVER) *.o *.bak 
 
 depend: 
-	/usr/bin/mkdep "$(CC) -E $(CPPFLAGS)" *.c > .depend
+	mkdep "$(CC) -E $(CPPFLAGS)" *.c > .depend
 
 # Include generated dependencies.
 include .depend

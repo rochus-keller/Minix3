@@ -47,6 +47,35 @@ PUBLIC int do_trace()
 	mp->mp_reply.reply_trace = 0;
 	return(OK);
   }
+  if (m_in.request == T_READB_INS)
+  {
+	/* Special hack for reading text segments */
+	if (mp->mp_effuid != SUPER_USER)
+		return(EPERM);
+	if ((child=find_proc(m_in.pid))==NIL_MPROC)
+		return(ESRCH);
+
+	r= sys_trace(m_in.request,child->mp_endpoint,m_in.taddr,&m_in.data);
+	if (r != OK) return(r);
+
+	mp->mp_reply.reply_trace = m_in.data;
+	return(OK);
+  }
+  if (m_in.request == T_WRITEB_INS)
+  {
+	/* Special hack for patching text segments */
+	if (mp->mp_effuid != SUPER_USER)
+		return(EPERM);
+	if ((child=find_proc(m_in.pid))==NIL_MPROC)
+		return(ESRCH);
+
+	r= sys_trace(m_in.request,child->mp_endpoint,m_in.taddr,&m_in.data);
+	if (r != OK) return(r);
+
+	mp->mp_reply.reply_trace = m_in.data;
+	return(OK);
+  }
+
   if ((child=find_proc(m_in.pid))==NIL_MPROC || !(child->mp_flags & STOPPED)) {
 	return(ESRCH);
   }
@@ -55,9 +84,11 @@ PUBLIC int do_trace()
    */
   switch (m_in.request) {
   case T_EXIT:		/* exit */
-	pm_exit(child, (int) m_in.data);
-	mp->mp_reply.reply_trace = 0;
-	return(OK);
+	pm_exit(child, (int) m_in.data, TRUE /*for_trace*/);
+	/* Do not reply to the caller until FS has processed the exit
+	 * request.
+	 */
+	return SUSPEND;
   case T_RESUME: 
   case T_STEP: 		/* resume execution */
 	if (m_in.data < 0 || m_in.data > _NSIG) return(EIO);

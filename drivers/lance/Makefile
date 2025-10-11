@@ -11,9 +11,9 @@ d = ..
 
 # programs, flags, etc.
 CC =	exec cc
-CFLAGS = -I$i
+CFLAGS = -I$i $(CPROFILE)
 LDFLAGS = -i 
-LIBS = -lsys -lsysutil
+LIBS = -lsysutil  -lsys
 #-lutils -ltimers
 
 OBJ = lance.o
@@ -22,7 +22,7 @@ OBJ = lance.o
 all build:	$(DRIVER)
 $(DRIVER):	$(OBJ) 
 	$(CC) -o $@ $(LDFLAGS) $(OBJ) $(LIBS)
-	install -S 4k $(DRIVER)
+	install -S 16k $(DRIVER)
 
 # install with other drivers
 install:	/usr/sbin/$(DRIVER)
@@ -34,7 +34,7 @@ clean:
 	rm -f *.o *.bak $(DRIVER)
 
 depend:
-	/usr/bin/mkdep "$(CC) -E $(CPPFLAGS)" *.c > .depend
+	mkdep "$(CC) -E $(CPPFLAGS)" *.c > .depend
 
 # Include generated dependencies.
 include .depend

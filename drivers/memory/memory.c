@@ -17,9 +17,14 @@
 #include "../drivers.h"
 #include "../libdriver/driver.h"
 #include <sys/ioc_memory.h>
+#include <env.h>
+#include <minix/ds.h>
 #include "../../kernel/const.h"
 #include "../../kernel/config.h"
 #include "../../kernel/type.h"
+
+#define MY_DS_NAME_BASE "dev:memory:ramdisk_base"
+#define MY_DS_NAME_SIZE "dev:memory:ramdisk_size"
 
 #include <sys/vm.h>
 
@@ -33,17 +38,16 @@ PRIVATE struct device m_geom[NR_DEVS];  /* base and size of each device */
 PRIVATE int m_seg[NR_DEVS];  		/* segment index of each device */
 PRIVATE int m_device;			/* current device */
 PRIVATE struct kinfo kinfo;		/* kernel information */ 
-PRIVATE struct machine machine;		/* machine information */ 
 
 extern int errno;			/* error number for PM calls */
 
 FORWARD _PROTOTYPE( char *m_name, (void) 				);
 FORWARD _PROTOTYPE( struct device *m_prepare, (int device) 		);
-FORWARD _PROTOTYPE( int m_transfer, (int proc_nr, int opcode, off_t position,
-					iovec_t *iov, unsigned nr_req) 	);
+FORWARD _PROTOTYPE( int m_transfer, (int proc_nr, int opcode, u64_t position,
+				iovec_t *iov, unsigned nr_req, int safe));
 FORWARD _PROTOTYPE( int m_do_open, (struct driver *dp, message *m_ptr) 	);
 FORWARD _PROTOTYPE( void m_init, (void) );
-FORWARD _PROTOTYPE( int m_ioctl, (struct driver *dp, message *m_ptr) 	);
+FORWARD _PROTOTYPE( int m_ioctl, (struct driver *dp, message *m_ptr, int safe));
 FORWARD _PROTOTYPE( void m_geometry, (struct partition *entry) 		);
 
 /* Entry points to this driver. */
@@ -63,6 +67,12 @@ PRIVATE struct driver m_dtab = {
   NULL,
   NULL
 };
+
+/* One page of temporary mapping area - enough to be able to page-align
+ * one page.
+ */
+static char pagedata_buf[2*PAGE_SIZE];
+vir_bytes pagedata_aligned;
 
 /* Buffer for the /dev/zero null byte feed. */
 #define ZERO_BUF_SIZE 			1024
@@ -115,21 +125,32 @@ int device;
 /*===========================================================================*
  *				m_transfer				     *
  *===========================================================================*/
-PRIVATE int m_transfer(proc_nr, opcode, position, iov, nr_req)
+PRIVATE int m_transfer(proc_nr, opcode, pos64, iov, nr_req, safe)
 int proc_nr;			/* process doing the request */
-int opcode;			/* DEV_GATHER or DEV_SCATTER */
-off_t position;			/* offset on device to read or write */
+int opcode;			/* DEV_GATHER_S or DEV_SCATTER_S */
+u64_t pos64;			/* offset on device to read or write */
 iovec_t *iov;			/* pointer to read or write request vector */
 unsigned nr_req;		/* length of request vector */
+int safe;			/* safe copies */
 {
 /* Read or write one the driver's minor devices. */
   phys_bytes mem_phys;
   int seg;
   unsigned count, left, chunk;
-  vir_bytes user_vir;
+  vir_bytes user_vir, vir_offset = 0;
   struct device *dv;
   unsigned long dv_size;
-  int s;
+  int s, r;
+  off_t position;
+
+  if(!safe) {
+	printf("m_transfer: unsafe?\n");
+	return EPERM;
+  }
+
+  if (ex64hi(pos64) != 0)
+	return OK;	/* Beyond EOF */
+  position= cv64ul(pos64);
 
   /* Get minor device number and check for /dev/null. */
   dv = &m_geom[m_device];
@@ -145,7 +166,7 @@ unsigned nr_req;		/* length of request vector */
 
 	/* No copying; ignore request. */
 	case NULL_DEV:
-	    if (opcode == DEV_GATHER) return(OK);	/* always at EOF */
+	    if (opcode == DEV_GATHER_S) return(OK);	/* always at EOF */
 	    break;
 
 	/* Virtual copying. For RAM disk, kernel memory and boot device. */
@@ -156,39 +177,82 @@ unsigned nr_req;		/* length of request vector */
 	    if (position + count > dv_size) count = dv_size - position;
 	    seg = m_seg[m_device];
 
-	    if (opcode == DEV_GATHER) {			/* copy actual data */
-	        sys_vircopy(SELF,seg,position, proc_nr,D,user_vir, count);
+	    if (opcode == DEV_GATHER_S) {			/* copy actual data */
+	        r=sys_safecopyto(proc_nr, user_vir, vir_offset,
+	  	  position, count, seg);
 	    } else {
-	        sys_vircopy(proc_nr,D,user_vir, SELF,seg,position, count);
+	        r=sys_safecopyfrom(proc_nr, user_vir, vir_offset,
+	  	  position, count, seg);
+	    }
+	    if(r != OK) {
+              panic("MEM","I/O copy failed",r);
 	    }
 	    break;
 
-	/* Physical copying. Only used to access entire memory. */
+	/* Physical copying. Only used to access entire memory.
+	 * Transfer one 'page window' at a time.
+	 */
 	case MEM_DEV:
-	    if (position >= dv_size) return(OK); 	/* check for EOF */
-	    if (position + count > dv_size) count = dv_size - position;
+	{
+	    u32_t pagestart, page_off;
+	    static u32_t pagestart_mapped;
+	    static int any_mapped = 0;
+	    int r;
+	    u32_t subcount;
+
+	    if (position >= dv_size)
+		return(OK); 	/* check for EOF */
+	    if (position + count > dv_size)
+		count = dv_size - position;
 	    mem_phys = cv64ul(dv->dv_base) + position;
 
-	    if (opcode == DEV_GATHER) {			/* copy data */
-	        sys_physcopy(NONE, PHYS_SEG, mem_phys, 
-	        	proc_nr, D, user_vir, count);
+	    page_off = mem_phys % PAGE_SIZE;
+	    pagestart = mem_phys - page_off; 
+
+	    /* All memory to the map call has to be page-aligned.
+	     * Don't have to map same page over and over.
+	     */
+	    if(!any_mapped || pagestart_mapped != pagestart) {
+	      if((r=sys_vm_map(SELF, 1, pagedata_aligned,
+		PAGE_SIZE, pagestart)) != OK) {
+		printf("memory: sys_vm_map failed: %d\n", r);
+		return r;
+	     }
+	     any_mapped = 1;
+	     pagestart_mapped = pagestart;
+	   }
+
+	    /* how much to be done within this page. */
+	    subcount = PAGE_SIZE-page_off;
+	    if(subcount > count)
+		subcount = count;
+
+	    if (opcode == DEV_GATHER_S) {			/* copy data */
+	           s=sys_safecopyto(proc_nr, user_vir,
+		       vir_offset, pagedata_aligned+page_off, subcount, D);
 	    } else {
-	        sys_physcopy(proc_nr, D, user_vir, 
-	        	NONE, PHYS_SEG, mem_phys, count);
+	           s=sys_safecopyfrom(proc_nr, user_vir,
+		       vir_offset, pagedata_aligned+page_off, subcount, D);
 	    }
+	    if(s != OK)
+		return s;
+	    count = subcount;
 	    break;
+	}
 
 	/* Null byte stream generator. */
 	case ZERO_DEV:
-	    if (opcode == DEV_GATHER) {
+	    if (opcode == DEV_GATHER_S) {
+		size_t suboffset = 0;
 	        left = count;
 	    	while (left > 0) {
 	    	    chunk = (left > ZERO_BUF_SIZE) ? ZERO_BUF_SIZE : left;
-	    	    if (OK != (s=sys_vircopy(SELF, D, (vir_bytes) dev_zero, 
-	    	            proc_nr, D, user_vir, chunk)))
-	    	        report("MEM","sys_vircopy failed", s);
+	             s=sys_safecopyto(proc_nr, user_vir,
+		       vir_offset+suboffset, (vir_bytes) dev_zero, chunk, D);
+		    if(s != OK)
+	    	        report("MEM","sys_safecopyto failed", s);
 	    	    left -= chunk;
- 	            user_vir += chunk;
+ 	            suboffset += chunk;
 	    	}
 	    }
 	    break;
@@ -197,12 +261,12 @@ unsigned nr_req;		/* length of request vector */
 	    if (position >= dv_size) return(OK); 	/* check for EOF */
 	    if (position + count > dv_size) count = dv_size - position;
 
-	    if (opcode == DEV_GATHER) {			/* copy actual data */
-	        sys_vircopy(SELF, D, (vir_bytes)&imgrd[position],
-			proc_nr, D, user_vir, count);
+	    if (opcode == DEV_GATHER_S) {	/* copy actual data */
+	          s=sys_safecopyto(proc_nr, user_vir, vir_offset,
+	  	     (vir_bytes)&imgrd[position], count, D);
 	    } else {
-	        sys_vircopy(proc_nr, D, user_vir,
-			SELF, D, (vir_bytes)&imgrd[position], count);
+	          s=sys_safecopyfrom(proc_nr, user_vir, vir_offset,
+	  	     (vir_bytes)&imgrd[position], count, D);
 	    }
 	    break;
 
@@ -213,8 +277,8 @@ unsigned nr_req;		/* length of request vector */
 
 	/* Book the number of bytes transferred. */
 	position += count;
-	iov->iov_addr += count;
-  	if ((iov->iov_size -= count) == 0) { iov++; nr_req--; }
+	vir_offset += count;
+  	if ((iov->iov_size -= count) == 0) { iov++; nr_req--; vir_offset = 0; }
 
   }
   return(OK);
@@ -250,9 +314,8 @@ message *m_ptr;
 PRIVATE void m_init()
 {
   /* Initialize this task. All minor devices are initialized one by one. */
-  phys_bytes ramdev_size;
-  phys_bytes ramdev_base;
-  message m;
+  u32_t ramdev_size;
+  u32_t ramdev_base;
   int i, s;
 
   if (OK != (s=sys_getkinfo(&kinfo))) {
@@ -278,10 +341,8 @@ PRIVATE void m_init()
   }
 
   /* See if there are already RAM disk details at the Data Store server. */
-  m.DS_KEY = MEMORY_MAJOR;
-  if (OK == (s = _taskcall(DS_PROC_NR, DS_RETRIEVE, &m))) {
-  	ramdev_size = m.DS_VAL_L1;
- 	ramdev_base = m.DS_VAL_L2;
+  if(ds_retrieve_u32(MY_DS_NAME_BASE, &ramdev_base) == OK &&
+     ds_retrieve_u32(MY_DS_NAME_SIZE, &ramdev_size) == OK) {
   	printf("MEM retrieved size %u and base %u from DS, status %d\n",
     		ramdev_size, ramdev_base, s);
   	if (OK != (s=sys_segctl(&m_seg[RAM_DEV], (u16_t *) &s, 
@@ -302,40 +363,31 @@ PRIVATE void m_init()
        dev_zero[i] = '\0';
   }
 
-  /* Set up memory ranges for /dev/mem. */
-#if (CHIP == INTEL)
-  if (OK != (s=sys_getmachine(&machine))) {
-      panic("MEM","Couldn't get machine information.",s);
-  }
-  if (! machine.protected) {
-	m_geom[MEM_DEV].dv_size =   cvul64(0x100000); /* 1M for 8086 systems */
-  } else {
-#if _WORD_SIZE == 2
-	m_geom[MEM_DEV].dv_size =  cvul64(0x1000000); /* 16M for 286 systems */
-#else
-	m_geom[MEM_DEV].dv_size = cvul64(0xFFFFFFFF); /* 4G-1 for 386 systems */
-#endif
-  }
-#else /* !(CHIP == INTEL) */
-#if (CHIP == M68000)
-  m_geom[MEM_DEV].dv_size = cvul64(MEM_BYTES);
-#else /* !(CHIP == M68000) */
-#error /* memory limit not set up */
-#endif /* !(CHIP == M68000) */
-#endif /* !(CHIP == INTEL) */
+  /* Page-align page pointer. */
+  pagedata_aligned = (u32_t) pagedata_buf + PAGE_SIZE;
+  pagedata_aligned -= pagedata_aligned % PAGE_SIZE;
+
+  /* Set up memory range for /dev/mem. */
+  m_geom[MEM_DEV].dv_size = cvul64(0xffffffff);
 }
 
 /*===========================================================================*
  *				m_ioctl					     *
  *===========================================================================*/
-PRIVATE int m_ioctl(dp, m_ptr)
+PRIVATE int m_ioctl(dp, m_ptr, safe)
 struct driver *dp;			/* pointer to driver structure */
 message *m_ptr;				/* pointer to control message */
+int safe;
 {
 /* I/O controls for the memory driver. Currently there is one I/O control:
  * - MIOCRAMSIZE: to set the size of the RAM disk.
  */
   struct device *dv;
+
+  if(!safe) {
+	printf("m_transfer: unsafe?\n");
+	return EPERM;
+  }
 
   switch (m_ptr->REQUEST) {
     case MIOCRAMSIZE: {
@@ -344,7 +396,6 @@ message *m_ptr;				/* pointer to control message */
 
 	u32_t ramdev_size;
 	phys_bytes ramdev_base;
-	message m;
 	int s;
 
 	/* A ramdisk can be created only once, and only on RAM disk device. */
@@ -356,8 +407,8 @@ message *m_ptr;				/* pointer to control message */
 	ramdev_size= m_ptr->POSITION;
 #else
 	/* Get request structure */
-	s= sys_vircopy(m_ptr->IO_ENDPT, D, (vir_bytes)m_ptr->ADDRESS,
-		SELF, D, (vir_bytes)&ramdev_size, sizeof(ramdev_size));
+	   s= sys_safecopyfrom(m_ptr->IO_ENDPT, (vir_bytes)m_ptr->IO_GRANT,
+		0, (vir_bytes)&ramdev_size, sizeof(ramdev_size), D);
 	if (s != OK)
 		return s;
 #endif
@@ -375,15 +426,14 @@ message *m_ptr;				/* pointer to control message */
 	/* Store the values we got in the data store so we can retrieve
 	 * them later on, in the unfortunate event of a crash.
 	 */
-	m.DS_KEY = MEMORY_MAJOR;
-	m.DS_VAL_L1 = ramdev_size;
-	m.DS_VAL_L2 = ramdev_base;
-	if (OK != (s = _taskcall(DS_PROC_NR, DS_PUBLISH, &m))) {
+	if(ds_publish_u32(MY_DS_NAME_BASE, ramdev_base) != OK ||
+	   ds_publish_u32(MY_DS_NAME_SIZE, ramdev_size) != OK) {
       		panic("MEM","Couldn't store RAM disk details at DS.",s);
 	}
+
 #if DEBUG
-	printf("MEM stored size %u and base %u at DS, status %d\n",
-	    ramdev_size, ramdev_base, s);
+	printf("MEM stored size %u and base %u at DS, names %s and %s\n",
+	    ramdev_size, ramdev_base, MY_DS_NAME_BASE, MY_DS_NAME_SIZE);
 #endif
 
   	if (OK != (s=sys_segctl(&m_seg[RAM_DEV], (u16_t *) &s, 
@@ -393,7 +443,7 @@ message *m_ptr;				/* pointer to control message */
 
 	dv->dv_base = cvul64(ramdev_base);
 	dv->dv_size = cvul64(ramdev_size);
-	/* first_time= 0; */
+	first_time= 0;
 	break;
     }
     case MIOCMAP:
@@ -408,8 +458,9 @@ message *m_ptr;				/* pointer to control message */
 	do_map= (m_ptr->REQUEST == MIOCMAP);	/* else unmap */
 
 	/* Get request structure */
-	r= sys_vircopy(m_ptr->IO_ENDPT, D, (vir_bytes)m_ptr->ADDRESS,
-		SELF, D, (vir_bytes)&mapreq, sizeof(mapreq));
+	   r= sys_safecopyfrom(m_ptr->IO_ENDPT, (vir_bytes)m_ptr->IO_GRANT,
+		0, (vir_bytes)&mapreq, sizeof(mapreq), D);
+
 	if (r != OK)
 		return r;
 	r= sys_vm_map(m_ptr->IO_ENDPT, do_map,
@@ -418,7 +469,7 @@ message *m_ptr;				/* pointer to control message */
     }
 
     default:
-  	return(do_diocntl(&m_dtab, m_ptr));
+  	return(do_diocntl(&m_dtab, m_ptr, safe));
   }
   return(OK);
 }
@@ -434,4 +485,3 @@ struct partition *entry;
   entry->heads = 64;
   entry->sectors = 32;
 }
-
