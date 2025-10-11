@@ -38,6 +38,7 @@
 FORWARD _PROTOTYPE( void init_clock, (void) );
 FORWARD _PROTOTYPE( int clock_handler, (irq_hook_t *hook) );
 FORWARD _PROTOTYPE( int do_clocktick, (message *m_ptr) );
+FORWARD _PROTOTYPE( void load_update, (void));
 
 /* Clock parameters. */
 #define COUNTER_FREQ (2*TIMER_FREQ) /* counter frequency using square wave */
@@ -130,14 +131,19 @@ message *m_ptr;				/* pointer to request message */
 PRIVATE void init_clock()
 {
   /* Initialize the CLOCK's interrupt hook. */
-  clock_hook.proc_nr = CLOCK;
+  clock_hook.proc_nr_e = CLOCK;
 
-  /* Initialize channel 0 of the 8253A timer to, e.g., 60 Hz. */
+  /* Initialize channel 0 of the 8253A timer to, e.g., 60 Hz, and register
+   * the CLOCK task's interrupt handler to be run on every clock tick. 
+   */
   outb(TIMER_MODE, SQUARE_WAVE);	/* set timer to run continuously */
   outb(TIMER0, TIMER_COUNT);		/* load timer low byte */
   outb(TIMER0, TIMER_COUNT >> 8);	/* load timer high byte */
-  put_irq_handler(&clock_hook, CLOCK_IRQ, clock_handler);/* register handler */
+  put_irq_handler(&clock_hook, CLOCK_IRQ, clock_handler);
   enable_irq(&clock_hook);		/* ready for clock interrupts */
+
+  /* Set a watchdog timer to periodically balance the scheduling queues. */
+  balance_queues(NULL);			/* side-effect sets new timer */
 }
 
 /*===========================================================================*
@@ -145,7 +151,7 @@ PRIVATE void init_clock()
  *===========================================================================*/
 PUBLIC void clock_stop()
 {
-/* Reset the clock to the BIOS rate. (For rebooting) */
+/* Reset the clock to the BIOS rate. (For rebooting.) */
   outb(TIMER_MODE, 0x36);
   outb(TIMER0, 0);
   outb(TIMER0, 0);
@@ -204,6 +210,9 @@ irq_hook_t *hook;
       bill_ptr->p_sys_time += ticks;
       bill_ptr->p_ticks_left -= ticks;
   }
+
+  /* Update load average. */
+  load_update();
 
   /* Check if do_clocktick() must be called. Done for alarms and scheduling.
    * Some processes, such as the kernel tasks, cannot be preempted. 
@@ -272,3 +281,36 @@ PUBLIC unsigned long read_clock()
   
   return count;
 }
+
+/*===========================================================================*
+ *				load_update				     * 
+ *===========================================================================*/
+PRIVATE void load_update(void)
+{
+	u16_t slot;
+	int enqueued = -1, q;	/* -1: special compensation for IDLE. */
+	struct proc *p;
+
+	/* Load average data is stored as a list of numbers in a circular
+	 * buffer. Each slot accumulates _LOAD_UNIT_SECS of samples of
+	 * the number of runnable processes. Computations can then
+	 * be made of the load average over variable periods, in the
+	 * user library (see getloadavg(3)).
+	 */
+	slot = (realtime / HZ / _LOAD_UNIT_SECS) % _LOAD_HISTORY;
+	if(slot != kloadinfo.proc_last_slot) {
+		kloadinfo.proc_load_history[slot] = 0;
+		kloadinfo.proc_last_slot = slot;
+	}
+
+	/* Cumulation. How many processes are ready now? */
+	for(q = 0; q < NR_SCHED_QUEUES; q++)
+		for(p = rdy_head[q]; p != NIL_PROC; p = p->p_nextready)
+			enqueued++;
+
+	kloadinfo.proc_load_history[slot] += enqueued;
+
+	/* Up-to-dateness. */
+	kloadinfo.last_clock = realtime;
+}
+

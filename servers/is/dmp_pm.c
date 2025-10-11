@@ -7,9 +7,11 @@
  *   May 11, 2005:	by Jorrit N. Herder
  */
 
-#include "is.h"
+#include "inc.h"
 #include "../pm/mproc.h"
 #include <timers.h> 
+#include <minix/config.h> 
+#include <minix/type.h> 
 
 PUBLIC struct mproc mproc[NR_PROCS];
 
@@ -95,5 +97,44 @@ PUBLIC void sigaction_dmp()
   if (i >= NR_PROCS) i = 0;
   else printf("--more--\r");
   prev_i = i;
+}
+
+/*===========================================================================*
+ *				holes_dmp				     *
+ *===========================================================================*/
+PUBLIC void holes_dmp(void)
+{
+	static struct pm_mem_info pmi;
+	int h;
+	int largest_bytes = 0, total_bytes = 0;
+
+	if(getsysinfo(PM_PROC_NR, SI_MEM_ALLOC, &pmi) != OK) {
+		printf("Obtaining memory hole list failed.\n");
+		return;
+	}
+	printf("Available memory stats\n");
+
+	for(h = 0; h < _NR_HOLES; h++) {
+		if(pmi.pmi_holes[h].h_base && pmi.pmi_holes[h].h_len) {
+			int bytes;
+			bytes = (pmi.pmi_holes[h].h_len << CLICK_SHIFT);
+			printf("%08lx: %6d kB\n",
+				pmi.pmi_holes[h].h_base << CLICK_SHIFT, bytes / 1024);
+			if(bytes > largest_bytes) largest_bytes = bytes;
+			total_bytes += bytes;
+		}
+	}
+	printf("\n"
+		"Total memory free:     %7d kB\n"
+		"Largest chunk:         %7d kB\n"
+		"Uncontiguous rest:     %7d kB (%d%% of total free)\n"
+		"Memory high watermark: %7d kB\n",
+		total_bytes/1024,
+		largest_bytes/1024,
+		(total_bytes-largest_bytes)/1024,
+		100*(total_bytes/100-largest_bytes/100)/total_bytes,
+		(pmi.pmi_hi_watermark/1024 << CLICK_SHIFT));
+
+	return;
 }
 

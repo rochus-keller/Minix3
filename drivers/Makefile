@@ -16,9 +16,7 @@ usage:
 build: all
 all install depend clean:
 	cd ./libdriver && $(MAKE) $@
-	cd ./libpci && $(MAKE) $@
 	cd ./tty && $(MAKE) $@
-	cd ./memory && $(MAKE) $@
 	cd ./at_wini && $(MAKE) $@
 	cd ./floppy && $(MAKE) $@
 	cd ./printer && $(MAKE) $@
@@ -29,16 +27,20 @@ all install depend clean:
 	cd ./bios_wini && $(MAKE) $@
 	cd ./cmos && $(MAKE) $@
 	cd ./random && $(MAKE) $@
+	cd ./rescue && $(MAKE) $@
 	cd ./dp8390 && $(MAKE) $@
 	cd ./sb16 && $(MAKE) $@
 	cd ./lance && $(MAKE) $@
+	cd ./pci && $(MAKE) $@
+	cd ./ti1225 && $(MAKE) $@
+	cd ./memory && $(MAKE) $@	# Must be last for ramdisk image
 
 image:
 	cd ./libdriver && $(MAKE) build
-	cd ./libpci && $(MAKE) build
 	cd ./tty && $(MAKE) build
-	cd ./memory && $(MAKE) build
 	cd ./at_wini && $(MAKE) build
 	cd ./floppy && $(MAKE) build
 	cd ./bios_wini && $(MAKE) build
 	cd ./log && $(MAKE) build
+	cd ./pci && $(MAKE) build
+	cd ./memory && $(MAKE) build	# Must be last for ramdisk image

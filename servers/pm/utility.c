@@ -16,6 +16,7 @@
 #include <sys/stat.h>
 #include <minix/callnr.h>
 #include <minix/com.h>
+#include <minix/endpoint.h>
 #include <fcntl.h>
 #include <signal.h>		/* needed only because mproc.h needs it */
 #include "mproc.h"
@@ -110,13 +111,19 @@ int num;			/* number to go with it */
 {
 /* An unrecoverable error has occurred.  Panics are caused when an internal
  * inconsistency is detected, e.g., a programming error or illegal value of a
- * defined constant. The process manager decides to shut down. This results 
- * in a HARD_STOP notification to all system processes to allow local cleanup.
+ * defined constant. The process manager decides to exit.
  */
+  message m;
+  int s;
+
+  /* Switch to primary console and print panic message. */
+  check_sig(mproc[TTY_PROC_NR].mp_pid, SIGTERM);
   printf("PM panic (%s): %s", who, mess);
   if (num != NO_NUM) printf(": %d",num);
   printf("\n");
-  sys_abort(RBT_PANIC);
+   
+  /* Exit PM. */
+  sys_exit(SELF);
 }
 
 /*===========================================================================*
@@ -135,8 +142,12 @@ int what, p1, p2, p3;
  *      tell_fs(SETUID, proc, realuid, effuid)
  *      tell_fs(UNPAUSE, proc, signr, 0)
  *      tell_fs(STIME, time, 0, 0)
+ * Ignore this call if the FS is already dead, e.g. on shutdown.
  */
   message m;
+
+  if ((mproc[FS_PROC_NR].mp_flags & (IN_USE|ZOMBIE)) != IN_USE)
+      return;
 
   m.tell_fs_arg1 = p1;
   m.tell_fs_arg2 = p2;
@@ -183,14 +194,14 @@ struct mem_map *mem_map;			/* put memory map here */
 /*===========================================================================*
  *				get_stack_ptr				     *
  *===========================================================================*/
-PUBLIC int get_stack_ptr(proc_nr, sp)
-int proc_nr;					/* process to get sp of */
+PUBLIC int get_stack_ptr(proc_nr_e, sp)
+int proc_nr_e;					/* process to get sp of */
 vir_bytes *sp;					/* put stack pointer here */
 {
   struct proc p;
   int s;
 
-  if ((s=sys_getproc(&p, proc_nr)) != OK)
+  if ((s=sys_getproc(&p, proc_nr_e)) != OK)
   	return(s);
   *sp = p.p_reg.sp;
   return(OK);
@@ -209,5 +220,20 @@ pid_t mp_pid;
 			return rmp;
 
 	return -1;
+}
+
+/*===========================================================================*
+ *				pm_isokendpt			 	     *
+ *===========================================================================*/
+PUBLIC int pm_isokendpt(int endpoint, int *proc)
+{
+	*proc = _ENDPOINT_P(endpoint);
+	if(*proc < -NR_TASKS || *proc >= NR_PROCS)
+		return EINVAL;
+	if(*proc >= 0 && endpoint != mproc[*proc].mp_endpoint)
+		return EDEADSRCDST;
+	if(*proc >= 0 && !(mproc[*proc].mp_flags & IN_USE))
+		return EDEADSRCDST;
+	return OK;
 }
 

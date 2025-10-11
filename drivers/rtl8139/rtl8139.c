@@ -10,8 +10,6 @@
  * |------------+----------+---------+----------+---------+---------|
  * | HARD_INT	|          |         |          |         |         |
  * |------------|----------|---------|----------|---------|---------|
- * | SYS_SIG	|          |         |          |         |         |
- * |------------|----------|---------|----------|---------|---------|
  * | DL_WRITE	| port nr  | proc nr | count    | mode    | address |
  * |------------|----------|---------|----------|---------|---------|
  * | DL_WRITEV	| port nr  | proc nr | count    | mode    | address |
@@ -23,6 +21,8 @@
  * | DL_INIT	| port nr  | proc nr | mode     |         | address |
  * |------------|----------|---------|----------|---------|---------|
  * | DL_GETSTAT	| port nr  | proc nr |          |         | address |
+ * |------------|----------|---------|----------|---------|---------|
+ * | DL_GETNAME	|          |         |          |         |         |
  * |------------|----------|---------|----------|---------|---------|
  * | DL_STOP	| port_nr  |         |          |         |	    |
  * |------------|----------|---------|----------|---------|---------|
@@ -62,6 +62,7 @@
 #include <net/hton.h>
 #include <net/gen/ether.h>
 #include <net/gen/eth_io.h>
+#include <ibm/pci.h>
 
 #include <sys/types.h>
 #include <fcntl.h>
@@ -79,9 +80,8 @@
 #define printW()		((void)0)
 #define vm_1phys2bus(p)		(p)
 
-#define VERBOSE		0	/* display message during init */
+#define VERBOSE		1	/* display message during init */
 
-#include "../libpci/pci.h"
 #include "rtl8139.h"
 
 #define RX_BUFSIZE	RL_RCR_RBLEN_64K_SIZE
@@ -180,14 +180,14 @@ FORWARD _PROTOTYPE( unsigned my_inb, (U16_t port) );
 FORWARD _PROTOTYPE( unsigned my_inw, (U16_t port) );
 FORWARD _PROTOTYPE( unsigned my_inl, (U16_t port) );
 static unsigned my_inb(U16_t port) {
-	U8_t value;
+	u32_t value;
 	int s;
 	if ((s=sys_inb(port, &value)) !=OK)
 		printf("RTL8139: warning, sys_inb failed: %d\n", s);
 	return value;
 }
 static unsigned my_inw(U16_t port) {
-	U16_t value;
+	u32_t value;
 	int s;
 	if ((s=sys_inw(port, &value)) !=OK)
 		printf("RTL8139: warning, sys_inw failed: %d\n", s);
@@ -226,6 +226,7 @@ static void my_outl(U16_t port, U32_t value) {
 #define rl_outw(port, offset, value)	(my_outw((port) + (offset), (value)))
 #define rl_outl(port, offset, value)	(my_outl((port) + (offset), (value)))
 
+_PROTOTYPE( static void sig_handler, (void)				);
 _PROTOTYPE( static void rl_init, (message *mp)				);
 _PROTOTYPE( static void rl_pci_conf, (void)				);
 _PROTOTYPE( static int rl_probe, (re_t *rep)				);
@@ -247,6 +248,7 @@ _PROTOTYPE( static void mii_print_stat_speed, (U16_t stat,
 _PROTOTYPE( static void rl_clear_rx, (re_t *rep)			);
 _PROTOTYPE( static void rl_do_reset, (re_t *rep)			);
 _PROTOTYPE( static void rl_getstat, (message *mp)			);
+_PROTOTYPE( static void rl_getname, (message *mp)			);
 _PROTOTYPE( static void reply, (re_t *rep, int err, int may_block)	);
 _PROTOTYPE( static void mess_reply, (message *req, message *reply)	);
 _PROTOTYPE( static void put_userdata, (int user_proc,
@@ -267,6 +269,7 @@ _PROTOTYPE( static void rl_watchdog_f, (timer_t *tp)			);
 PRIVATE message m;
 PRIVATE int int_event_check;		/* set to TRUE if events arrived */
 
+static char *progname;
 extern int errno;
 
 /*===========================================================================*
@@ -275,6 +278,7 @@ extern int errno;
 int main(int argc, char *argv[])
 {
 	int fkeys, sfkeys;
+	int inet_proc_nr;
 	int i, r;
 	re_t *rep;
 	long v;
@@ -294,6 +298,15 @@ int main(int argc, char *argv[])
 	for (rep= &re_table[0]; rep < re_table+RE_PORT_NR; rep++)
 		rl_init_buf(rep);
 
+	/* Try to notify INET that we are present (again). If INET cannot
+	 * be found, assume this is the first time we started and INET is
+	 * not yet alive.
+	 */
+	(progname=strrchr(argv[0],'/')) ? progname++ : (progname=argv[0]);
+	r = _pm_findproc("inet", &inet_proc_nr);
+	if (r == OK) notify(inet_proc_nr);
+
+
 	while (TRUE)
 	{
 		if ((r= receive(ANY, &m)) != OK)
@@ -301,6 +314,7 @@ int main(int argc, char *argv[])
 
 		switch (m.m_type)
 		{
+		case DEV_PING: notify(m.m_source);		continue;
 		case DL_WRITEV:	rl_writev(&m, FALSE, TRUE);	break;
 		case DL_WRITE:	rl_writev(&m, FALSE, FALSE);	break;
 #if 0
@@ -309,6 +323,7 @@ int main(int argc, char *argv[])
 		case DL_READV:	rl_readv(&m, FALSE, TRUE);	break;
 		case DL_INIT:	rl_init(&m);			break;
 		case DL_GETSTAT: rl_getstat(&m);		break;
+		case DL_GETNAME: rl_getname(&m);		break;
 #if 0
 		case DL_STOP:	do_stop(&m);			break;
 #endif
@@ -330,17 +345,35 @@ int main(int argc, char *argv[])
 				check_int_events();
 			break ;
 		case FKEY_PRESSED: rtl8139_dump(&m);		break;
-		case SYS_SIG: {
-			sigset_t sigset = m.NOTIFY_ARG;
-			if (sigismember(&sigset, SIGKSTOP)) rtl8139_stop();		
+		case PROC_EVENT:
+			sig_handler();
 			break;
-		}
 		default:
 			panic("rtl8139","illegal message", m.m_type);
 		}
 	}
 }
 
+/*===========================================================================*
+ *				sig_handler                                  *
+ *===========================================================================*/
+PRIVATE void sig_handler()
+{
+  sigset_t sigset;
+  int sig;
+
+  /* Try to obtain signal set from PM. */
+  if (getsigset(&sigset) != 0) return;
+
+  /* Check for known signals. */
+  if (sigismember(&sigset, SIGTERM)) {
+      rtl8139_stop();
+  }
+}
+
+/*===========================================================================*
+ *				check_int_events			     *
+ *===========================================================================*/
 static void check_int_events(void) 
 {
   int i;
@@ -632,9 +665,11 @@ re_t *rep;
 	pci_reserve(devind);
 	/* printf("cr = 0x%x\n", pci_attr_r16(devind, PCI_CR)); */
 	bar= pci_attr_r32(devind, PCI_BAR) & 0xffffffe0;
-	if ((bar & 0x3ff) >= 0x100-32 || bar < 0x400)
-	  panic("rtl_probe",
-	    "base address is not properly configured", NO_NUM);
+	if (bar < 0x400)
+	{
+		panic("rtl_probe",
+			"base address is not properly configured", NO_NUM);
+	}
 	rep->re_base_port= bar;
 
 	ilr= pci_attr_r8(devind, PCI_ILR);
@@ -757,7 +792,7 @@ re_t *rep;
 		printf("RTL8139: error, couldn't enable interrupts: %d\n", s);
 
 #if VERBOSE	/* stay silent during startup, can always get status later */
-	if (rep->re_mode) {
+	if (rep->re_model) {
 		printf("%s: model %s\n", rep->re_name, rep->re_model);
 	} else
 	{
@@ -807,14 +842,18 @@ re_t *rep;
 #endif
 
 	/* Reset the device */
+	printf("rl_reset_hw: (before reset) port = 0x%x, RL_CR = 0x%x\n",
+		port, rl_inb(port, RL_CR));
 	rl_outb(port, RL_CR, RL_CR_RST);
 	getuptime(&t0);
 	do {
 		if (!(rl_inb(port, RL_CR) & RL_CR_RST))
 			break;
 	} while (getuptime(&t1)==OK && (t1-t0) < HZ);
+	printf("rl_reset_hw: (after reset) port = 0x%x, RL_CR = 0x%x\n",
+		port, rl_inb(port, RL_CR));
 	if (rl_inb(port, RL_CR) & RL_CR_RST)
-		panic("rtl8139","reset failed to complete", NO_NUM);
+		printf("rtl8139: reset failed to complete");
 
 	t= rl_inl(port, RL_TCR);
 	switch(t & (RL_TCR_HWVER_AM | RL_TCR_HWVER_BM))
@@ -1878,6 +1917,24 @@ message *mp;
 		(vir_bytes) sizeof(stats), &stats);
 	reply(rep, OK, FALSE);
 }
+
+
+/*===========================================================================*
+ *				rl_getname				     *
+ *===========================================================================*/
+static void rl_getname(mp)
+message *mp;
+{
+	int r;
+
+	strncpy(mp->DL_NAME, progname, sizeof(mp->DL_NAME));
+	mp->DL_NAME[sizeof(mp->DL_NAME)-1]= '\0';
+	mp->m_type= DL_NAME_REPLY;
+	r= send(mp->m_source, mp);
+	if (r != OK)
+		panic("RTL8139", "rl_getname: send failed: %d\n", r);
+}
+
 
 /*===========================================================================*
  *				reply					     *

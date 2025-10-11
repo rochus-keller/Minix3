@@ -14,7 +14,7 @@
  *   DEV_WRITE:	a process wants to write on a terminal
  *   CANCEL:	terminate a previous incomplete system call immediately
  *
- *    m_type      TTY_LINE   PROC_NR    COUNT    ADDRESS
+ *    m_type      TTY_LINE   IO_ENDPT    COUNT    ADDRESS
  * |-------------+---------+---------+---------+---------|
  * | DEV_OPEN    |         |         |         |         |
  * |-------------+---------+---------+---------+---------|
@@ -109,22 +109,8 @@ FORWARD _PROTOTYPE( void prepare_output, (void) );
 FORWARD _PROTOTYPE( void do_initialize, (void) );
 FORWARD _PROTOTYPE( void reply, (int code,int replyee,int proc,int status));
 FORWARD _PROTOTYPE( void do_printer_output, (void) );
-FORWARD _PROTOTYPE( void signal_handler, (int sig) );
+FORWARD _PROTOTYPE( void do_signal, (message *m_ptr) );
 
-/*===========================================================================*
- *				 signal_handler                              *
- *===========================================================================*/
-PRIVATE void signal_handler(sig)
-int sig;					/* signal number */
-{
-/* Expect a SIGTERM signal when this server must shutdown. */
-  if (sig == SIGTERM) {
-  	printf("Shutting down PRINTER driver\n");
-  	exit(0);
-  } else {
-  	printf("PRINTER got unknown signal\n");
-  }
-}
 
 /*===========================================================================*
  *				printer_task				     *
@@ -133,6 +119,14 @@ PUBLIC void main(void)
 {
 /* Main routine of the printer task. */
   message pr_mess;		/* buffer for all incoming messages */
+  struct sigaction sa;
+  int s;
+
+  /* Install signal handlers. Ask PM to transform signal into message. */
+  sa.sa_handler = SIG_MESS;
+  sigemptyset(&sa.sa_mask);
+  sa.sa_flags = 0;
+  if (sigaction(SIGTERM,&sa,NULL)<0) panic("PRN","sigaction failed", errno);
   
   while (TRUE) {
 	receive(ANY, &pr_mess);
@@ -141,17 +135,36 @@ PUBLIC void main(void)
                  do_initialize();		/* initialize */
 	        /* fall through */
 	    case DEV_CLOSE:
-		reply(TASK_REPLY, pr_mess.m_source, pr_mess.PROC_NR, OK);
+		reply(TASK_REPLY, pr_mess.m_source, pr_mess.IO_ENDPT, OK);
 		break;
 	    case DEV_WRITE:	do_write(&pr_mess);	break;
 	    case DEV_STATUS:	do_status(&pr_mess);	break;
 	    case CANCEL:	do_cancel(&pr_mess);	break;
 	    case HARD_INT:	do_printer_output();	break;
-	    case SYS_SIG:	/* do nothing */	break;
+	    case SYS_SIG:	do_signal(&pr_mess); 	break;
+	    case DEV_PING:  	notify(pr_mess.m_source);	break;
+	    case PROC_EVENT:	break;
 	    default:
-		reply(TASK_REPLY, pr_mess.m_source, pr_mess.PROC_NR, EINVAL);
+		reply(TASK_REPLY, pr_mess.m_source, pr_mess.IO_ENDPT, EINVAL);
 	}
   }
+}
+
+
+/*===========================================================================*
+ *				 do_signal	                             *
+ *===========================================================================*/
+PRIVATE void do_signal(m_ptr)
+message *m_ptr;					/* signal message */
+{
+  int sig;
+  sigset_t sigset = m_ptr->NOTIFY_ARG;
+  
+  /* Expect a SIGTERM signal when this server must shutdown. */
+  if (sigismember(&sigset, SIGTERM)) {
+	exit(0);
+  } 
+  /* Ignore all other signals. */
 }
 
 /*===========================================================================*
@@ -164,7 +177,7 @@ register message *m_ptr;	/* pointer to the newly arrived message */
 
     register int r = SUSPEND;
     int retries;
-    int status;
+    unsigned long status;
 
     /* Reject command if last write is not yet finished, the count is not
      * positive, or the user address is bad.
@@ -173,14 +186,14 @@ register message *m_ptr;	/* pointer to the newly arrived message */
     else if (m_ptr->COUNT <= 0)  	r = EINVAL;
 
     /* Reply to FS, no matter what happened, possible SUSPEND caller. */
-    reply(TASK_REPLY, m_ptr->m_source, m_ptr->PROC_NR, r);
+    reply(TASK_REPLY, m_ptr->m_source, m_ptr->IO_ENDPT, r);
 
     /* If no errors occurred, continue printing with SUSPENDED caller.
      * First wait until the printer is online to prevent stupid errors.
      */
     if (SUSPEND == r) { 	
 	caller = m_ptr->m_source;
-	proc_nr = m_ptr->PROC_NR;
+	proc_nr = m_ptr->IO_ENDPT;
 	user_left = m_ptr->COUNT;
 	orig_count = m_ptr->COUNT;
 	user_vir = (vir_bytes) m_ptr->ADDRESS;
@@ -203,7 +216,7 @@ register message *m_ptr;	/* pointer to the newly arrived message */
 }
 
 /*===========================================================================*
- *				output_done					     *
+ *				output_done				     *
  *===========================================================================*/
 PRIVATE void output_done()
 {
@@ -236,14 +249,9 @@ PRIVATE void output_done()
     else {				/* done! report back to FS */
 	status = orig_count;
     }
-#if DEAD_CODE
-    reply(REVIVE, caller, proc_nr, status);
-    writing = FALSE;
-#else
     revive_pending = TRUE;
     revive_status = status;
     notify(caller);
-#endif
 }
 
 /*===========================================================================*
@@ -254,7 +262,7 @@ register message *m_ptr;	/* pointer to the newly arrived message */
 {
   if (revive_pending) {
 	m_ptr->m_type = DEV_REVIVE;		/* build message */
-	m_ptr->REP_PROC_NR = proc_nr;
+	m_ptr->REP_ENDPT = proc_nr;
 	m_ptr->REP_STATUS = revive_status;
 
 	writing = FALSE;			/* unmark event */
@@ -277,12 +285,12 @@ register message *m_ptr;	/* pointer to the newly arrived message */
  * but rely on FS to handle the EINTR reply and de-suspension properly.
  */
 
-  if (writing && m_ptr->PROC_NR == proc_nr) {
+  if (writing && m_ptr->IO_ENDPT == proc_nr) {
 	oleft = 0;		/* cancel output by interrupt handler */
 	writing = FALSE;
 	revive_pending = FALSE;
   }
-  reply(TASK_REPLY, m_ptr->m_source, m_ptr->PROC_NR, EINTR);
+  reply(TASK_REPLY, m_ptr->m_source, m_ptr->IO_ENDPT, EINTR);
 }
 
 /*===========================================================================*
@@ -300,7 +308,7 @@ int status;			/* number of  chars printed or error code */
 
   pr_mess.m_type = code;		/* TASK_REPLY or REVIVE */
   pr_mess.REP_STATUS = status;		/* count or EIO */
-  pr_mess.REP_PROC_NR = process;	/* which user does this pertain to */
+  pr_mess.REP_ENDPT = process;	/* which user does this pertain to */
   send(replyee, &pr_mess);		/* send the message */
 }
 
@@ -310,7 +318,6 @@ int status;			/* number of  chars printed or error code */
 PRIVATE void do_initialize()
 {
 /* Set global variables and initialize the printer. */
-
   static int initialized = FALSE;
   if (initialized) return;
   initialized = TRUE;
@@ -358,7 +365,7 @@ PRIVATE void do_printer_output()
  * printer IRQ yet! 
  */
 
-  int status;
+  unsigned long status;
   pvb_pair_t char_out[3];
 
   if (oleft == 0) {

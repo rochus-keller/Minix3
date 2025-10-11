@@ -97,6 +97,12 @@ PRIVATE struct driver w_dtab = {
 PUBLIC int main()
 {
   long v;
+  struct sigaction sa;
+ 
+  sa.sa_handler = SIG_MESS;
+  sigemptyset(&sa.sa_mask);
+  sa.sa_flags = 0;
+  if (sigaction(SIGTERM,&sa,NULL)<0) panic("BIOS","sigaction failed", errno);
 
   v= 0;
   env_parse("bios_remap_first", "d", 0, &v, 0, 1);
@@ -494,7 +500,7 @@ message *m;
                 if (w_prepare(m->DEVICE) == NIL_DEV) return ENXIO;
                 count = w_wn->open_ct;
                 if ((r=sys_datacopy(SELF, (vir_bytes)&count,
-                        m->PROC_NR, (vir_bytes)m->ADDRESS, sizeof(count))) != OK)
+                        m->IO_ENDPT, (vir_bytes)m->ADDRESS, sizeof(count))) != OK)
                         return r;
                 return OK;
         }

@@ -18,6 +18,8 @@
 
 #include "../drivers.h"
 #include <termios.h>
+#include <sys/ioctl.h>
+#include <sys/vm.h>
 #include <minix/callnr.h>
 #include <minix/com.h>
 #include "tty.h"
@@ -47,6 +49,9 @@
 #define STATUS             6	/* 6845's status register */
 #define VID_ORG           12	/* 6845's origin register */
 #define CURSOR            14	/* 6845's cursor register */
+
+/* The clock task should provide an interface for this */
+#define TIMER_FREQ  1193182L    /* clock frequency for timer in PC and AT */
 
 /* Beeper. */
 #define BEEP_FREQ     0x0533	/* value to put into timer to set beep freq */
@@ -118,7 +123,7 @@ struct sequence {
 FORWARD _PROTOTYPE( int cons_write, (struct tty *tp, int try)		);
 FORWARD _PROTOTYPE( void cons_echo, (tty_t *tp, int c)			);
 FORWARD _PROTOTYPE( void out_char, (console_t *cons, int c)		);
-FORWARD _PROTOTYPE( void putk, (int c)					);
+FORWARD _PROTOTYPE( void cons_putk, (int c)				);
 FORWARD _PROTOTYPE( void beep, (void)					);
 FORWARD _PROTOTYPE( void do_escape, (console_t *cons, int c)		);
 FORWARD _PROTOTYPE( void flush, (console_t *cons)			);
@@ -130,6 +135,7 @@ FORWARD _PROTOTYPE( void stop_beep, (timer_t *tmrp)			);
 FORWARD _PROTOTYPE( void cons_org0, (void)				);
 FORWARD _PROTOTYPE( int ga_program, (struct sequence *seq)		);
 FORWARD _PROTOTYPE( int cons_ioctl, (tty_t *tp, int)			);
+PRIVATE _PROTOTYPE( void ser_putc, (char c)				);
 
 /*===========================================================================*
  *				cons_write				     *
@@ -716,11 +722,14 @@ int reg;			/* which register pair to set */
 unsigned *val;			/* 16-bit value to set it to */
 {
   char v1, v2;
+  unsigned long v;
 /* Get a register pair inside the 6845.  */
   sys_outb(vid_port + INDEX, reg); 
-  sys_inb(vid_port + DATA, &v1); 
+  sys_inb(vid_port + DATA, &v); 
+  v1 = v;
   sys_outb(vid_port + INDEX, reg+1); 
-  sys_inb(vid_port + DATA, &v2); 
+  sys_inb(vid_port + DATA, &v); 
+  v2 = v;
   *val = (v1 << 8) | v2;
 }
 
@@ -736,7 +745,8 @@ PRIVATE void beep()
   static timer_t tmr_stop_beep;
   pvb_pair_t char_out[3];
   clock_t now;
-  int port_b_val, s;
+  unsigned long port_b_val;
+  int s;
   
   /* Fetch current time in advance to prevent beeping delay. */
   if ((s=getuptime(&now)) != OK)
@@ -761,6 +771,106 @@ PRIVATE void beep()
   }
 }
 
+
+/*===========================================================================*
+ *				do_video				     *
+ *===========================================================================*/
+PUBLIC void do_video(message *m)
+{
+	int i, n, r, ops, watch;
+	unsigned char c;
+
+	/* Execute the requested device driver function. */
+	r= EINVAL;	/* just in case */
+	switch (m->m_type) {
+	    case DEV_OPEN:
+		/* Should grant IOPL */
+		r= OK;
+		break;
+	    case DEV_CLOSE:
+		r= OK;
+		break;
+	    case DEV_IOCTL:
+		if (m->TTY_REQUEST == MIOCMAP || m->TTY_REQUEST == MIOCUNMAP)
+		{
+			int r, do_map;
+			struct mapreq mapreq;
+
+			do_map= (m->REQUEST == MIOCMAP);	/* else unmap */
+
+			/* Get request structure */
+			r= sys_vircopy(m->IO_ENDPT, D,
+				(vir_bytes)m->ADDRESS,
+				SELF, D, (vir_bytes)&mapreq, sizeof(mapreq));
+			if (r != OK)
+			{
+				tty_reply(TASK_REPLY, m->m_source, m->IO_ENDPT,
+					r);
+				return;
+			}
+			r= sys_vm_map(m->IO_ENDPT, do_map,
+				(phys_bytes)mapreq.base, mapreq.size,
+				mapreq.offset);
+			tty_reply(TASK_REPLY, m->m_source, m->IO_ENDPT, r);
+			return;
+		}
+		r= ENOTTY;
+		break;
+
+	    default:		
+		printf(
+		"Warning, TTY(video) got unexpected request %d from %d\n",
+			m->m_type, m->m_source);
+		r= EINVAL;
+	}
+	tty_reply(TASK_REPLY, m->m_source, m->IO_ENDPT, r);
+}
+
+
+/*===========================================================================*
+ *				beep_x					     *
+ *===========================================================================*/
+PUBLIC void beep_x(freq, dur)
+unsigned freq;
+clock_t dur;
+{
+/* Making a beeping sound on the speaker.
+ * This routine works by turning on the bits 0 and 1 in port B of the 8255
+ * chip that drive the speaker.
+ */
+  static timer_t tmr_stop_beep;
+  pvb_pair_t char_out[3];
+  clock_t now;
+  unsigned long port_b_val;
+  int s;
+  
+  unsigned long ival= TIMER_FREQ / freq;
+  if (ival == 0 || ival > 0xffff)
+	return;	/* Frequency out of range */
+
+  /* Fetch current time in advance to prevent beeping delay. */
+  if ((s=getuptime(&now)) != OK)
+  	panic("TTY","Console couldn't get clock's uptime.", s);
+  if (!beeping) {
+	/* Set timer channel 2, square wave, with given frequency. */
+        pv_set(char_out[0], TIMER_MODE, 0xB6);	
+        pv_set(char_out[1], TIMER2, (ival >> 0) & BYTE);
+        pv_set(char_out[2], TIMER2, (ival >> 8) & BYTE);
+        if (sys_voutb(char_out, 3)==OK) {
+        	if (sys_inb(PORT_B, &port_b_val)==OK &&
+        	    sys_outb(PORT_B, (port_b_val|3))==OK)
+        	    	beeping = TRUE;
+        }
+  }
+  /* Add a timer to the timers list. Possibly reschedule the alarm. */
+  tmrs_settimer(&tty_timers, &tmr_stop_beep, now+dur, stop_beep, NULL);
+  if (tty_timers->tmr_exp_time != tty_next_timeout) {
+  	tty_next_timeout = tty_timers->tmr_exp_time;
+  	if ((s=sys_setalarm(tty_next_timeout, 1)) != OK)
+  		panic("TTY","Console couldn't set alarm.", s);
+  }
+}
+
 /*===========================================================================*
  *				stop_beep				     *
  *===========================================================================*/
@@ -768,7 +878,7 @@ PRIVATE void stop_beep(tmrp)
 timer_t *tmrp;
 {
 /* Turn off the beeper by turning off bits 0 and 1 in PORT_B. */
-  int port_b_val;
+  unsigned long port_b_val;
   if (sys_inb(PORT_B, &port_b_val)==OK && 
 	sys_outb(PORT_B, (port_b_val & ~3))==OK)
 		beeping = FALSE;
@@ -796,9 +906,6 @@ tty_t *tp;
   cons = &cons_table[line];
   cons->c_tty = tp;
   tp->tty_priv = cons;
-
-  /* Initialize the keyboard driver. */
-  kb_init(tp);
 
   /* Fill in TTY function hooks. */
   tp->tty_devwrite = cons_write;
@@ -876,7 +983,24 @@ tty_t *tp;
 PUBLIC void kputc(c)
 int c;
 {
-	putk(c);
+/* Accumulate a single character for a kernel message. Send a notification
+ * the to output driver if an END_OF_KMESS is encountered. 
+ */
+#if 0
+  ser_putc(c);
+  return;
+#endif
+
+  if (panicing)
+	cons_putk(c);
+  if (c != 0) {
+      kmess.km_buf[kmess.km_next] = c;	/* put normal char in buffer */
+      if (kmess.km_size < KMESS_BUF_SIZE)
+          kmess.km_size += 1;		
+      kmess.km_next = (kmess.km_next + 1) % KMESS_BUF_SIZE;
+  } else {
+      notify(LOG_PROC_NR);
+  }
 }
 
 /*===========================================================================*
@@ -915,11 +1039,11 @@ message *m;
       bytes = ((kmess.km_next + KMESS_BUF_SIZE) - prev_next) % KMESS_BUF_SIZE;
       r=prev_next;				/* start at previous old */ 
       while (bytes > 0) {			
-          putk( kmess.km_buf[(r%KMESS_BUF_SIZE)] );
+          cons_putk( kmess.km_buf[(r%KMESS_BUF_SIZE)] );
           bytes --;
           r ++;
       }
-      putk(0);			/* terminate to flush output */
+      cons_putk(0);			/* terminate to flush output */
   }
 
   /* Almost done, store 'next' so that we can determine what part of the
@@ -939,7 +1063,7 @@ message *m_ptr;			/* pointer to request message */
   vir_bytes src;
   int count;
   int result = OK;
-  int proc_nr = m_ptr->DIAG_PROC_NR;
+  int proc_nr = m_ptr->DIAG_ENDPT;
   if (proc_nr == SELF) proc_nr = m_ptr->m_source;
 
   src = (vir_bytes) m_ptr->DIAG_PRINT_BUF;
@@ -948,26 +1072,43 @@ message *m_ptr;			/* pointer to request message */
 		result = EFAULT;
 		break;
 	}
-	putk(c);
+	cons_putk(c);
   }
-  putk(0);			/* always terminate, even with EFAULT */
+  cons_putk(0);			/* always terminate, even with EFAULT */
   m_ptr->m_type = result;
   send(m_ptr->m_source, m_ptr);
 }
 
 /*===========================================================================*
- *				putk					     *
+ *				do_get_kmess				     *
  *===========================================================================*/
-PRIVATE void putk(c)
+PUBLIC void do_get_kmess(m_ptr)
+message *m_ptr;			/* pointer to request message */
+{
+/* Provide the log device with debug output */
+  vir_bytes dst;
+  int r;
+
+  dst = (vir_bytes) m_ptr->GETKM_PTR;
+  r= OK;
+  if (sys_vircopy(SELF, D, (vir_bytes)&kmess, m_ptr->m_source, D,
+	dst, sizeof(kmess)) != OK) {
+	r = EFAULT;
+  }
+  m_ptr->m_type = r;
+  send(m_ptr->m_source, m_ptr);
+}
+
+/*===========================================================================*
+ *				cons_putk				     *
+ *===========================================================================*/
+PRIVATE void cons_putk(c)
 int c;				/* character to print */
 {
-/* This procedure is used by the version of printf() that is linked with
- * the TTY driver.  The one in the library sends a message to FS, which is
- * not what is needed for printing within the TTY. This version just queues
- * the character and starts the output.
+/* This procedure is used to print a character on the console.
  */
   if (c != 0) {
-	if (c == '\n') putk('\r');
+	if (c == '\n') cons_putk('\r');
 	out_char(&cons_table[0], (int) c);
   } else {
 	flush(&cons_table[0]);
@@ -1068,7 +1209,7 @@ message *m;
   if (!machine.vdu_ega) return(ENOTTY);
   result = ga_program(seq1);	/* bring font memory into view */
 
-  result = sys_physcopy(m->PROC_NR, D, (vir_bytes) m->ADDRESS, 
+  result = sys_physcopy(m->IO_ENDPT, D, (vir_bytes) m->ADDRESS, 
   	NONE, PHYS_SEG, (phys_bytes) GA_VIDEO_ADDRESS, (phys_bytes)GA_FONT_SIZE);
 
   result = ga_program(seq2);	/* restore */
@@ -1105,4 +1246,26 @@ int try;
   tp->tty_winsize.ws_col= scr_width;
   tp->tty_winsize.ws_xpixel= scr_width * 8;
   tp->tty_winsize.ws_ypixel= scr_lines * font_lines;
+}
+
+#define COM1_BASE	0x3F8
+#define COM1_THR	(COM1_BASE + 0)
+#define		LSR_THRE	0x20
+#define COM1_LSR	(COM1_BASE + 5)
+
+PRIVATE void ser_putc(char c)
+{
+	unsigned long b;
+	int i;
+	int lsr, thr;
+
+	lsr= COM1_LSR;
+	thr= COM1_THR;
+	for (i= 0; i<100; i++)
+	{
+		sys_inb(lsr, &b);
+		if (b & LSR_THRE)
+			break;
+	}
+	sys_outb(thr, c);
 }

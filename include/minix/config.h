@@ -3,7 +3,7 @@
 
 /* Minix release and version numbers. */
 #define OS_RELEASE "3"
-#define OS_VERSION "1.0"
+#define OS_VERSION "1.2"
 
 /* This file sets configuration parameters for the MINIX kernel, FS, and PM.
  * It is divided up into two main sections.  The first section contains
@@ -41,7 +41,7 @@
 
 #if _MINIX_SMALL
 
-#define NR_BUFS	128
+#define NR_BUFS	100
 #define NR_BUF_HASH 128
 
 #else
@@ -53,7 +53,7 @@
 #endif
 
 #if (MACHINE == IBM_PC && _WORD_SIZE == 4)
-#define NR_BUFS         1280	/* # blocks in the buffer cache */
+#define NR_BUFS         1200	/* # blocks in the buffer cache */
 #define NR_BUF_HASH     2048	/* size of buf hash table; MUST BE POWER OF 2*/
 #endif
 
@@ -85,11 +85,16 @@
 #define ENABLE_BINCOMPAT   0	/* for binaries using obsolete calls */
 #define ENABLE_SRCCOMPAT   0	/* for sources using obsolete calls */
 
-/* Which process should receive diagnostics from the kernel and system? 
+/* Which processes should receive diagnostics from the kernel and system? 
  * Directly sending it to TTY only displays the output. Sending it to the
  * log driver will cause the diagnostics to be buffered and displayed.
+ * Messages are sent by src/lib/sysutil/kputc.c to these processes, in
+ * the order of this array, which must be terminated by NONE. This is used
+ * by drivers and servers that printf().
+ * The kernel does this for its own kprintf() in kernel/utility.c, also using
+ * this array, but a slightly different mechanism.
  */
-#define OUTPUT_PROC_NR	LOG_PROC_NR	/* TTY_PROC_NR or LOG_PROC_NR */
+#define OUTPUT_PROCS_ARRAY	{ TTY_PROC_NR, LOG_PROC_NR, NONE }
 
 /* NR_CONS, NR_RS_LINES, and NR_PTYS determine the number of terminals the
  * system can handle.

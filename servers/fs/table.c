@@ -60,12 +60,12 @@ PUBLIC _PROTOTYPE (int (*call_vec[]), (void) ) = {
 	do_pipe,	/* 42 = pipe	*/
 	no_sys,		/* 43 = times	*/
 	no_sys,		/* 44 = (prof)	*/
-	no_sys,		/* 45 = unused	*/
+	do_slink,	/* 45 = symlink	*/
 	do_set,		/* 46 = setgid	*/
 	no_sys,		/* 47 = getgid	*/
 	no_sys,		/* 48 = (signal)*/
-	no_sys,		/* 49 = unused	*/
-	no_sys,		/* 50 = unused	*/
+	do_rdlink,	/* 49 = readlink*/
+	do_lstat,	/* 50 = lstat	*/
 	no_sys,		/* 51 = (acct)	*/
 	no_sys,		/* 52 = (phys)	*/
 	no_sys,		/* 53 = (lock)	*/
@@ -108,6 +108,10 @@ PUBLIC _PROTOTYPE (int (*call_vec[]), (void) ) = {
 	no_sys,		/* 88 = getpriority */
 	no_sys,		/* 89 = setpriority */
 	no_sys,		/* 90 = gettimeofday */
+	no_sys,		/* 91 = seteuid */
+	no_sys,		/* 92 = setegid */
+	do_truncate,	/* 93 = truncate */
+	do_ftruncate,	/* 94 = truncate */
 };
 /* This should not fail with "array size is negative": */
 extern int dummy[sizeof(call_vec) == NCALLS * sizeof(call_vec[0]) ? 1 : -1];

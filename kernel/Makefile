@@ -14,7 +14,7 @@ CFLAGS = -I$i
 LDFLAGS = -i 
 
 HEAD =	mpx.o
-OBJS =	start.o protect.o klib.o table.o main.o proc.o \
+OBJS =	start.o protect.o klib.o table.o kprintf.o main.o proc.o \
 	i8259.o exception.o system.o clock.o utility.o debug.o
 SYSTEM = system.a
 LIBS = -ltimers 
@@ -36,6 +36,13 @@ clean:
 depend: 
 	cd system && $(MAKE) -$(MAKEFLAGS) $@
 	/usr/bin/mkdep "$(CC) -E $(CPPFLAGS)" *.c *.s > .depend
+
+# How to build it
+.s.o:
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+.c.o:
+	$(CC) $(CFLAGS) -c -o $@ $<
 
 # Include generated dependencies.
 klib.o:	klib386.s klib88.s

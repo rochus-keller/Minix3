@@ -26,17 +26,22 @@ struct reg86u;
 _PROTOTYPE( int _taskcall, (int who, int syscallnr, message *msgptr));
 
 _PROTOTYPE( int sys_abort, (int how, ...));
+_PROTOTYPE( int sys_enable_iop, (int proc));
 _PROTOTYPE( int sys_exec, (int proc, char *ptr,  
 				char *aout, vir_bytes initpc));
-_PROTOTYPE( int sys_fork, (int parent, int child));
+_PROTOTYPE( int sys_fork, (int parent, int child, int *));
 _PROTOTYPE( int sys_newmap, (int proc, struct mem_map *ptr));
 _PROTOTYPE( int sys_exit, (int proc));
 _PROTOTYPE( int sys_trace, (int req, int proc, long addr, long *data_p));
 
-_PROTOTYPE( int sys_svrctl, (int proc, int req, int priv,vir_bytes argp));
+_PROTOTYPE( int sys_privctl, (int proc, int req, int i, void *p));
 _PROTOTYPE( int sys_nice, (int proc, int priority));
 
 _PROTOTYPE( int sys_int86, (struct reg86u *reg86p));
+_PROTOTYPE( int sys_vm_setbuf, (phys_bytes base, phys_bytes size,
+							phys_bytes high));
+_PROTOTYPE( int sys_vm_map, (int proc_nr, int do_map,
+	phys_bytes base, phys_bytes size, phys_bytes offset));
 
 /* Shorthands for sys_sdevio() system call. */
 #define sys_insb(port, proc_nr, buffer, count) \
@@ -101,6 +106,7 @@ _PROTOTYPE(int sys_segctl, (int *index, u16_t *seg, vir_bytes *off,
 /* Shorthands for sys_getinfo() system call. */
 #define sys_getkmessages(dst)	sys_getinfo(GET_KMESSAGES, dst, 0,0,0)
 #define sys_getkinfo(dst)	sys_getinfo(GET_KINFO, dst, 0,0,0)
+#define sys_getloadinfo(dst)	sys_getinfo(GET_LOADINFO, dst, 0,0,0)
 #define sys_getmachine(dst)	sys_getinfo(GET_MACHINE, dst, 0,0,0)
 #define sys_getproctab(dst)	sys_getinfo(GET_PROCTAB, dst, 0,0,0)
 #define sys_getprivtab(dst)	sys_getinfo(GET_PRIVTAB, dst, 0,0,0)
@@ -108,6 +114,7 @@ _PROTOTYPE(int sys_segctl, (int *index, u16_t *seg, vir_bytes *off,
 #define sys_getrandomness(dst)	sys_getinfo(GET_RANDOMNESS, dst, 0,0,0)
 #define sys_getimage(dst)	sys_getinfo(GET_IMAGE, dst, 0,0,0)
 #define sys_getirqhooks(dst)	sys_getinfo(GET_IRQHOOKS, dst, 0,0,0)
+#define sys_getirqactids(dst)	sys_getinfo(GET_IRQACTIDS, dst, 0,0,0)
 #define sys_getmonparams(v,vl)	sys_getinfo(GET_MONPARAMS, v,vl, 0,0)
 #define sys_getschedinfo(v1,v2)	sys_getinfo(GET_SCHEDINFO, v1,0, v2,0)
 #define sys_getlocktimings(dst)	sys_getinfo(GET_LOCKTIMING, dst, 0,0,0)
@@ -141,10 +148,29 @@ _PROTOTYPE(int sys_vinl, (pvl_pair_t *pvl_pairs, int nr_ports)		);
 _PROTOTYPE(int sys_out, (int port, unsigned long value, int type)	); 
 
 /* Shorthands for sys_in() system call. */
-#define sys_inb(p,v)	sys_in((p), (unsigned long*) (v), DIO_BYTE)
-#define sys_inw(p,v)	sys_in((p), (unsigned long*) (v), DIO_WORD)
-#define sys_inl(p,v)	sys_in((p), (unsigned long*) (v), DIO_LONG)
+#define sys_inb(p,v)	sys_in((p), (v), DIO_BYTE)
+#define sys_inw(p,v)	sys_in((p), (v), DIO_WORD)
+#define sys_inl(p,v)	sys_in((p), (v), DIO_LONG)
 _PROTOTYPE(int sys_in, (int port, unsigned long *value, int type)	);
+
+/* pci.c */
+_PROTOTYPE( void pci_init, (void)					);
+_PROTOTYPE( void pci_init1, (char *name)				);
+_PROTOTYPE( int pci_first_dev, (int *devindp, u16_t *vidp, u16_t *didp)	);
+_PROTOTYPE( int pci_next_dev, (int *devindp, u16_t *vidp, u16_t *didp)	);
+_PROTOTYPE( int pci_find_dev, (U8_t bus, U8_t dev, U8_t func,
+							int *devindp)	);
+_PROTOTYPE( void pci_reserve, (int devind)				);
+_PROTOTYPE( void pci_ids, (int devind, u16_t *vidp, u16_t *didp)	);
+_PROTOTYPE( void pci_rescan_bus, (U8_t busnr)				);
+_PROTOTYPE( u8_t pci_attr_r8, (int devind, int port)			);
+_PROTOTYPE( u16_t pci_attr_r16, (int devind, int port)			);
+_PROTOTYPE( u32_t pci_attr_r32, (int devind, int port)			);
+_PROTOTYPE( void pci_attr_w8, (int devind, int port, U8_t value)	);
+_PROTOTYPE( void pci_attr_w16, (int devind, int port, U16_t value)	);
+_PROTOTYPE( void pci_attr_w32, (int devind, int port, u32_t value)	);
+_PROTOTYPE( char *pci_dev_name, (U16_t vid, U16_t did)			);
+_PROTOTYPE( char *pci_slot_name, (int devind)				);
 
 #endif /* _SYSLIB_H */
 

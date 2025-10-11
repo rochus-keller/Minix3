@@ -4,9 +4,9 @@
 #define V2_NR_DZONES       7	/* # direct zone numbers in a V2 inode */
 #define V2_NR_TZONES      10	/* total # zone numbers in a V2 inode */
 
-#define NR_FILPS         128	/* # slots in filp table */
-#define NR_INODES         64	/* # slots in "in core" inode table */
-#define NR_SUPERS          8	/* # slots in super block table */
+#define NR_FILPS         256	/* # slots in filp table */
+#define NR_INODES        256	/* # slots in "in core" inode table */
+#define NR_SUPERS         12	/* # slots in super block table */
 #define NR_LOCKS           8	/* # slots in the file locking table */
 
 /* The type of sizeof may be (unsigned) long.  Use the following macro for
@@ -28,6 +28,7 @@
 
 /* Miscellaneous constants */
 #define SU_UID 	 ((uid_t) 0)	/* super_user's uid_t */
+#define SERVERS_UID ((uid_t) 11) /* who may do FSSIGNON */
 #define SYS_UID  ((uid_t) 0)	/* uid_t for processes MM and INIT */
 #define SYS_GID  ((gid_t) 0)	/* gid_t for processes MM and INIT */
 #define NORMAL	           0	/* forces get_block to do disk read */
@@ -47,6 +48,21 @@
 #define ENTER              1 /* tells search_dir to make dir entry */
 #define DELETE             2 /* tells search_dir to delete entry */
 #define IS_EMPTY           3 /* tells search_dir to ret. OK or ENOTEMPTY */  
+
+/* write_map() args */
+#define WMAP_FREE	(1 << 0)
+
+#define PATH_TRANSPARENT 000   /* parse_path stops at final object */
+#define PATH_PENULTIMATE 001   /* parse_path stops at last but one name */
+#define PATH_OPAQUE      002   /* parse_path stops at final name */
+#define PATH_NONSYMBOLIC 004   /* parse_path scans final name if symbolic */
+#define PATH_STRIPDOT    010   /* parse_path strips /. from path */
+#define EAT_PATH         PATH_TRANSPARENT
+#define EAT_PATH_OPAQUE  PATH_OPAQUE 
+#define LAST_DIR         PATH_PENULTIMATE
+#define LAST_DIR_NOTDOT  PATH_PENULTIMATE | PATH_STRIPDOT
+#define LAST_DIR_EATSYM  PATH_NONSYMBOLIC
+#define SYMLOOP		16
 
 #define CLEAN              0	/* disk and memory copies identical */
 #define DIRTY              1	/* disk and memory copies differ */
@@ -77,10 +93,10 @@
 #define V1_INODE_SIZE             usizeof (d1_inode)  /* bytes in V1 dsk ino */
 
 /* # zones/indir block */
-#define V1_INDIRECTS (STATIC_BLOCK_SIZE/V1_ZONE_NUM_SIZE)  
+#define V1_INDIRECTS (_STATIC_BLOCK_SIZE/V1_ZONE_NUM_SIZE)  
 
 /* # V1 dsk inodes/blk */
-#define V1_INODES_PER_BLOCK (STATIC_BLOCK_SIZE/V1_INODE_SIZE)
+#define V1_INODES_PER_BLOCK (_STATIC_BLOCK_SIZE/V1_INODE_SIZE)
 
 /* Derived sizes pertaining to the V2 file system. */
 #define V2_ZONE_NUM_SIZE            usizeof (zone_t)  /* # bytes in V2 zone  */

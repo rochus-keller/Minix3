@@ -28,11 +28,14 @@
 
 #ifdef _MINIX
 /* How to exit the system or stop a server process. */
-#define RBT_HALT	   0
-#define RBT_REBOOT	   1
+#define RBT_HALT	   0	/* shutdown and return to monitor */
+#define RBT_REBOOT	   1	/* reboot the system through the monitor */
 #define RBT_PANIC	   2	/* a server panics */
 #define RBT_MONITOR	   3	/* let the monitor do this */
 #define RBT_RESET	   4	/* hard reset the system */
+#define RBT_INVALID	   5	/* first invalid reboot flag */
+
+#define _PM_SEG_FLAG (1L << 30)	/* for read() and write() to FS by PM */
 #endif
 
 /* What system info to retrieve with sysgetinfo(). */
@@ -40,6 +43,10 @@
 #define SI_PROC_ADDR	   1	/* address of process table */
 #define SI_PROC_TAB	   2	/* copy of entire process table */
 #define SI_DMAP_TAB	   3	/* get device <-> driver mappings */
+#define SI_MEM_ALLOC	   4	/* get memory allocation data */
+#define SI_DATA_STORE	   5	/* get copy of data store */
+#define SI_LOADINFO	   6	/* get copy of load average structure */
+#define SI_KPROC_TAB	   7	/* copy of kernel process table */
 
 /* NULL must be defined in <unistd.h> according to POSIX Sec. 2.7.1. */
 #define NULL    ((void *)0)
@@ -56,6 +63,8 @@
 #define _SC_VERSION	   8
 #define _SC_STREAM_MAX	   9
 #define _SC_TZNAME_MAX    10
+#define _SC_PAGESIZE	  11
+#define _SC_PAGE_SIZE	  _SC_PAGESIZE
 
 /* The following relate to configurable pathname variables. POSIX Table 5-2. */
 #define _PC_LINK_MAX	   1	/* link count */
@@ -109,6 +118,7 @@ _PROTOTYPE( int getgroups, (int _gidsetsize, gid_t _grouplist[])	);
 _PROTOTYPE( char *getlogin, (void)					);
 _PROTOTYPE( pid_t getpgrp, (void)					);
 _PROTOTYPE( pid_t getpid, (void)					);
+_PROTOTYPE( pid_t getnpid, (int proc_nr)				);
 _PROTOTYPE( pid_t getppid, (void)					);
 _PROTOTYPE( uid_t getuid, (void)					);
 _PROTOTYPE( int isatty, (int _fd)					);
@@ -120,9 +130,11 @@ _PROTOTYPE( int pipe, (int _fildes[2])					);
 _PROTOTYPE( ssize_t read, (int _fd, void *_buf, size_t _n)		);
 _PROTOTYPE( int rmdir, (const char *_path)				);
 _PROTOTYPE( int setgid, (_mnx_Gid_t _gid)				);
+_PROTOTYPE( int setegid, (_mnx_Gid_t _gid)				);
 _PROTOTYPE( int setpgid, (pid_t _pid, pid_t _pgid)			);
 _PROTOTYPE( pid_t setsid, (void)					);
 _PROTOTYPE( int setuid, (_mnx_Uid_t _uid)				);
+_PROTOTYPE( int seteuid, (_mnx_Uid_t _uid)				);
 _PROTOTYPE( unsigned int sleep, (unsigned int _seconds)			);
 _PROTOTYPE( long sysconf, (int _name)					);
 _PROTOTYPE( pid_t tcgetpgrp, (int _fd)					);
@@ -130,10 +142,13 @@ _PROTOTYPE( int tcsetpgrp, (int _fd, pid_t _pgrp_id)			);
 _PROTOTYPE( char *ttyname, (int _fd)					);
 _PROTOTYPE( int unlink, (const char *_path)				);
 _PROTOTYPE( ssize_t write, (int _fd, const void *_buf, size_t _n)	);
+_PROTOTYPE( int truncate, (const char *_path, off_t _length)		);
+_PROTOTYPE( int ftruncate, (int _fd, off_t _length)			);
 
 /* Open Group Base Specifications Issue 6 (not complete) */
 _PROTOTYPE( int symlink, (const char *path1, const char *path2)		);
-_PROTOTYPE( int getopt, (int _argc, char **_argv, char *_opts)		);
+_PROTOTYPE( int readlink, (const char *, char *, size_t)		);
+_PROTOTYPE( int getopt, (int _argc, char * const _argv[], char const *_opts)		);
 extern char *optarg;
 extern int optind, opterr, optopt;
 _PROTOTYPE( int usleep, (useconds_t _useconds)				);
@@ -161,8 +176,11 @@ _PROTOTYPE( int ttyslot, (void)						);
 _PROTOTYPE( int fttyslot, (int _fd)					);
 _PROTOTYPE( char *crypt, (const char *_key, const char *_salt)		);
 _PROTOTYPE( int getsysinfo, (int who, int what, void *where)		);
+_PROTOTYPE( int getsigset, (sigset_t *sigset)				);
 _PROTOTYPE( int getprocnr, (void)					);
-_PROTOTYPE( int findproc, (char *proc_name, int *proc_nr)		);
+_PROTOTYPE( int getnprocnr, (pid_t pid)					);
+_PROTOTYPE( int getpprocnr, (void)					);
+_PROTOTYPE( int _pm_findproc, (char *proc_name, int *proc_nr)		);
 _PROTOTYPE( int allocmem, (phys_bytes size, phys_bytes *base)		);
 _PROTOTYPE( int freemem, (phys_bytes size, phys_bytes base)		);
 #define DEV_MAP 1
@@ -174,11 +192,8 @@ _PROTOTYPE( int devctl, (int ctl_req, int driver, int device, int style));
 /* For compatibility with other Unix systems */
 _PROTOTYPE( int getpagesize, (void)					);
 _PROTOTYPE( int setgroups, (int ngroups, const gid_t *gidset)		);
+_PROTOTYPE( int initgroups, (const char *name, gid_t basegid)		);
 
 #endif
-
-_PROTOTYPE( int readlink, (const char *, char *, int));
-_PROTOTYPE( int getopt, (int, char **, char *));
-extern int optind, opterr, optopt;
 
 #endif /* _UNISTD_H */

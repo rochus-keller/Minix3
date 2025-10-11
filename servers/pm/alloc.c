@@ -13,26 +13,26 @@
  *   free_mem:	release a previously allocated chunk of memory
  *   mem_init:	initialize the tables when PM start up
  *   max_hole:	returns the largest hole currently available
+ *   mem_holes_copy: for outsiders who want a copy of the hole-list
  */
 
 #include "pm.h"
 #include <minix/com.h>
 #include <minix/callnr.h>
+#include <minix/type.h>
+#include <minix/config.h>
 #include <signal.h>
 #include <stdlib.h>
+#include <string.h>
 #include "mproc.h"
 #include "../../kernel/const.h"
 #include "../../kernel/config.h"
 #include "../../kernel/type.h"
 
-#define NR_HOLES  (2*NR_PROCS)	/* max # entries in hole table */
 #define NIL_HOLE (struct hole *) 0
 
-PRIVATE struct hole {
-  struct hole *h_next;		/* pointer to next entry on the list */
-  phys_clicks h_base;		/* where does the hole begin? */
-  phys_clicks h_len;		/* how big is the hole? */
-} hole[NR_HOLES];
+PRIVATE struct hole hole[_NR_HOLES];
+PRIVATE u32_t high_watermark = 0;
 
 PRIVATE struct hole *hole_head;	/* pointer to first hole */
 PRIVATE struct hole *free_slots;/* ptr to list of unused table slots */
@@ -79,6 +79,10 @@ phys_clicks clicks;		/* amount of memory requested */
 			old_base = hp->h_base;	/* remember where it started */
 			hp->h_base += clicks;	/* bite a piece off */
 			hp->h_len -= clicks;	/* ditto */
+
+			/* Remember new high watermark of used memory. */
+			if(hp->h_base > high_watermark)
+				high_watermark = hp->h_base;
 
 			/* Delete the hole if used up completely. */
 			if (hp->h_len == 0) del_slot(prev_ptr, hp);
@@ -161,6 +165,7 @@ register struct hole *hp;
 	prev_ptr->h_next = hp->h_next;
 
   hp->h_next = free_slots;
+  hp->h_base = hp->h_len = 0;
   free_slots = hp;
 }
 
@@ -218,8 +223,11 @@ phys_clicks *free;		/* memory size summaries */
   register struct hole *hp;
 
   /* Put all holes on the free list. */
-  for (hp = &hole[0]; hp < &hole[NR_HOLES]; hp++) hp->h_next = hp + 1;
-  hole[NR_HOLES-1].h_next = NIL_HOLE;
+  for (hp = &hole[0]; hp < &hole[_NR_HOLES]; hp++) {
+	hp->h_next = hp + 1;
+	hp->h_base = hp->h_len = 0;
+  }
+  hole[_NR_HOLES-1].h_next = NIL_HOLE;
   hole_head = NIL_HOLE;
   free_slots = &hole[0];
 
@@ -245,6 +253,18 @@ phys_clicks *free;		/* memory size summaries */
 #endif
 }
 
+/*===========================================================================*
+ *				mem_holes_copy				     *
+ *===========================================================================*/
+PUBLIC int mem_holes_copy(struct hole *holecopies, size_t *bytes, u32_t *hi)
+{
+	if(*bytes < sizeof(hole)) return ENOSPC;
+	memcpy(holecopies, hole, sizeof(hole));
+	*bytes = sizeof(hole);
+	*hi = high_watermark;
+	return OK;
+}
+
 #if ENABLE_SWAP
 /*===========================================================================*
  *				swap_on					     *
@@ -257,7 +277,7 @@ u32_t offset, size;			/* area on swap file to use */
 
   if (swap_fd != -1) return(EBUSY);	/* already have swap? */
 
-  tell_fs(CHDIR, who, FALSE, 0);	/* be like the caller for open() */
+  tell_fs(CHDIR, who_e, FALSE, 0);	/* be like the caller for open() */
   if ((swap_fd = open(file, O_RDWR)) < 0) return(-errno);
   swap_offset = offset;
   size >>= CLICK_SHIFT;
@@ -354,10 +374,10 @@ PUBLIC void swap_in()
 		rmp->mp_seg[D].mem_phys = new_base;
 		rmp->mp_seg[S].mem_phys = rmp->mp_seg[D].mem_phys + 
 			(rmp->mp_seg[S].mem_vir - rmp->mp_seg[D].mem_vir);
-		sys_newmap(proc_nr, rmp->mp_seg);
+		sys_newmap(rmp->mp_endpoint, rmp->mp_seg);
 		off = swap_offset + ((off_t) (old_base-swap_base)<<CLICK_SHIFT);
 		lseek(swap_fd, off, SEEK_SET);
-		rw_seg(0, swap_fd, proc_nr, D, (phys_bytes)size << CLICK_SHIFT);
+		rw_seg(0, swap_fd, rmp->mp_endpoint, D, (phys_bytes)size << CLICK_SHIFT);
 		free_mem(old_base, size);
 		rmp->mp_flags &= ~(ONSWAP|SWAPIN);
 		*pmp = rmp->mp_swapq;
@@ -407,12 +427,12 @@ PRIVATE int swap_out()
 
 	off = swap_offset + ((off_t) (new_base - swap_base) << CLICK_SHIFT);
 	lseek(swap_fd, off, SEEK_SET);
-	rw_seg(1, swap_fd, proc_nr, D, (phys_bytes)size << CLICK_SHIFT);
+	rw_seg(1, swap_fd, rmp->mp_endpoint, D, (phys_bytes)size << CLICK_SHIFT);
 	old_base = rmp->mp_seg[D].mem_phys;
 	rmp->mp_seg[D].mem_phys = new_base;
 	rmp->mp_seg[S].mem_phys = rmp->mp_seg[D].mem_phys + 
 		(rmp->mp_seg[S].mem_vir - rmp->mp_seg[D].mem_vir);
-	sys_newmap(proc_nr, rmp->mp_seg);
+	sys_newmap(rmp->mp_endpoint, rmp->mp_seg);
 	free_mem(old_base, size);
 	rmp->mp_flags |= ONSWAP;
 

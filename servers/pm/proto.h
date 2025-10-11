@@ -20,6 +20,7 @@ _PROTOTYPE( void swap_inqueue, (struct mproc *rmp)			);
 #define swap_in()			((void)0)
 #define swap_inqueue(rmp)		((void)0)
 #endif /* !SWAP */
+_PROTOTYPE(int mem_holes_copy, (struct hole *, size_t *, u32_t *)	);
 
 /* break.c */
 _PROTOTYPE( int adjust, (struct mproc *rmp,
@@ -56,12 +57,16 @@ _PROTOTYPE( int main, (void)						);
 
 /* misc.c */
 _PROTOTYPE( int do_reboot, (void)					);
+_PROTOTYPE( int do_procstat, (void)					);
 _PROTOTYPE( int do_getsysinfo, (void)					);
 _PROTOTYPE( int do_getprocnr, (void)					);
 _PROTOTYPE( int do_svrctl, (void)					);
 _PROTOTYPE( int do_allocmem, (void)					);
 _PROTOTYPE( int do_freemem, (void)					);
 _PROTOTYPE( int do_getsetpriority, (void)					);
+_PROTOTYPE( ssize_t _read_pm, (int _fd, void *_buf, size_t _n, int s, int e));
+_PROTOTYPE( ssize_t _write_pm, (int _fd, void *_buf, size_t _n, int s, int e));
+
 
 #if (MACHINE == MACINTOSH)
 _PROTOTYPE( phys_clicks start_click, (void)				);
@@ -110,4 +115,5 @@ _PROTOTYPE( int get_stack_ptr, (int proc_nr, vir_bytes *sp)		);
 _PROTOTYPE( int get_mem_map, (int proc_nr, struct mem_map *mem_map)	);
 _PROTOTYPE( char *find_param, (const char *key));
 _PROTOTYPE( int proc_from_pid, (pid_t p));
+_PROTOTYPE( int pm_isokendpt, (int ep, int *proc));
 

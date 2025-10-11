@@ -55,8 +55,7 @@ daemonize()
 up()
 {
     service=$1
-    args=$2
-    device=$3
+    shift
 
     # Function to dynamically start a system service
 
@@ -64,12 +63,12 @@ up()
     if disabled $service; then return; fi
 
     # Service is not disabled. Try to bring it up.
-    command="/usr/sbin/$service"
-    if [ ! -z "$args" ]; then command="$command -args \"$args\""; fi
-    if [ ! -z "$device" ]; then command="$command -dev \"$device\""; fi
     echo -n " $service"
-    eval service up $command
+    service up /usr/sbin/$service "$@" 
 }
+
+
+DAEMONS=/etc/rc.daemons
 
 case $action in
 start)
@@ -81,7 +80,7 @@ start)
 
     # Start servers and drivers set at the boot monitor.
     echo -n "Starting services:"
-    up random "" /dev/random
+    up random -dev /dev/random -period 3HZ
 
     # load random number generator
     if [ -f $RANDOM_FILE ]
@@ -97,11 +96,12 @@ start)
         if grep " $driver " /etc/inet.conf > /dev/null  2>&1
         then 
             eval arg=\$${driver}_arg
-            up $driver "$arg"
+	    if [ ! -z "$arg" ]; then arg="-args \"$arg\""; fi
+            eval up $driver $arg -period 5HZ
         fi
     done
-    up inet ""
-    up printer "" /dev/lp
+    up inet 
+    up printer -dev /dev/lp -period 10HZ
     echo .
 
     # Network initialization.
@@ -109,15 +109,19 @@ start)
 
     echo -n "Starting daemons:"
     daemonize update
-    rotate /usr/log/messages 7
-    daemonize usyslogd
 
     # Ugly error message when starting cron from CD.
     # (and cron unnecessary then so..)
     if [ ! -f /CD ]
     then	daemonize cron
-    else	. /etc/rc.cd
+    else	mkdir /tmp/log
+    		rm -f /var/log || true
+		ln -s /tmp/log /var/log || true
+		. /etc/rc.cd
     fi
+    # syslogd has not been started yet
+    rm -f /var/run/syslogd.pid
+    daemonize syslogd
     echo .
 
     if [ "$net" ]
@@ -129,13 +133,14 @@ start)
 	else
 	    # Standard network daemons.
     	    echo -n "Starting networking:"
-	    daemonize dhcpd
-	    daemonize nonamed
-	    daemonize talkd
-	    daemonize tcpd shell in.rshd
-	    daemonize tcpd login in.rlogind
-	    daemonize tcpd telnet in.telnetd
-	    daemonize tcpd ftp in.ftpd
+	    if grep -s 'psip0.*default' /etc/inet.conf 
+	    then	ifconfig -h 10.0.0.1
+	    else	daemonize dhcpd
+	    fi
+	    daemonize nonamed -L
+	    if [ -f "$DAEMONS" ]
+	    then	. "$DAEMONS"
+	    fi
 	    # The last daemon has been started, so close the list:
 	    echo .
 	fi
@@ -145,7 +150,7 @@ start)
     then
 	# Get the nodename from the DNS and set it.
 	trap '' 2
-	intr -t 10 hostaddr -h || echo "Unable to obtain an IP address."
+	intr -t 20 hostaddr -h || echo "Unable to obtain an IP address."
 	trap 2
     fi
 
@@ -157,11 +162,32 @@ start)
 
 ;;
 stop|down)
-    	# Save random data.
-    	if dd if=/dev/random of=$RANDOM_FILE.new bs=1024 count=1 2>/dev/null
-    	then
+    	# Save random data, if /usr is mounted rw.
+	if grep ' \/usr .*rw' /etc/mtab >/dev/null
+	then
+	  if dd if=/dev/random of=$RANDOM_FILE.new bs=1024 count=1 2>/dev/null
+    	  then
     		mv $RANDOM_FILE.new $RANDOM_FILE
-	else
+	  else
 		echo 'Failed to save random data.'
+	  fi
 	fi
 esac
+
+d=/usr/local/etc/rc.d
+# Let packages run their own scripts
+if [ -d "$d" ]
+then	if cd $d
+	then
+		echo -n "Local packages ($action): "
+		for f in *
+		do
+			if [ -x "$f" ]
+			then	echo -n "$f "
+				sh "$f" "$action"
+			fi
+		done
+		echo " done."
+	fi
+fi
+

@@ -52,9 +52,9 @@
 #include <assert.h>
 
 #include <minix/syslib.h>
+#include <ibm/pci.h>
 
 #include "lance.h"
-#include "../libpci/pci.h"
 /*#include "proc.h"*/
 
 #include <sys/ioc_memory.h>
@@ -65,20 +65,20 @@
 
 static U8_t in_byte(U16_t port)
 {
-	U8_t value;
+	unsigned long value;
 	int s;
 	if ((s=sys_inb(port, &value)) != OK)
 		printf( "lance: warning, sys_inb failed: %d\n", s );
-	return value;
+	return (U8_t) value;
 }
 
 static U16_t in_word( U16_t port)
 {
-	U16_t value;
+	unsigned long value;
 	int s;
 	if ((s=sys_inw(port, &value)) != OK)
 		printf( "lance: warning, sys_inw failed: %d\n", s );
-	return value;
+	return (U16_t) value;
 }
 /*
 #define in_byte( x ) inb( x )
@@ -166,6 +166,7 @@ _PROTOTYPE( static void put_userdata,
 	     vir_bytes user_addr, vir_bytes count, 
 	     void *loc_addr)                                            );
 _PROTOTYPE( static void do_stop, (message *mp)                          );
+_PROTOTYPE( static void do_getname, (message *mp)                       );
 
 _PROTOTYPE( static void lance_dump, (void)				);
 _PROTOTYPE( static void lance_stop, (void)				);
@@ -296,6 +297,7 @@ static int rx_slot_nr = 0;          /* Rx-slot number */
 static int tx_slot_nr = 0;          /* Tx-slot number */
 static int cur_tx_slot_nr = 0;      /* Tx-slot number */
 static char isstored[TX_RING_SIZE]; /* Tx-slot in-use */
+static char *progname;
 
 
 /*===========================================================================*
@@ -304,17 +306,20 @@ static char isstored[TX_RING_SIZE]; /* Tx-slot in-use */
 void main( int argc, char **argv )
 {
   message m;
-  int i,irq,r;
+  int i,irq,r, tasknr;
   ether_card_t *ec;
   long v;
 	int fkeys, sfkeys;
+	(progname=strrchr(argv[0],'/')) ? progname++ : (progname=argv[0]);
 
 	env_setargs( argc, argv );
 	
 	fkeys = sfkeys = 0; bit_set( sfkeys, 7 );
  
+#if 0
 	if ( (r = fkey_map(&fkeys, &sfkeys)) != OK )
 		printf( "Error registering key\n" );
+#endif
 	
 	if((eth_tasknr=getprocnr()) < 0)
 		panic("lance","couldn't get own proc nr", i);
@@ -322,6 +327,11 @@ void main( int argc, char **argv )
   v= 0;
   (void) env_parse("ETH_IGN_PROTO", "x", 0, &v, 0x0000L, 0xFFFFL);
   eth_ign_proto= htons((u16_t) v);
+
+  /* Try to notify inet that we are present (again) */
+  r = _pm_findproc("inet", &tasknr);
+  if (r == OK)
+	notify(tasknr);
 
   while (TRUE)
     {
@@ -345,6 +355,7 @@ void main( int argc, char **argv )
 /*printf( "." );*/
 
       switch (m.m_type){
+      case DEV_PING:   notify(m.m_source);		continue;
       case DL_WRITE:   do_vwrite(&m, FALSE, FALSE);    break;
       case DL_WRITEV:  do_vwrite(&m, FALSE, TRUE);     break;
       case DL_READ:    do_vread(&m, FALSE);            break;
@@ -352,6 +363,7 @@ void main( int argc, char **argv )
       case DL_INIT:    do_init(&m);                    break;
       case DL_GETSTAT: do_getstat(&m);                 break;
       case DL_STOP:    do_stop(&m);                    break;
+      case DL_GETNAME: do_getname(&m); 			break;
       case FKEY_PRESSED: lance_dump();                 break;
       /*case HARD_STOP:  lance_stop();                   break;*/
       case SYS_SIG:
@@ -381,6 +393,8 @@ void main( int argc, char **argv )
               }
           }
         break;
+      case PROC_EVENT:
+	break;
       default:
         panic( "lance", "illegal message", m.m_type);
       }
@@ -1685,6 +1699,21 @@ ether_card_t *ec;
   return lance_version;
 }
 
+/*===========================================================================*
+ *				do_getname				     *
+ *===========================================================================*/
+static void do_getname(mp)
+message *mp;
+{
+	int r;
+
+	strncpy(mp->DL_NAME, progname, sizeof(mp->DL_NAME));
+	mp->DL_NAME[sizeof(mp->DL_NAME)-1]= '\0';
+	mp->m_type= DL_NAME_REPLY;
+	r= send(mp->m_source, mp);
+	if (r != OK)
+		panic("LANCE", "do_getname: send failed", r);
+}
 
 /*===========================================================================*
  *                            lance_init_card                                *

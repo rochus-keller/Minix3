@@ -38,15 +38,17 @@ typedef struct eth_fd
 	put_pkt_t ef_put_pkt;
 	time_t ef_exp_time;
 	size_t ef_write_count;
+	ioreq_t ef_ioctl_req;
 } eth_fd_t;
 
 #define EFF_FLAGS	0xf
 #	define EFF_EMPTY	0x0
 #	define EFF_INUSE	0x1
-#	define EFF_BUSY		0x6
+#	define EFF_BUSY		0xE
 #		define	EFF_READ_IP	0x2
 #		define 	EFF_WRITE_IP	0x4
-#	define EFF_OPTSET       0x8
+#		define 	EFF_IOCTL_IP	0x8
+#	define EFF_OPTSET       0x10
 
 /* Note that the vh_type field is normally considered part of the ethernet
  * header.
@@ -155,6 +157,7 @@ select_res_t select_res;
 	eth_fd->ef_get_userdata= get_userdata;
 	eth_fd->ef_put_userdata= put_userdata;
 	eth_fd->ef_put_pkt= put_pkt;
+
 	return i;
 }
 
@@ -332,6 +335,17 @@ ioreq_t req;
 				return NW_OK;
 			}
 
+			if (!(eth_port->etp_flags & EPF_GOT_ADDR))
+			{
+				printf(
+				"eth_ioctl: suspending NWIOGETHSTAT ioctl\n");
+
+				eth_fd->ef_ioctl_req= req;
+				assert(!(eth_fd->ef_flags & EFF_IOCTL_IP));
+				eth_fd->ef_flags |= EFF_IOCTL_IP;
+				return NW_SUSPEND;
+			}
+
 			acc= bf_memreq(sizeof(nwio_ethstat_t));
 			compare (bf_bufsize(acc), ==, sizeof(*ethstat));
 
@@ -342,7 +356,12 @@ ioreq_t req;
 			{
 				result= eth_get_stat(eth_port,
 					&ethstat->nwes_stat);
-				assert (result == 0);
+				if (result != NW_OK)
+				{
+					bf_afree(acc);
+					reply_thr_put(eth_fd, result, TRUE);
+					return NW_OK;
+				}
 			}
 			else
 			{
@@ -476,6 +495,13 @@ size_t data_len;
 	if (nweo_flags & NWEO_REMSPEC)
 		eth_hdr->eh_dst= eth_fd->ef_ethopt.nweo_rem;
 
+	if (!(eth_port->etp_flags & EPF_GOT_ADDR))
+	{
+		/* No device, discard packet */
+		bf_afree(eth_pack);
+		return NW_OK;
+	}
+
 	if (!(nweo_flags & NWEO_EN_PROMISC))
 		eth_hdr->eh_src= eth_port->etp_ethaddr;
 
@@ -547,7 +573,8 @@ PUBLIC int eth_cancel(fd, which_operation)
 int fd;
 int which_operation;
 {
-	eth_fd_t *eth_fd;
+	eth_fd_t *eth_fd, *prev, *loc_fd;
+	eth_port_t *eth_port;
 
 	DBLOCK(2, printf("eth_cancel (%d)\n", fd));
 	eth_fd= &eth_fd_table[fd];
@@ -562,7 +589,31 @@ int which_operation;
 	case SR_CANCEL_WRITE:
 		assert (eth_fd->ef_flags & EFF_WRITE_IP);
 		eth_fd->ef_flags &= ~EFF_WRITE_IP;
+
+		/* Remove fd from send queue */
+		eth_port= eth_fd->ef_port;
+		if (eth_port->etp_vlan_port)
+			eth_port= eth_port->etp_vlan_port;
+		for (prev= 0, loc_fd= eth_port->etp_sendq_head; loc_fd != NULL;
+			prev= loc_fd, loc_fd= loc_fd->ef_send_next)
+		{
+			if (loc_fd == eth_fd)
+				break;
+		}
+		assert(loc_fd == eth_fd);
+		if (prev == NULL)
+			eth_port->etp_sendq_head= loc_fd->ef_send_next;
+		else
+			prev->ef_send_next= loc_fd->ef_send_next;
+		if (loc_fd->ef_send_next == NULL)
+			eth_port->etp_sendq_tail= prev;
+			
 		reply_thr_get(eth_fd, EINTR, FALSE);
+		break;
+	case SR_CANCEL_IOCTL:
+		assert (eth_fd->ef_flags & EFF_IOCTL_IP);
+		eth_fd->ef_flags &= ~EFF_IOCTL_IP;
+		reply_thr_get(eth_fd, EINTR, TRUE);
 		break;
 	default:
 		ip_panic(( "got unknown cancel request" ));
@@ -733,6 +784,7 @@ eth_port_t *eth_port;
 			return;
 		eth_port->etp_sendq_head= eth_fd->ef_send_next;
 
+		assert(eth_fd->ef_flags & EFF_WRITE_IP);
 		eth_fd->ef_flags &= ~EFF_WRITE_IP;
 		r= eth_write(eth_fd-eth_fd_table, eth_fd->ef_write_count);
 		assert(r == NW_OK);
@@ -779,6 +831,7 @@ size_t pack_size;
 	}
 	else
 	{
+		assert(eth_port->etp_flags & EPF_GOT_ADDR);
 		if (eth_addrcmp (*dst_addr, eth_port->etp_ethaddr) == 0)
 			pack_stat= NWEO_EN_LOC;
 		else
@@ -935,6 +988,28 @@ eth_port_t *vlan_port;
 	h= ETH_HASH_VLAN(vlan, t);
 	vlan_port->etp_vlan_next= eth_port->etp_vlan_tab[h];
 	eth_port->etp_vlan_tab[h]= vlan_port;
+}
+
+PUBLIC void eth_restart_ioctl(eth_port)
+eth_port_t *eth_port;
+{
+	int i;
+	eth_fd_t *eth_fd;
+
+	for (i= 0, eth_fd= eth_fd_table; i<ETH_FD_NR; i++, eth_fd++)
+	{
+		if (!(eth_fd->ef_flags & EFF_INUSE))
+			continue;
+		if (eth_fd->ef_port != eth_port)
+			continue;
+		if (!(eth_fd->ef_flags & EFF_IOCTL_IP))
+			continue;
+		if (eth_fd->ef_ioctl_req != NWIOGETHSTAT)
+			continue;
+
+		eth_fd->ef_flags &= ~EFF_IOCTL_IP;
+		eth_ioctl(i, eth_fd->ef_ioctl_req);
+	}
 }
 
 PRIVATE void packet2user (eth_fd, pack, exp_time)

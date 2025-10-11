@@ -42,9 +42,22 @@ struct far_mem {
 
 /* Structure for virtual copying by means of a vector with requests. */
 struct vir_addr {
-  int proc_nr;
+  int proc_nr_e;
   int segment;
   vir_bytes offset;
+};
+
+/* Memory allocation by PM. */
+struct hole {
+  struct hole *h_next;          /* pointer to next entry on the list */
+  phys_clicks h_base;           /* where does the hole begin? */
+  phys_clicks h_len;            /* how big is the hole? */
+};
+
+/* Memory info from PM. */
+struct pm_mem_info {
+	struct hole pmi_holes[_NR_HOLES];/* memory (un)allocations */
+	u32_t pmi_hi_watermark;		 /* highest ever-used click + 1 */
 };
 
 #define phys_cp_req vir_cp_req 
@@ -83,14 +96,34 @@ struct kinfo {
   phys_bytes kmem_size;
   phys_bytes bootdev_base;	/* boot device from boot image (/dev/boot) */
   phys_bytes bootdev_size;
-  phys_bytes bootdev_mem;
+  phys_bytes ramdev_base;	/* boot device from boot image (/dev/boot) */
+  phys_bytes ramdev_size;
   phys_bytes params_base;	/* parameters passed by boot monitor */
   phys_bytes params_size;
   int nr_procs;			/* number of user processes */
   int nr_tasks;			/* number of kernel tasks */
   char release[6];		/* kernel release number */
   char version[6];		/* kernel version number */
-  int relocking;		/* relocking check (for debugging) */
+#if DEBUG_LOCK_CHECK
+  int relocking;		/* interrupt locking depth (should be 0) */
+#endif
+};
+
+/* Load data accounted every this no. of seconds. */
+#define _LOAD_UNIT_SECS		 6 
+
+/* Load data history is kept for this long. */
+#define _LOAD_HISTORY_MINUTES	15
+#define _LOAD_HISTORY_SECONDS	(60*_LOAD_HISTORY_MINUTES)
+
+/* We need this many slots to store the load history. */
+#define _LOAD_HISTORY	(_LOAD_HISTORY_SECONDS/_LOAD_UNIT_SECS)
+
+/* Runnable processes and other load-average information. */
+struct loadinfo {
+  u16_t proc_load_history[_LOAD_HISTORY];	/* history of proc_s_cur */
+  u16_t proc_last_slot;
+  clock_t last_clock;
 };
 
 struct machine {
@@ -100,6 +133,18 @@ struct machine {
   int protected;
   int vdu_ega;
   int vdu_vga;
+};
+
+struct io_range
+{
+	unsigned ior_base;	/* Lowest I/O port in range */
+	unsigned ior_limit;	/* Highest I/O port in range */
+};
+
+struct mem_range
+{
+	phys_bytes mr_base;	/* Lowest memory address in range */
+	phys_bytes mr_limit;	/* Highest memory address in range */
 };
 
 #endif /* _TYPE_H */

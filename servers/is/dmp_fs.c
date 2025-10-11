@@ -8,7 +8,7 @@
  *   Oct 01, 2004:	by Jorrit N. Herder
  */
 
-#include "is.h"
+#include "inc.h"
 #include "../fs/const.h"
 #include "../fs/fproc.h"
 #include <minix/dmap.h>
@@ -49,6 +49,19 @@ PUBLIC void fproc_dmp()
 }
 
 /*===========================================================================*
+ *				dmap_flags				     *
+ *===========================================================================*/
+PRIVATE char * dmap_flags(int flags)
+{
+	static char fl[10];
+	strcpy(fl, "---");
+	if(flags & DMAP_MUTABLE) fl[0] = 'M';
+	if(flags & DMAP_BUSY)    fl[1] = 'S';
+	if(flags & DMAP_BABY)    fl[2] = 'B';
+	return fl;
+}
+
+/*===========================================================================*
  *				dtab_dmp				     *
  *===========================================================================*/
 PUBLIC void dtab_dmp()
@@ -58,12 +71,12 @@ PUBLIC void dtab_dmp()
     getsysinfo(FS_PROC_NR, SI_DMAP_TAB, dmap);
     
     printf("File System (FS) device <-> driver mappings\n");
-    printf("Major  Proc\n");
-    printf("-----  ----\n");
+    printf("Major  Driver ept  Flags\n");
+    printf("-----  ----------  -----\n");
     for (i=0; i<NR_DEVICES; i++) {
-        if (dmap[i].dmap_driver == 0) continue;
-        printf("%5d  ", i);
-        printf("%4d\n", dmap[i].dmap_driver);
+        if (dmap[i].dmap_driver == NONE) continue;
+        printf("%5d  %10d  %s\n",
+		i, dmap[i].dmap_driver, dmap_flags(dmap[i].dmap_flags));
     }
 }
 

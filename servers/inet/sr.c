@@ -66,7 +66,7 @@
 #define NDEV_COUNT COUNT
 #define NDEV_IOCTL REQUEST
 #define NDEV_MINOR DEVICE
-#define NDEV_PROC PROC_NR
+#define NDEV_PROC IO_ENDPT
 #endif
 
 THIS_FILE
@@ -141,7 +141,7 @@ mq_t *m;
 				m->mq_mess.NDEV_REF, 
 				m->mq_mess.NDEV_OPERATION);
 #else /* Minix 3 */
-			result= sr_repl_queue(m->mq_mess.PROC_NR, 0, 0);
+			result= sr_repl_queue(m->mq_mess.IO_ENDPT, 0, 0);
 #endif
 			if (result)
 			{
@@ -375,7 +375,7 @@ mq_t *m;
 				(vir_bytes)m->mq_mess.NDEV_BUFFER);
 			r= sr_put_userdata(sr_fd-sr_fd_table, r, NULL, 1);
 			assert(r == OK);
-			return OK;
+			break;
 		}
 
 		/* And now, we continue with our regular program. */
@@ -386,6 +386,8 @@ mq_t *m;
 			r= sr_put_userdata(sr_fd-sr_fd_table, EINVAL, 
 				NULL, 1);
 			assert(r == OK);
+			assert(sr_fd->srf_flags & first_flag);
+			sr_fd->srf_flags &= ~first_flag;
 			return OK;
 		}
 		r= (*sr_fd->srf_ioctl)(sr_fd->srf_fd, request);
@@ -563,7 +565,7 @@ message *m;
 
 	sr_fd->srf_select_proc= m->m_source;
 
-	m_ops= m->PROC_NR;
+	m_ops= m->IO_ENDPT;
 	i_ops= 0;
 	if (m_ops & SEL_RD) i_ops |= SR_SELECT_READ;
 	if (m_ops & SEL_WR) i_ops |= SR_SELECT_WRITE;
@@ -729,7 +731,7 @@ int is_revive;
 		mp= &reply;
 
 	mp->m_type= DEVICE_REPLY;
-	mp->REP_PROC_NR= proc;
+	mp->REP_ENDPT= proc;
 	mp->REP_STATUS= status;
 #ifdef __minix_vmd
 	mp->REP_REF= ref;
@@ -990,10 +992,10 @@ int size;
 		cpvec[i].cpv_size= size;
 #else /* Minix 3 */
 		vir_cp_req[i].count= size;
-		vir_cp_req[i].src.proc_nr = proc;
+		vir_cp_req[i].src.proc_nr_e = proc;
 		vir_cp_req[i].src.segment = D;
 		vir_cp_req[i].src.offset = (vir_bytes) src;
-		vir_cp_req[i].dst.proc_nr = this_proc;
+		vir_cp_req[i].dst.proc_nr_e = this_proc;
 		vir_cp_req[i].dst.segment = D;
 		vir_cp_req[i].dst.offset = (vir_bytes) ptr2acc_data(acc);
 #endif
@@ -1052,10 +1054,10 @@ char *dest;
 			cpvec[i].cpv_dst= (vir_bytes)dest;
 			cpvec[i].cpv_size= size;
 #else /* Minix 3 */
-			vir_cp_req[i].src.proc_nr = this_proc;
+			vir_cp_req[i].src.proc_nr_e = this_proc;
 			vir_cp_req[i].src.segment = D;
 			vir_cp_req[i].src.offset= (vir_bytes)ptr2acc_data(acc);
-			vir_cp_req[i].dst.proc_nr = proc;
+			vir_cp_req[i].dst.proc_nr_e = proc;
 			vir_cp_req[i].dst.segment = D;
 			vir_cp_req[i].dst.offset= (vir_bytes)dest;
 			vir_cp_req[i].count= size;
@@ -1106,12 +1108,12 @@ int operation;
 	for (m= repl_queue; m;)
 	{
 #ifdef __minix_vmd
-		if (m->mq_mess.REP_PROC_NR == proc && 
+		if (m->mq_mess.REP_ENDPT == proc && 
 			m->mq_mess.REP_REF ==ref &&
 			(m->mq_mess.REP_OPERATION == operation ||
 				operation == CANCEL_ANY))
 #else /* Minix 3 */
-		if (m->mq_mess.REP_PROC_NR == proc)
+		if (m->mq_mess.REP_ENDPT == proc)
 #endif
 		{
 assert(!m_cancel);

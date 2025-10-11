@@ -1,8 +1,9 @@
 /* Debugging dump procedures for the kernel. */
 
-#include "is.h"
+#include "inc.h"
 #include <timers.h>
 #include <ibm/interrupt.h>
+#include <minix/endpoint.h>
 #include "../../kernel/const.h"
 #include "../../kernel/config.h"
 #include "../../kernel/debug.h"
@@ -133,6 +134,7 @@ PUBLIC void irqtab_dmp()
 {
   int i,r;
   struct irq_hook irq_hooks[NR_IRQ_HOOKS];
+  int irq_actids[NR_IRQ_VECTORS];
   struct irq_hook *e;	/* irq tab entry */
   char *irq[] = {
   	"clock",	/* 00 */
@@ -157,20 +159,34 @@ PUBLIC void irqtab_dmp()
       report("IS","warning: couldn't get copy of irq hooks", r);
       return;
   }
+  if ((r = sys_getirqactids(irq_actids)) != OK) {
+      report("IS","warning: couldn't get copy of irq mask", r);
+      return;
+  }
+
+#if 0
+  printf("irq_actids:");
+  for (i= 0; i<NR_IRQ_VECTORS; i++)
+	printf(" [%d] = 0x%08x", i, irq_actids[i]);
+  printf("\n");
+#endif
 
   printf("IRQ policies dump shows use of kernel's IRQ hooks.\n");
   printf("-h.id- -proc.nr- -IRQ vector (nr.)- -policy- -notify id-\n");
   for (i=0; i<NR_IRQ_HOOKS; i++) {
   	e = &irq_hooks[i];
   	printf("%3d", i);
-  	if (e->proc_nr==NONE) {
+  	if (e->proc_nr_e==NONE) {
   	    printf("    <unused>\n");
   	    continue;
   	}
-  	printf("%10d  ", e->proc_nr); 
+  	printf("%10d  ", e->proc_nr_e); 
   	printf("    %9.9s (%02d) ", irq[e->irq], e->irq); 
   	printf("  %s", (e->policy & IRQ_REENABLE) ? "reenable" : "    -   ");
-  	printf("   %d\n", e->notify_id);
+  	printf("   %d", e->notify_id);
+	if (irq_actids[e->irq] & (1 << i))
+		printf("masked");
+	printf("\n");
   }
   printf("\n");
 }
@@ -289,7 +305,8 @@ PUBLIC void kenv_dmp()
     printf("- kmem_size:  %5u\n", kinfo.kmem_size); 
     printf("- bootdev_base:  %5u\n", kinfo.bootdev_base); 
     printf("- bootdev_size:  %5u\n", kinfo.bootdev_size); 
-    printf("- bootdev_mem:  %5u\n", kinfo.bootdev_mem); 
+    printf("- ramdev_base:   %5u\n", kinfo.ramdev_base); 
+    printf("- ramdev_size:   %5u\n", kinfo.ramdev_size); 
     printf("- params_base:   %5u\n", kinfo.params_base); 
     printf("- params_size:   %5u\n", kinfo.params_size); 
     printf("- nr_procs:     %3u\n", kinfo.nr_procs); 
@@ -435,7 +452,7 @@ PRIVATE char *p_rts_flags_str(int flags)
 	str[0] = (flags & NO_MAP) ? 'M' : '-';
 	str[1] = (flags & SENDING)  ? 'S' : '-';
 	str[2] = (flags & RECEIVING)    ? 'R' : '-';
-	str[3] = (flags & SIGNALED)    ? 'S' : '-';
+	str[3] = (flags & SIGNALED)    ? 'I' : '-';
 	str[4] = (flags & SIG_PENDING)    ? 'P' : '-';
 	str[5] = (flags & P_STOP)    ? 'T' : '-';
 	str[6] = '\0';
@@ -462,7 +479,7 @@ PUBLIC void proctab_dmp()
       return;
   }
 
-  printf("\n--nr-name---- -prior-quant- -user---sys- -text---data---size- -rts flags-\n");
+  printf("\n-nr-----gen---endpoint--name--- -prior-quant- -user---sys----size-rts flags-\n");
 
   for (rp = oldrp; rp < END_PROC_ADDR; rp++) {
 	if (isemptyp(rp)) continue;
@@ -474,16 +491,16 @@ PUBLIC void proctab_dmp()
 	if (proc_nr(rp) == IDLE) 	printf("(%2d) ", proc_nr(rp));  
 	else if (proc_nr(rp) < 0) 	printf("[%2d] ", proc_nr(rp));
 	else 				printf(" %2d  ", proc_nr(rp));
-	printf(" %-8.8s %02u/%02u %02u/%02u %6lu%6lu %6uK%6uK%6uK %s",
+	printf(" %5d %10d ", _ENDPOINT_G(rp->p_endpoint), rp->p_endpoint);
+	printf(" %-8.8s %02u/%02u %02d/%02u %6lu%6lu %6uK %s",
 	       rp->p_name,
 	       rp->p_priority, rp->p_max_priority,
 	       rp->p_ticks_left, rp->p_quantum_size, 
 	       rp->p_user_time, rp->p_sys_time,
-	       click_to_round_k(text), click_to_round_k(data),
 	       click_to_round_k(size),
 	       p_rts_flags_str(rp->p_rts_flags));
 	if (rp->p_rts_flags & (SENDING|RECEIVING)) {
-		printf(" %-7.7s", proc_name(rp->p_getfrom));
+		printf(" %-7.7s", proc_name(_ENDPOINT_P(rp->p_getfrom_e)));
 	} 
 	printf("\n");
   }

@@ -1,210 +1,203 @@
-# Makefile for the libraries
+#Generated from ./Makefile.in
+all: all-ack
 
-# This makefile runs make in all the subdirectories of the src/lib tree.
-# See ansi/Makefile for a further explanation.
+all-ack:
+all-gnu:
 
-MAKE	= exec make -$(MAKEFLAGS)
-ZLIB=zlib-1.2.3
+makefiles: Makefile
+Makedepend-ack Makedepend-gnu: 
+	sh generate.sh . obj-ack/ obj-gnu
 
-usage:
-	@echo "Usage: make all" >&2	# Compile all library functions" >&2
-	@echo "       make install	# Backup /usr/lib/*.a first!" >&2
-	@echo "       make clean	# Delete .o and .a files" >&2
-	@false
+Makefile: Makefile.in Makedepend-ack Makedepend-gnu
+	sh generate.sh . obj-ack/ obj-gnu
+	@echo
+	@echo *Attention*
+	@echo Makefile is regenerated... rerun command to see changes
+	@echo *Attention*
+	@echo
 
-all:
-	cd ansi && $(MAKE)
-	cd curses && $(MAKE)
-	cd dummy && $(MAKE)
-	cd editline && $(MAKE)
-	cd end && $(MAKE)
-	cd float && $(MAKE)
-	cd fphook && $(MAKE)
-	cd ip && $(MAKE)
-	cd libm2 && $(MAKE)
-	cd libp && $(MAKE)
-	cd liby && $(MAKE)
-	cd math && $(MAKE)
-	cd other && $(MAKE)
-	cd posix && $(MAKE)
-	test `arch` = i86 || { cd regex && $(MAKE); }
-	cd rts && $(MAKE)
-	cd stdio && $(MAKE)
-	cd syscall && $(MAKE)
-	cd syslib && $(MAKE)
-	cd util && $(MAKE)
-	cd sysutil && $(MAKE)
-	cd timers && $(MAKE)
-	cd $(ZLIB) && $(MAKE)
-	cd `arch` && $(MAKE)
+all-ack: makefiles
+	mkdir -p obj-ack//./ansi
+	cd ansi && $(MAKE) $@
+	mkdir -p obj-ack//./curses
+	cd curses && $(MAKE) $@
+	mkdir -p obj-ack//./dummy
+	cd dummy && $(MAKE) $@
+	mkdir -p obj-ack//./editline
+	cd editline && $(MAKE) $@
+	mkdir -p obj-ack//./end
+	cd end && $(MAKE) $@
+	mkdir -p obj-ack//./ip
+	cd ip && $(MAKE) $@
+	mkdir -p obj-ack//./math
+	cd math && $(MAKE) $@
+	mkdir -p obj-ack//./other
+	cd other && $(MAKE) $@
+	mkdir -p obj-ack//./posix
+	cd posix && $(MAKE) $@
+	mkdir -p obj-ack//./regex
+	cd regex && $(MAKE) $@
+	mkdir -p obj-ack//./stdio
+	cd stdio && $(MAKE) $@
+	mkdir -p obj-ack//./syscall
+	cd syscall && $(MAKE) $@
+	mkdir -p obj-ack//./syslib
+	cd syslib && $(MAKE) $@
+	mkdir -p obj-ack//./util
+	cd util && $(MAKE) $@
+	mkdir -p obj-ack//./sysutil
+	cd sysutil && $(MAKE) $@
+	mkdir -p obj-ack//./timers
+	cd timers && $(MAKE) $@
+	mkdir -p obj-ack//./i386
+	cd i386 && $(MAKE) $@
+	mkdir -p obj-ack//./zlib-1.2.3
+	cd zlib-1.2.3 && $(MAKE) $@
+	mkdir -p obj-ack//./ack
+	cd ack && $(MAKE) $@
+	mkdir -p obj-ack//./gnu
+	cd gnu && $(MAKE) $@
 
-install:	all
-	cd $(ZLIB) && make install
-	$(MAKE) install_`arch`
+all-gnu: makefiles
+	mkdir -p obj-gnu/./ansi
+	cd ansi && $(MAKE) $@
+	mkdir -p obj-gnu/./curses
+	cd curses && $(MAKE) $@
+	mkdir -p obj-gnu/./dummy
+	cd dummy && $(MAKE) $@
+	mkdir -p obj-gnu/./editline
+	cd editline && $(MAKE) $@
+	mkdir -p obj-gnu/./end
+	cd end && $(MAKE) $@
+	mkdir -p obj-gnu/./ip
+	cd ip && $(MAKE) $@
+	mkdir -p obj-gnu/./math
+	cd math && $(MAKE) $@
+	mkdir -p obj-gnu/./other
+	cd other && $(MAKE) $@
+	mkdir -p obj-gnu/./posix
+	cd posix && $(MAKE) $@
+	mkdir -p obj-gnu/./regex
+	cd regex && $(MAKE) $@
+	mkdir -p obj-gnu/./stdio
+	cd stdio && $(MAKE) $@
+	mkdir -p obj-gnu/./syscall
+	cd syscall && $(MAKE) $@
+	mkdir -p obj-gnu/./syslib
+	cd syslib && $(MAKE) $@
+	mkdir -p obj-gnu/./util
+	cd util && $(MAKE) $@
+	mkdir -p obj-gnu/./sysutil
+	cd sysutil && $(MAKE) $@
+	mkdir -p obj-gnu/./timers
+	cd timers && $(MAKE) $@
+	mkdir -p obj-gnu/./i386
+	cd i386 && $(MAKE) $@
+	mkdir -p obj-gnu/./zlib-1.2.3
+	cd zlib-1.2.3 && $(MAKE) $@
+	mkdir -p obj-gnu/./ack
+	cd ack && $(MAKE) $@
+	mkdir -p obj-gnu/./gnu
+	cd gnu && $(MAKE) $@
 
-# Installation rules for PC Minix.
-LIB=	/usr/lib
+clean depend depend-ack depend-gnu:: makefiles
+	cd ansi && $(MAKE) $@
+	cd curses && $(MAKE) $@
+	cd dummy && $(MAKE) $@
+	cd editline && $(MAKE) $@
+	cd end && $(MAKE) $@
+	cd ip && $(MAKE) $@
+	cd math && $(MAKE) $@
+	cd other && $(MAKE) $@
+	cd posix && $(MAKE) $@
+	cd regex && $(MAKE) $@
+	cd stdio && $(MAKE) $@
+	cd syscall && $(MAKE) $@
+	cd syslib && $(MAKE) $@
+	cd util && $(MAKE) $@
+	cd sysutil && $(MAKE) $@
+	cd timers && $(MAKE) $@
+	cd i386 && $(MAKE) $@
+	cd zlib-1.2.3 && $(MAKE) $@
+	cd ack && $(MAKE) $@
+	cd gnu && $(MAKE) $@
 
-install_i86:	\
-	$(LIB)/ncrtso.o \
-	$(LIB)/nm2rtso.o \
-	$(LIB)/nprtso.o \
-	$(LIB)/libc.a \
-	$(LIB)/libd.a \
-	$(LIB)/libe.a \
-	$(LIB)/libfp.a \
-	$(LIB)/libm.a \
-	$(LIB)/libm2.a \
-	$(LIB)/libp.a \
-	$(LIB)/end.a \
-	$(LIB)/libsys.a \
-	$(LIB)/libtimers.a \
-	$(LIB)/util.a \
-	$(LIB)/sysutil.a \
-	$(LIB)/libcurses.a \
-	$(LIB)/libedit.a \
-	$(LIB)/liby.a \
+makefiles: ansi/Makefile
+makefiles: curses/Makefile
+makefiles: dummy/Makefile
+makefiles: editline/Makefile
+makefiles: end/Makefile
+makefiles: ip/Makefile
+makefiles: math/Makefile
+makefiles: other/Makefile
+makefiles: posix/Makefile
+makefiles: regex/Makefile
+makefiles: stdio/Makefile
+makefiles: syscall/Makefile
+makefiles: syslib/Makefile
+makefiles: util/Makefile
+makefiles: sysutil/Makefile
+makefiles: timers/Makefile
+makefiles: i386/Makefile
+makefiles: zlib-1.2.3/Makefile
+makefiles: ack/Makefile
+makefiles: gnu/Makefile
 
-$(LIB)/ncrtso.o:	ncrtso.o
-	install -c -o bin $? $@
+ansi/Makefile: ansi/Makefile.in
+	cd ansi && sh ../generate.sh ./ansi ../obj-ack/ ../obj-gnu && $(MAKE) makefiles
+curses/Makefile: curses/Makefile.in
+	cd curses && sh ../generate.sh ./curses ../obj-ack/ ../obj-gnu && $(MAKE) makefiles
+dummy/Makefile: dummy/Makefile.in
+	cd dummy && sh ../generate.sh ./dummy ../obj-ack/ ../obj-gnu && $(MAKE) makefiles
+editline/Makefile: editline/Makefile.in
+	cd editline && sh ../generate.sh ./editline ../obj-ack/ ../obj-gnu && $(MAKE) makefiles
+end/Makefile: end/Makefile.in
+	cd end && sh ../generate.sh ./end ../obj-ack/ ../obj-gnu && $(MAKE) makefiles
+ip/Makefile: ip/Makefile.in
+	cd ip && sh ../generate.sh ./ip ../obj-ack/ ../obj-gnu && $(MAKE) makefiles
+math/Makefile: math/Makefile.in
+	cd math && sh ../generate.sh ./math ../obj-ack/ ../obj-gnu && $(MAKE) makefiles
+other/Makefile: other/Makefile.in
+	cd other && sh ../generate.sh ./other ../obj-ack/ ../obj-gnu && $(MAKE) makefiles
+posix/Makefile: posix/Makefile.in
+	cd posix && sh ../generate.sh ./posix ../obj-ack/ ../obj-gnu && $(MAKE) makefiles
+regex/Makefile: regex/Makefile.in
+	cd regex && sh ../generate.sh ./regex ../obj-ack/ ../obj-gnu && $(MAKE) makefiles
+stdio/Makefile: stdio/Makefile.in
+	cd stdio && sh ../generate.sh ./stdio ../obj-ack/ ../obj-gnu && $(MAKE) makefiles
+syscall/Makefile: syscall/Makefile.in
+	cd syscall && sh ../generate.sh ./syscall ../obj-ack/ ../obj-gnu && $(MAKE) makefiles
+syslib/Makefile: syslib/Makefile.in
+	cd syslib && sh ../generate.sh ./syslib ../obj-ack/ ../obj-gnu && $(MAKE) makefiles
+util/Makefile: util/Makefile.in
+	cd util && sh ../generate.sh ./util ../obj-ack/ ../obj-gnu && $(MAKE) makefiles
+sysutil/Makefile: sysutil/Makefile.in
+	cd sysutil && sh ../generate.sh ./sysutil ../obj-ack/ ../obj-gnu && $(MAKE) makefiles
+timers/Makefile: timers/Makefile.in
+	cd timers && sh ../generate.sh ./timers ../obj-ack/ ../obj-gnu && $(MAKE) makefiles
+i386/Makefile: i386/Makefile.in
+	cd i386 && sh ../generate.sh ./i386 ../obj-ack/ ../obj-gnu && $(MAKE) makefiles
+zlib-1.2.3/Makefile: zlib-1.2.3/Makefile.in
+	cd zlib-1.2.3 && sh ../generate.sh ./zlib-1.2.3 ../obj-ack/ ../obj-gnu && $(MAKE) makefiles
+ack/Makefile: ack/Makefile.in
+	cd ack && sh ../generate.sh ./ack ../obj-ack/ ../obj-gnu && $(MAKE) makefiles
+gnu/Makefile: gnu/Makefile.in
+	cd gnu && sh ../generate.sh ./gnu ../obj-ack/ ../obj-gnu && $(MAKE) makefiles
 
-$(LIB)/nm2rtso.o:	nm2rtso.o
-	install -c -o bin $? $@
+clean::
+	rm -f obj-ack//./*
+	rm -f obj-gnu/./*
 
-$(LIB)/nprtso.o:	nprtso.o
-	install -c -o bin $? $@
+install: install-ack
 
-$(LIB)/libc.a:	libc.a
-	install -c -o bin $? $@
+install-ack: all-ack
+	cp obj-ack//*.[ao] /usr/lib/i386
 
-$(LIB)/libd.a:	libd.a
-	install -c -o bin $? $@
+install-gnu: all-gnu
+	cp obj-gnu/*.[ao] /usr/gnu/lib
 
-$(LIB)/libe.a:	libe.a
-	install -c -o bin $? $@
+include Makedepend-ack
+include .depend-ack
 
-$(LIB)/libfp.a:	libfp.a
-	install -c -o bin $? $@
-
-$(LIB)/libm.a:	libm.a
-	install -c -o bin $? $@
-
-$(LIB)/libm2.a:	libm2.a
-	install -c -o bin $? $@
-
-$(LIB)/libp.a:	libp.a
-	install -c -o bin $? $@
-
-$(LIB)/end.a:	end.a
-	install -c -o bin $? $@
-
-$(LIB)/libsys.a:	libsys.a
-	install -c -o bin $? $@
-
-$(LIB)/libtimers.a:	libtimers.a
-	install -c -o bin $? $@
-
-$(LIB)/libsysutil.a:	libsysutil.a
-	install -c -o bin $? $@
-
-$(LIB)/libutil.a:	libutil.a
-	install -c -o bin $? $@
-
-$(LIB)/libcurses.a:	libcurses.a
-	install -c -o bin $? $@
-
-$(LIB)/libedit.a:	libedit.a
-	install -c -o bin $? $@
-
-$(LIB)/liby.a:	liby.a
-	install -c -o bin $? $@
-
-# Installation rules for Minix-386.
-LIB386=	/usr/lib/i386
-LIB86=	/usr/lib/i86
-
-install_i386:	\
-	$(LIB386)/crtso.o \
-	$(LIB386)/m2rtso.o \
-	$(LIB386)/prtso.o \
-	$(LIB386)/libc.a \
-	$(LIB386)/libd.a \
-	$(LIB386)/libe.a \
-	$(LIB386)/libfp.a \
-	$(LIB386)/libm.a \
-	$(LIB386)/libm2.a \
-	$(LIB386)/libp.a \
-	$(LIB386)/libtimers.a \
-	$(LIB386)/end.a \
-	$(LIB386)/libsys.a \
-	$(LIB386)/libtimers.a \
-	$(LIB386)/libutil.a \
-	$(LIB386)/libsysutil.a \
-	$(LIB386)/libcurses.a \
-	$(LIB386)/libedit.a \
-	$(LIB386)/liby.a \
-#	$(LIB86)/libc.a \
-#	$(LIB86)/end.a \
-
-$(LIB386)/crtso.o:	crtso.o
-	install -c -o bin $? $@
-
-$(LIB386)/m2rtso.o:	m2rtso.o
-	install -c -o bin $? $@
-
-$(LIB386)/prtso.o:	prtso.o
-	install -c -o bin $? $@
-
-$(LIB386)/libc.a:	libc.a
-	install -c -o bin $? $@
-
-$(LIB386)/libd.a:	libd.a
-	install -c -o bin $? $@
-
-$(LIB386)/libe.a:	libe.a
-	install -c -o bin $? $@
-
-$(LIB386)/libfp.a:	libfp.a
-	install -c -o bin $? $@
-
-$(LIB386)/libm.a:	libm.a
-	install -c -o bin $? $@
-
-$(LIB386)/libm2.a:	libm2.a
-	install -c -o bin $? $@
-
-$(LIB386)/libp.a:	libp.a
-	install -c -o bin $? $@
-
-$(LIB386)/end.a:	end.a
-	install -c -o bin $? $@
-
-$(LIB386)/libsys.a:	libsys.a
-	install -c -o bin $? $@
-
-$(LIB386)/libtimers.a:	libtimers.a
-	install -c -o bin $? $@
-
-$(LIB386)/libsysutil.a:	libsysutil.a
-	install -c -o bin $? $@
-
-$(LIB386)/libutil.a:	libutil.a
-	install -c -o bin $? $@
-
-$(LIB386)/libcurses.a:	libcurses.a
-	install -c -o bin $? $@
-
-$(LIB386)/libedit.a:	libedit.a
-	install -c -o bin $? $@
-
-$(LIB386)/liby.a:	liby.a
-	install -c -o bin $? $@
-
-#$(LIB86)/libc.a:	libc86.a
-#	install -c -o bin $? $@
-#
-#$(LIB86)/end.a:	end86.a
-#	install -c -o bin $? $@
-
-clean:
-	find . -name '*.[oa]' -o -name '*.bak' | xargs rm
+include Makedepend-gnu
+include .depend-gnu

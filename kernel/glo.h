@@ -24,6 +24,7 @@ EXTERN struct kinfo kinfo;		/* kernel information for users */
 EXTERN struct machine machine;		/* machine information for users */
 EXTERN struct kmessages kmess;  	/* diagnostic messages in kernel */
 EXTERN struct randomness krandom;	/* gather kernel random information */
+EXTERN struct loadinfo kloadinfo;	/* status of load average */
 
 /* Process scheduling information and the kernel reentry count. */
 EXTERN struct proc *prev_ptr;	/* previously running process */
@@ -44,6 +45,13 @@ EXTERN int irq_use;				/* map of all in-use irq's */
 /* Miscellaneous. */
 EXTERN reg_t mon_ss, mon_sp;		/* boot monitor stack */
 EXTERN int mon_return;			/* true if we can return to monitor */
+EXTERN int do_serial_debug;
+EXTERN int who_e, who_p;		/* message source endpoint and proc */
+
+/* VM */
+EXTERN phys_bytes vm_base;
+EXTERN phys_bytes vm_size;
+EXTERN phys_bytes vm_mem_high;
 
 /* Variables that are initialized elsewhere are just extern here. */
 extern struct boot_image image[]; 	/* system image processes */

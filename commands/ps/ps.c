@@ -54,6 +54,7 @@
  */
 
 #include <minix/config.h>
+#include <minix/endpoint.h>
 #include <limits.h>
 #include <timers.h>
 #include <sys/types.h>
@@ -134,8 +135,8 @@ int kmemfd, memfd;		/* file descriptors of [k]mem */
  */
 #define S_HEADER "  PID TTY  TIME CMD\n"
 #define S_FORMAT "%5s %3s %s %s\n"
-#define L_HEADER "  F S UID   PID  PPID  PGRP     SZ       RECV TTY  TIME CMD\n"
-#define L_FORMAT "%3o %c %3d %5s %5d %5d %6d %10s %3s %s %s\n"
+#define L_HEADER "  F S UID   PID  PPID  PGRP     SZ         RECV TTY  TIME CMD\n"
+#define L_FORMAT "%3o %c %3d %5s %5d %5d %6d %12s %3s %s %s\n"
 
 
 struct pstat {			/* structure filled by pstat() */
@@ -210,7 +211,7 @@ Dev_t dev_nr;
 char *taskname(p_nr)
 int p_nr;
 {
-  return ps_proc[p_nr + nr_tasks].p_name;
+  return ps_proc[_ENDPOINT_P(p_nr) + nr_tasks].p_name;
 }
 
 /* Prrecv prints the RECV field for process with pstat buffer pointer bufp.
@@ -242,8 +243,12 @@ struct pstat *bufp;
 		blkstr = "popen";
 	else if (-bufp->ps_ftask == XLOCK)
 		blkstr = "flock";
-	else
+	else if(-bufp->ps_ftask == XSELECT)
+		blkstr = "select";
+	else if(-bufp->ps_ftask >= 0)
 		blkstr = taskname(-bufp->ps_ftask);
+	else
+		blkstr = "??";
   }
   (void) sprintf(recvstr, "(%s) %s", blkstr, task);
   return recvstr;
@@ -520,7 +525,7 @@ struct pstat *bufp;
   bufp->ps_data = (off_t) ps_proc[p_ki].p_memmap[D].mem_phys << CLICK_SHIFT;
   bufp->ps_stack = (off_t) ps_proc[p_ki].p_memmap[S].mem_phys << CLICK_SHIFT;
 
-  bufp->ps_recv = ps_proc[p_ki].p_getfrom;
+  bufp->ps_recv = _ENDPOINT_P(ps_proc[p_ki].p_getfrom_e);
 
   bufp->ps_utime = ps_proc[p_ki].p_user_time;
   bufp->ps_stime = ps_proc[p_ki].p_sys_time;

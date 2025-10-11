@@ -11,6 +11,7 @@
  *   release:	  check to see if a suspended process can be released and do
  *                it
  *   revive:	  mark a suspended process as able to run again
+ *   unsuspend_by_endpt: revive all processes blocking on a given process
  *   do_unpause:  a signal has been sent to a process; see if it suspended
  */
 
@@ -18,6 +19,7 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <minix/callnr.h>
+#include <minix/endpoint.h>
 #include <minix/com.h>
 #include <sys/select.h>
 #include <sys/time.h>
@@ -45,20 +47,25 @@ PUBLIC int do_pipe()
   rfp = fp;
   if ( (r = get_fd(0, R_BIT, &fil_des[0], &fil_ptr0)) != OK) return(r);
   rfp->fp_filp[fil_des[0]] = fil_ptr0;
+  FD_SET(fil_des[0], &rfp->fp_filp_inuse);
   fil_ptr0->filp_count = 1;
   if ( (r = get_fd(0, W_BIT, &fil_des[1], &fil_ptr1)) != OK) {
 	rfp->fp_filp[fil_des[0]] = NIL_FILP;
+  	FD_CLR(fil_des[0], &rfp->fp_filp_inuse);
 	fil_ptr0->filp_count = 0;
 	return(r);
   }
   rfp->fp_filp[fil_des[1]] = fil_ptr1;
+  FD_SET(fil_des[1], &rfp->fp_filp_inuse);
   fil_ptr1->filp_count = 1;
 
   /* Make the inode on the pipe device. */
   if ( (rip = alloc_inode(root_dev, I_REGULAR) ) == NIL_INODE) {
 	rfp->fp_filp[fil_des[0]] = NIL_FILP;
+  	FD_CLR(fil_des[0], &rfp->fp_filp_inuse);
 	fil_ptr0->filp_count = 0;
 	rfp->fp_filp[fil_des[1]] = NIL_FILP;
+  	FD_CLR(fil_des[1], &rfp->fp_filp_inuse);
 	fil_ptr1->filp_count = 0;
 	return(err_code);
   }
@@ -123,8 +130,9 @@ int notouch;			/* check only */
 	/* Process is writing to a pipe. */
 	if (find_filp(rip, R_BIT) == NIL_FILP) {
 		/* Tell kernel to generate a SIGPIPE signal. */
-		if (!notouch)
-			sys_kill((int)(fp - fproc), SIGPIPE);
+		if (!notouch) {
+			sys_kill(fp->fp_endpoint, SIGPIPE);
+		}
 		return(EPIPE);
 	}
 
@@ -150,7 +158,8 @@ int notouch;			/* check only */
 				/* Do a partial write. Need to wakeup reader
 				 * since we'll suspend ourself in read_write()
 				 */
-				release(rip, READ, susp_count);
+				if (!notouch)
+					release(rip, READ, susp_count);
 				return(1);
 			}
 		}
@@ -184,6 +193,8 @@ int task;			/* who is proc waiting for? (PIPE = pipe) */
   if (task == XPIPE || task == XPOPEN) susp_count++;/* #procs susp'ed on pipe*/
   fp->fp_suspended = SUSPENDED;
   fp->fp_fd = m_in.fd << 8 | call_nr;
+  if(task == NONE)
+	panic(__FILE__,"suspend on NONE",NO_NUM);
   fp->fp_task = -task;
   if (task == XLOCK) {
 	fp->fp_buffer = (char *) m_in.name1;	/* third arg to fcntl() */
@@ -193,6 +204,32 @@ int task;			/* who is proc waiting for? (PIPE = pipe) */
 	fp->fp_nbytes = m_in.nbytes;
   }
 }
+
+/*===========================================================================*
+ *				unsuspend_by_endpt			     *
+ *===========================================================================*/
+PUBLIC void unsuspend_by_endpt(int proc_e)
+{
+  struct fproc *rp;
+  int client = 0;
+
+  /* Revive processes waiting for drivers (SUSPENDed) that have
+   * disappeared with return code EAGAIN.
+   */
+  for (rp = &fproc[0]; rp < &fproc[NR_PROCS]; rp++, client++)
+	if(rp->fp_pid != PID_FREE &&
+	   rp->fp_suspended == SUSPENDED && rp->fp_task == -proc_e) {
+		revive(rp->fp_endpoint, EAGAIN);
+	}
+
+  /* Revive processes waiting in drivers on select()s
+   * with EAGAIN too.
+   */
+  select_unsuspend_by_endpt(proc_e);
+
+  return;
+}
+
 
 /*===========================================================================*
  *				release					     *
@@ -230,11 +267,11 @@ int count;			/* max number of processes to release */
 
   /* Search the proc table. */
   for (rp = &fproc[0]; rp < &fproc[NR_PROCS]; rp++) {
-	if (rp->fp_suspended == SUSPENDED &&
+	if (rp->fp_pid != PID_FREE && rp->fp_suspended == SUSPENDED &&
 			rp->fp_revived == NOT_REVIVING &&
 			(rp->fp_fd & BYTE) == call_nr &&
 			rp->fp_filp[rp->fp_fd>>8]->filp_ino == ip) {
-		revive((int)(rp - fproc), 0);
+		revive(rp->fp_endpoint, 0);
 		susp_count--;	/* keep track of who is suspended */
 		if (--count == 0) return;
 	}
@@ -244,8 +281,8 @@ int count;			/* max number of processes to release */
 /*===========================================================================*
  *				revive					     *
  *===========================================================================*/
-PUBLIC void revive(proc_nr, returned)
-int proc_nr;			/* process to revive */
+PUBLIC void revive(proc_nr_e, returned)
+int proc_nr_e;			/* process to revive */
 int returned;			/* if hanging on task, how many bytes read */
 {
 /* Revive a previously blocked process. When a process hangs on tty, this
@@ -254,9 +291,11 @@ int returned;			/* if hanging on task, how many bytes read */
 
   register struct fproc *rfp;
   register int task;
+  int proc_nr;
 
-  if (proc_nr < 0 || proc_nr >= NR_PROCS)
-  	panic(__FILE__,"revive err", proc_nr);
+  if(isokendpt(proc_nr_e, &proc_nr) != OK)
+	return;
+
   rfp = &fproc[proc_nr];
   if (rfp->fp_suspended == NOT_SUSPENDED || rfp->fp_revived == REVIVING)return;
 
@@ -273,13 +312,13 @@ int returned;			/* if hanging on task, how many bytes read */
   } else {
 	rfp->fp_suspended = NOT_SUSPENDED;
 	if (task == XPOPEN) /* process blocked in open or create */
-		reply(proc_nr, rfp->fp_fd>>8);
+		reply(proc_nr_e, rfp->fp_fd>>8);
 	else if (task == XSELECT) {
-		reply(proc_nr, returned);
+		reply(proc_nr_e, returned);
 	} else {
 		/* Revive a process suspended on TTY or other device. */
 		rfp->fp_nbytes = returned;	/*pretend it wants only what there is*/
-		reply(proc_nr, returned);	/* unblock the process */
+		reply(proc_nr_e, returned);	/* unblock the process */
 	}
   }
 }
@@ -294,16 +333,15 @@ PUBLIC int do_unpause()
  */
 
   register struct fproc *rfp;
-  int proc_nr, task, fild;
+  int proc_nr_e, proc_nr_p, task, fild;
   struct filp *f;
   dev_t dev;
   message mess;
 
-  if (who > PM_PROC_NR) return(EPERM);
-  proc_nr = m_in.pro;
-  if (proc_nr < 0 || proc_nr >= NR_PROCS)
-  	panic(__FILE__,"unpause err 1", proc_nr);
-  rfp = &fproc[proc_nr];
+  if (who_e != PM_PROC_NR) return(EPERM);
+  proc_nr_e = m_in.ENDPT;
+  okendpt(proc_nr_e, &proc_nr_p);
+  rfp = &fproc[proc_nr_p];
   if (rfp->fp_suspended == NOT_SUSPENDED) return(OK);
   task = -rfp->fp_task;
 
@@ -315,7 +353,7 @@ PUBLIC int do_unpause()
 		break;
 
 	case XSELECT:		/* process blocking on select() */
-		select_forget(proc_nr);
+		select_forget(proc_nr_e);
 		break;
 
 	case XPOPEN:		/* process trying to open a fifo */
@@ -328,7 +366,7 @@ PUBLIC int do_unpause()
 		f = rfp->fp_filp[fild];
 		dev = (dev_t) f->filp_ino->i_zone[0];	/* device hung on */
 		mess.TTY_LINE = (dev >> MINOR) & BYTE;
-		mess.PROC_NR = proc_nr;
+		mess.IO_ENDPT = proc_nr_e;
 
 		/* Tell kernel R or W. Mode is from current call, not open. */
 		mess.COUNT = (rfp->fp_fd & BYTE) == READ ? R_BIT : W_BIT;
@@ -338,7 +376,7 @@ PUBLIC int do_unpause()
   }
 
   rfp->fp_suspended = NOT_SUSPENDED;
-  reply(proc_nr, EINTR);	/* signal interrupted call */
+  reply(proc_nr_e, EINTR);	/* signal interrupted call */
   return(OK);
 }
 
@@ -349,24 +387,26 @@ PUBLIC int select_request_pipe(struct filp *f, int *ops, int block)
 {
 	int orig_ops, r = 0, err, canwrite;
 	orig_ops = *ops;
-	if ((*ops & SEL_RD)) {
+	if ((*ops & (SEL_RD|SEL_ERR))) {
 		if ((err = pipe_check(f->filp_ino, READING, 0,
-			1, f->filp_pos, &canwrite, 1)) != SUSPEND)
+			1, f->filp_pos, &canwrite, 1)) != SUSPEND && err > 0)
 			r |= SEL_RD;
-		if (err < 0 && err != SUSPEND && (*ops & SEL_ERR))
+		if (err < 0 && err != SUSPEND)
 			r |= SEL_ERR;
 	}
-	if ((*ops & SEL_WR)) {
+	if ((*ops & (SEL_WR|SEL_ERR))) {
 		if ((err = pipe_check(f->filp_ino, WRITING, 0,
-			1, f->filp_pos, &canwrite, 1)) != SUSPEND)
+			1, f->filp_pos, &canwrite, 1)) != SUSPEND &&
+			err > 0 && canwrite > 0)
 			r |= SEL_WR;
-		if (err < 0 && err != SUSPEND && (*ops & SEL_ERR))
+		if (err < 0 && err != SUSPEND)
 			r |= SEL_ERR;
 	}
 
-	*ops = r;
+	/* Some options we collected might not be requested. */
+	*ops = r & orig_ops;
 
-	if (!r && block) {
+	if (!*ops && block) {
 		f->filp_pipe_select_ops |= orig_ops;
 	}
 

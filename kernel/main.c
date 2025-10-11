@@ -19,6 +19,7 @@
 #include <a.out.h>
 #include <minix/callnr.h>
 #include <minix/com.h>
+#include <minix/endpoint.h>
 #include "proc.h"
 
 /* Prototype declarations for PRIVATE functions. */
@@ -51,6 +52,7 @@ PUBLIC void main()
   for (rp = BEG_PROC_ADDR, i = -NR_TASKS; rp < END_PROC_ADDR; ++rp, ++i) {
   	rp->p_rts_flags = SLOT_FREE;		/* initialize free slot */
 	rp->p_nr = i;				/* proc number from ptr */
+	rp->p_endpoint = _ENDPOINT(0, rp->p_nr); /* generation no. 0 */
         (pproc_addr + NR_TASKS)[i] = rp;        /* proc ptr from number */
   }
   for (sp = BEG_PRIV_ADDR, i = 0; sp < END_PRIV_ADDR; ++sp, ++i) {
@@ -73,6 +75,7 @@ PUBLIC void main()
   for (i=0; i < NR_BOOT_PROCS; ++i) {
 	ip = &image[i];				/* process' attributes */
 	rp = proc_addr(ip->proc_nr);		/* get process pointer */
+	ip->endpoint = rp->p_endpoint;		/* ipc endpoint */
 	rp->p_max_priority = ip->priority;	/* max scheduling priority */
 	rp->p_priority = ip->priority;		/* current priority */
 	rp->p_quantum_size = ip->quantum;	/* quantum size in ticks */
@@ -155,9 +158,6 @@ PUBLIC void main()
   }
 #endif
 
-  /* We're definitely not shutting down. */
-  shutdown_started = 0;
-
   /* MINIX is now ready. All boot image processes are on the ready queue.
    * Return to the assembly code to start running the current process. 
    */
@@ -173,7 +173,7 @@ PRIVATE void announce(void)
 {
   /* Display the MINIX startup banner. */
   kprintf("\nMINIX %s.%s. "
-  "Copyright 2006, Vrije Universiteit, Amsterdam, The Netherlands\n",
+      "Copyright 2006, Vrije Universiteit, Amsterdam, The Netherlands\n",
       OS_RELEASE, OS_VERSION);
 #if (CHIP == INTEL)
   /* Real mode, or 16/32-bit protected mode? */
@@ -193,16 +193,6 @@ int how;
   register struct proc *rp; 
   message m;
 
-  /* Show debugging dumps on panics. Make sure that the TTY driver is still 
-   * available to handle them. This is done with help of a non-blocking send. 
-   * We rely on TTY to call sys_abort() when it is done with the dumps.
-   */
-  if (how == RBT_PANIC) {
-      m.m_type = PANIC_DUMPS;
-      if (nb_send(TTY_PROC_NR,&m)==OK)	/* don't block if TTY isn't ready */
-          return;			/* await sys_abort() from TTY */
-  }
-
   /* Send a signal to all system processes that are still alive to inform 
    * them that the MINIX kernel is shutting down. A proper shutdown sequence
    * should be implemented by a user-space server. This mechanism is useful
@@ -210,28 +200,22 @@ int how;
    * run their shutdown code, e.g, to synchronize the FS or to let the TTY
    * switch to the first console. 
    */
+#if DEAD_CODE
   kprintf("Sending SIGKSTOP to system processes ...\n"); 
   for (rp=BEG_PROC_ADDR; rp<END_PROC_ADDR; rp++) {
       if (!isemptyp(rp) && (priv(rp)->s_flags & SYS_PROC) && !iskernelp(rp))
           send_sig(proc_nr(rp), SIGKSTOP);
   }
+#endif
 
-  /* We're shutting down. Diagnostics may behave differently now. */
-  shutdown_started = 1;
-
-  /* Notify system processes of the upcoming shutdown and allow them to be 
-   * scheduled by setting a watchog timer that calls shutdown(). The timer 
+  /* Continue after 1 second, to give processes a chance to get scheduled to 
+   * do shutdown work.  Set a watchog timer to call shutdown(). The timer 
    * argument passes the shutdown status. 
    */
   kprintf("MINIX will now be shut down ...\n");
   tmr_arg(&shutdown_timer)->ta_int = how;
-
-  /* Continue after 1 second, to give processes a chance to get
-   * scheduled to do shutdown work.
-   */
   set_timer(&shutdown_timer, get_uptime() + HZ, shutdown);
 }
-
 /*===========================================================================*
  *				shutdown 				     *
  *===========================================================================*/

@@ -19,9 +19,9 @@
 PUBLIC int do_abort(m_ptr)
 message *m_ptr;			/* pointer to request message */
 {
-  /* Handle sys_abort. MINIX is unable to continue. This can originate in the
-   * PM (normal abort or panic) or TTY (after CTRL-ALT-DEL). 
-   */
+/* Handle sys_abort. MINIX is unable to continue. This can originate e.g.
+ * in the PM (normal abort or panic) or TTY (after CTRL-ALT-DEL).
+ */
   int how = m_ptr->ABRT_HOW;
   int proc_nr;
   int length;
@@ -30,8 +30,7 @@ message *m_ptr;			/* pointer to request message */
   /* See if the monitor is to run the specified instructions. */
   if (how == RBT_MONITOR) {
 
-      proc_nr = m_ptr->ABRT_MON_PROC;
-      if (! isokprocn(proc_nr)) return(EINVAL);
+      if(!isokendpt(m_ptr->ABRT_MON_ENDPT, &proc_nr)) return(EDEADSRCDST);
       length = m_ptr->ABRT_MON_LEN + 1;
       if (length > kinfo.params_size) return(E2BIG);
       src_phys = numap_local(proc_nr,(vir_bytes)m_ptr->ABRT_MON_ADDR,length);

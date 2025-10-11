@@ -1,6 +1,3 @@
-/* Copyright (C) 2001 by Prentice-Hall, Inc.  See the copyright notice in
- * the file /usr/src/LICENSE.
- */
 
 #ifndef CHIP
 #error CHIP is not defined
@@ -17,10 +14,6 @@
 #define HZ	          60	/* clock freq (software settable on IBM-PC) */
 
 #define SUPER_USER (uid_t) 0	/* uid_t of superuser */
-
-/* Devices. */
-#define MAJOR	           8	/* major device = (dev>>MAJOR) & 0377 */
-#define MINOR	           0	/* minor device = (dev>>MINOR) & 0377 */
 
 #define NULL     ((void *)0)	/* null pointer */
 #define CPVEC_NR          16	/* max # of entries in a SYS_VCOPY request */
@@ -72,8 +65,8 @@
 
 /* Memory is allocated in clicks. */
 #if (CHIP == INTEL)
-#define CLICK_SIZE      1024	/* unit in which memory is allocated */
-#define CLICK_SHIFT       10	/* log2 of CLICK_SIZE */
+#define CLICK_SIZE      4096	/* unit in which memory is allocated */
+#define CLICK_SHIFT       12	/* log2 of CLICK_SIZE */
 #endif
 
 #if (CHIP == SPARC) || (CHIP == M68000)
@@ -96,6 +89,7 @@
 
 /* Flag bits for i_mode in the inode. */
 #define I_TYPE          0170000	/* this field gives inode type */
+#define I_SYMBOLIC_LINK 0120000	/* file is a symbolic link */
 #define I_REGULAR       0100000	/* regular file, not dir or special */
 #define I_BLOCK_SPECIAL 0060000	/* block special file */
 #define I_DIRECTORY     0040000	/* file is a directory */
@@ -110,14 +104,13 @@
 #define X_BIT           0000001	/* rwX protection bit */
 #define I_NOT_ALLOC     0000000	/* this inode is free */
 
-/* Flag used only in flags argument of dev_open. */
-#define RO_BIT		0200000	/* Open device readonly; fail if writable. */
-
 /* Some limits. */
 #define MAX_BLOCK_NR  ((block_t) 077777777)	/* largest block number */
 #define HIGHEST_ZONE   ((zone_t) 077777777)	/* largest zone number */
 #define MAX_INODE_NR ((ino_t) 037777777777)	/* largest inode number */
 #define MAX_FILE_POS ((off_t) 037777777777)	/* largest legal file offset */
+
+#define MAX_SYM_LOOPS	8	/* how many symbolic links are recursed */
 
 #define NO_BLOCK              ((block_t) 0)	/* absence of a block number */
 #define NO_ENTRY                ((ino_t) 0)	/* absence of a dir entry */

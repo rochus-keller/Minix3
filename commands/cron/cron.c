@@ -3,6 +3,7 @@
  */
 
 #define _MINIX_SOURCE
+#define _MINIX 1
 
 #define nil ((void*)0)
 #include <sys/types.h>
@@ -31,21 +32,6 @@ static volatile int busy;	/* Set when something is afoot, don't sleep! */
 static volatile int need_reload;/* Set if table reload required. */
 static volatile int need_quit;	/* Set if cron must exit. */
 static volatile int debug;	/* Debug level. */
-
-static int setenv(char *var, char *val)
-/* Set an environment variable.  Return 0/-1 for success/failure. */
-{
-	char *env;
-
-	env= malloc((strlen(var) + strlen(val) + 2) * sizeof(env[0]));
-	if (env == nil) return -1;
-	strcpy(env, var);
-	strcat(env, "=");
-	strcat(env, val);
-	if (putenv(env) < 0) return -1;
-	free(env);
-	return 0;
-}
 
 static void run_job(cronjob_t *job)
 /* Execute a cron job.  Register its pid in the job structure.  If a job's
@@ -204,11 +190,11 @@ static void run_job(cronjob_t *job)
 			setgid(pw->pw_gid);
 			setuid(pw->pw_uid);
 			chdir(pw->pw_dir);
-			if (setenv("USER", pw->pw_name) < 0) goto bad;
-			if (setenv("LOGNAME", pw->pw_name) < 0) goto bad;
-			if (setenv("HOME", pw->pw_dir) < 0) goto bad;
+			if (setenv("USER", pw->pw_name, 1) < 0) goto bad;
+			if (setenv("LOGNAME", pw->pw_name, 1) < 0) goto bad;
+			if (setenv("HOME", pw->pw_dir, 1) < 0) goto bad;
 			if (setenv("SHELL", pw->pw_shell[0] == 0 ? "/bin/sh"
-						: pw->pw_shell) < 0) goto bad;
+						: pw->pw_shell, 1) < 0) goto bad;
 		}
 
 		if (job->atjob) {

@@ -15,15 +15,11 @@ usage()
 up()
 {
     service=$1
-    args=$2
-    device=$3
+    shift
 
     # Function to dynamically start a system service
-    command="/sbin/$service"
-    if [ ! -z "$args" ]; then command="$command -args \"$args\""; fi
-    if [ ! -z "$device" ]; then command="$command -dev \"$device\""; fi
     echo -n " $service"
-    eval service up $command
+    service up /sbin/$service "$@"
 }
 
 while getopts 'saf' opt
@@ -52,14 +48,8 @@ start)
     # National keyboard?
     test -f /etc/keymap && loadkeys /etc/keymap
 
-    # Start crucial system services. The floppy driver *must* be loaded 
-    # first, as it needs memory below 16MB in order to do ISA DMA.
-    if [ ! "`sysenv label`" = "FLOPPY" ]  
-    then up floppy "" /dev/fd0
-    else up at_wini "" /dev/c0d0
-    fi
-    up is ""
-    up cmos "" /dev/cmos
+    up is -period 5HZ
+    up cmos -dev /dev/cmos -period 5HZ
     echo .
 
     # Set timezone.
@@ -90,11 +80,11 @@ start)
     # where it is based on sysenv (set by FS when probing for CD).
     if [ "$bootcd" = 1 ]
     then	
-    		imagedev="`/bin/sysenv cdproberoot`"
-    		usrdev="`expr $imagedev + 1`"
+    		#imagedev="`/bin/sysenv cdproberoot`"
+    		#usrdev="`expr $imagedev + 1`"
     		usr_roflag="-r"
-    		usr="`/bin/dev2name $usrdev`"
-    		echo "Setting /usr to mount readonly from cd: $usrdev -> $usr"
+    		usr="$cddev"p2
+    		echo "Setting /usr on cd is $usr"
     fi
  
     # Mount the /usr partition unless this is a single floppy Minix.
@@ -129,10 +119,13 @@ Mount $usr /usr failed -- Single user."
     if [ "$fflag" ]
     then
 	umount $usr
+	echo "fsck / - $root"
 	intr fsck -r $root
+	echo "fsck /usr - $usr"
 	intr fsck -r $usr
 	if [ ! -z "$home" ]
-	then	intr fsck -r $home
+	then	echo "fsck /home - $home"
+		intr fsck -r $home
 	fi
 	mount $usr /usr
     fi
@@ -165,11 +158,18 @@ Mount $usr /usr failed -- Single user."
     esac
 
     # Things should be alright now.
+    ;;
+down|stop)
+    sync
+    # Tell RS server we're going down.
+    service shutdown
+    ;;
 esac
 
 # Further initialization.
 test -f /usr/etc/rc && sh /usr/etc/rc $action
 test -f /usr/local/etc/rc && sh /usr/local/etc/rc $action
+test -f /etc/rc.rescue && sh /etc/rc.rescue $action
 
 # Any messages?
 test "$action" = start -a -f /etc/issue && cat /etc/issue

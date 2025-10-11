@@ -10,14 +10,15 @@ LK =	/usr/lib/keymaps
 	@rm -f a.out
 
 all:	\
+	dvorak.map \
 	french.map \
 	german.map \
 	italian.map \
 	japanese.map \
-	latin-am.map \
+	latin-america.map \
 	olivetti.map \
 	polish.map \
-	scandinavn.map \
+	scandinavian.map \
 	spanish.map \
 	uk.map \
 	us-std.map \
@@ -25,14 +26,15 @@ all:	\
 
 install:	\
 	$(LK) \
+	$(LK)/dvorak.map \
 	$(LK)/french.map \
 	$(LK)/german.map \
 	$(LK)/italian.map \
 	$(LK)/japanese.map \
-	$(LK)/latin-am.map \
+	$(LK)/latin-america.map \
 	$(LK)/olivetti.map \
 	$(LK)/polish.map \
-	$(LK)/scandinavn.map \
+	$(LK)/scandinavian.map \
 	$(LK)/spanish.map \
 	$(LK)/uk.map \
 	$(LK)/us-std.map \
@@ -43,6 +45,9 @@ clean:
 
 $(LK):
 	install -d $@
+
+$(LK)/dvorak.map:	dvorak.map
+	install -c $? $@
 
 $(LK)/french.map:	french.map
 	install -c $? $@
@@ -56,7 +61,7 @@ $(LK)/italian.map:	italian.map
 $(LK)/japanese.map:	japanese.map
 	install -c $? $@
 
-$(LK)/latin-am.map:	latin-am.map
+$(LK)/latin-america.map:	latin-america.map
 	install -c $? $@
 
 $(LK)/olivetti.map:	olivetti.map
@@ -65,7 +70,7 @@ $(LK)/olivetti.map:	olivetti.map
 $(LK)/polish.map:	polish.map
 	install -c $? $@
 
-$(LK)/scandinavn.map:	scandinavn.map
+$(LK)/scandinavian.map:	scandinavian.map
 	install -c $? $@
 
 $(LK)/spanish.map:	spanish.map

@@ -28,7 +28,8 @@ struct proc {
 
   proc_nr_t p_nr;		/* number of this process (for fast access) */
   struct priv *p_priv;		/* system privileges structure */
-  char p_rts_flags;		/* SENDING, RECEIVING, etc. */
+  short p_rts_flags;		/* process is runnable only if zero */
+  short p_misc_flags;		/* flags that do suspend the process */
 
   char p_priority;		/* current scheduling priority */
   char p_max_priority;		/* maximum scheduling priority */
@@ -44,12 +45,14 @@ struct proc {
   struct proc *p_caller_q;	/* head of list of procs wishing to send */
   struct proc *p_q_link;	/* link to next proc wishing to send */
   message *p_messbuf;		/* pointer to passed message buffer */
-  proc_nr_t p_getfrom;		/* from whom does process want to receive? */
-  proc_nr_t p_sendto;		/* to whom does process want to send? */
+  int p_getfrom_e;		/* from whom does process want to receive? */
+  int p_sendto_e;		/* to whom does process want to send? */
 
   sigset_t p_pending;		/* bit map for pending kernel signals */
 
   char p_name[P_NAME_LEN];	/* name of the process, including \0 */
+
+  int p_endpoint;		/* endpoint number, generation-aware */
 
 #if DEBUG_SCHED_CHECK
   int p_ready, p_found;
@@ -59,12 +62,18 @@ struct proc {
 /* Bits for the runtime flags. A process is runnable iff p_rts_flags == 0. */
 #define SLOT_FREE	0x01	/* process slot is free */
 #define NO_MAP		0x02	/* keeps unmapped forked child from running */
-#define SENDING		0x04	/* process blocked trying to SEND */
-#define RECEIVING	0x08	/* process blocked trying to RECEIVE */
+#define SENDING		0x04	/* process blocked trying to send */
+#define RECEIVING	0x08	/* process blocked trying to receive */
 #define SIGNALED	0x10	/* set when new kernel signal arrives */
 #define SIG_PENDING	0x20	/* unready while signal being processed */
 #define P_STOP		0x40	/* set when process is being traced */
 #define NO_PRIV		0x80	/* keep forked system process from running */
+#define NO_PRIORITY    0x100	/* process has been stopped */
+#define NO_ENDPOINT    0x200	/* process cannot send or receive messages */
+
+/* Misc flags */
+#define REPLY_PENDING	0x01	/* reply to IPC_REQUEST is pending */
+#define MF_VM		0x08	/* process uses VM */
 
 /* Scheduling priorities for p_priority. Values must start at zero (highest
  * priority) and increment.  Priorities of the processes in the boot image 

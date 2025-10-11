@@ -1,4 +1,6 @@
 #!/bin/sh
 make clean
-sh makeme.sh
-make install
+make all
+if [ "$1" != build ]
+then make install
+fi

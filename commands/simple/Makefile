@@ -2,6 +2,7 @@
 
 CFLAGS	= -D_MINIX -D_POSIX_SOURCE
 SYS	= ../..
+SERVERS = ../../servers
 CCLD	= $(CC) -i $(CFLAGS)
 CC	= exec cc
 
@@ -40,6 +41,7 @@ CC	= exec cc
 
 ALL	= \
 	add_route \
+	arp \
 	at \
 	backup \
 	badblocks \
@@ -49,6 +51,7 @@ ALL	= \
 	calendar \
 	cat \
 	cdiff \
+	cdprobe \
 	cgrep \
 	chmem \
 	chmod \
@@ -108,6 +111,7 @@ ALL	= \
 	last \
 	leave \
 	life \
+	loadramdisk \
 	login \
 	look \
 	lp \
@@ -126,6 +130,7 @@ ALL	= \
 	mount \
 	mt \
 	nm \
+	newroot \
 	nonamed \
 	nice \
 	od \
@@ -142,8 +147,10 @@ ALL	= \
 	proto \
 	pwd \
 	pwdauth \
+	ramdisk \
 	rarpd \
 	rcp \
+	rawspeed \
 	rdate \
 	readall \
 	rev \
@@ -174,17 +181,21 @@ ALL	= \
 	tar \
 	tcpd \
 	tcpdp \
+	tcpstat \
 	tee \
 	term \
 	termcap \
 	tget \
 	time \
 	touch \
+	top \
 	tr \
+	truncate \
 	treecmp \
 	tsort \
 	ttt \
 	tty \
+	udpstat \
 	umount \
 	uname \
 	unexpand \
@@ -192,7 +203,6 @@ ALL	= \
 	update \
 	uud \
 	uue \
-	usyslogd \
 	vol \
 	wc \
 	which \
@@ -208,6 +218,10 @@ all:	$(ALL)
 
 add_route:	add_route.c
 	$(CCLD) -o $@ add_route.c
+	@install -S 4kw $@
+
+arp:	arp.c
+	$(CCLD) -o $@ arp.c
 	@install -S 4kw $@
 
 at:	at.c
@@ -243,6 +257,10 @@ cat:	cat.c
 	@install -S 4kw $@
 
 cdiff:	cdiff.c
+	$(CCLD) -o $@ $?
+	@install -S 28kw $@
+
+cdprobe: cdprobe.c
 	$(CCLD) -o $@ $?
 	@install -S 28kw $@
 
@@ -296,7 +314,7 @@ compress:	compress.c
 
 cp:    cp.c
 	$(CCLD) -o $@ $?
-	@install -S 16kw $@
+	@install -S 32kw $@
 
 crc:	crc.c
 	$(CCLD) -o $@ $?
@@ -344,7 +362,7 @@ dirname:	dirname.c
 
 du:	du.c
 	$(CCLD) -o $@ $?
-	@install -S 16kw $@
+	@install -S 256kw $@
 
 ed:	ed.c
 	$(CCLD) -o $@ $?
@@ -482,6 +500,10 @@ life:	life.c
 	$(CCLD) -o $@ $? -lcurses
 	@install -S 15kw $@
 
+loadramdisk:	loadramdisk.c
+	$(CCLD) -o $@ $?
+	install -S 4kw $@
+
 login:	login.c
 	$(CCLD) -o $@ $?
 	install -S 4kw $@
@@ -549,6 +571,10 @@ mount:	mount.c
 mt:	mt.c
 	$(CCLD) -o $@ $?
 	@install -S 4kw $@
+
+newroot:	newroot.c
+	$(CCLD) -o $@ $?
+	@install -S 32kw $@
 
 nm:	nm.c
 	$(CCLD) -o $@ $?
@@ -618,6 +644,10 @@ pwdauth:	pwdauth.c
 	$(CCLD) -o $@ $?
 	@install -S 4kw $@
 
+ramdisk:	ramdisk.c
+	$(CCLD) -o $@ ramdisk.c
+	@install -S 4kw $@
+
 rarpd:	rarpd.c
 	$(CCLD) -o $@ rarpd.c
 	@install -S 4kw $@
@@ -625,6 +655,10 @@ rarpd:	rarpd.c
 rcp:	rcp.c
 	$(CCLD) -o $@ rcp.c
 	@install -S 8kw $@
+
+rawspeed:	rawspeed.c
+	$(CCLD) -o $@ rawspeed.c
+	@install -S 512k $@
 
 rdate:	rdate.c
 	$(CCLD) -o $@ rdate.c
@@ -724,7 +758,7 @@ sync:	sync.c
 
 synctree:	synctree.c
 	$(CCLD) -o $@ -wo $?
-	install -S 64kw $@
+	install -S 256kw $@
 
 sysenv:	sysenv.c
 	$(CCLD) -o $@ -wo $?
@@ -736,7 +770,7 @@ tail:	tail.c
 
 tar:	tar.c
 	$(CCLD) -o $@ $?
-	@install -S 512kw $@
+	@install -S 256kw $@
 
 tcpd:	tcpd.c
 	$(CCLD) -o $@ -DPARANOID=0 tcpd.c
@@ -744,6 +778,10 @@ tcpd:	tcpd.c
 
 tcpdp:	tcpd.c
 	$(CCLD) -o $@ -DPARANOID=1 tcpd.c
+	@install -S 8kw $@
+
+tcpstat:	tcpstat.c
+	$(CCLD) -o $@ -I$(SERVERS) tcpstat.c
 	@install -S 8kw $@
 
 tee:	tee.c
@@ -770,6 +808,9 @@ touch:	touch.c
 	$(CCLD) -o $@ $?
 	@install -S 4kw $@
 
+top:	top.c
+	$(CCLD) -o $@ $? -lcurses
+
 tr:	tr.c
 	$(CCLD) -o $@ $?
 	@install -S 4kw $@
@@ -782,6 +823,10 @@ treecmp:	treecmp.c
 	$(CCLD) -o $@ $?
 	@install -S 4kw $@
 
+truncate:	truncate.c
+	$(CCLD) -o $@ $?
+	@install -S 4kw $@
+
 ttt:	ttt.c
 	$(CCLD) -o $@ $?
 	@install -S 4kw $@
@@ -789,6 +834,10 @@ ttt:	ttt.c
 tty:	tty.c
 	$(CCLD) -o $@ $?
 	@install -S 4kw $@
+
+udpstat:	udpstat.c
+	$(CCLD) -o $@ -I$(SERVERS) $?
+	@install -S 32k $@
 
 umount:	umount.c
 	$(CCLD) -o $@ $?
@@ -808,13 +857,9 @@ uniq:	uniq.c
 
 update:	update.c
 	$(CCLD) -o $@ $?
-	@install -S 1kw $@
+	@install -S 2kw $@
 
 uud:	uud.c
-	$(CCLD) -o $@ $?
-	@install -S 4kw $@
-
-usyslogd:	usyslogd.c
 	$(CCLD) -o $@ $?
 	@install -S 4kw $@
 
@@ -859,6 +904,7 @@ yes:	yes.c
 install:	\
 	/usr/bin/add_route \
 		/usr/bin/del_route \
+	/usr/bin/arp \
 	/usr/bin/at \
 	/usr/bin/backup \
 	/usr/bin/restore \
@@ -870,11 +916,12 @@ install:	\
 	/usr/bin/calendar \
 	/usr/bin/cat \
 	/usr/bin/cdiff \
+	/usr/bin/cdprobe \
 	/usr/bin/cgrep \
 	/usr/bin/chmem \
 	/usr/bin/chmod \
 	/usr/bin/chown \
-	/usr/bin/chroot \
+	/bin/chroot \
 		/usr/bin/chgrp \
 	/usr/bin/ci \
 	/usr/bin/cksum \
@@ -948,11 +995,13 @@ install:	\
 		/usr/bin/uptime \
 	/usr/bin/leave \
 	/usr/bin/life \
+	/usr/bin/loadramdisk \
 	/usr/bin/login \
 	/usr/bin/look \
 	/usr/bin/lp \
 	/usr/bin/lpd \
 	/usr/bin/ls \
+	/bin/ls \
 	/usr/bin/mail \
 	/usr/bin/man \
 	/usr/bin/mesg \
@@ -965,6 +1014,7 @@ install:	\
 	/usr/bin/modem \
 	/usr/bin/mount \
 	/usr/bin/mt \
+	/usr/bin/newroot \
 	/usr/bin/nm \
 	/usr/bin/nice \
 	/usr/bin/nonamed \
@@ -984,10 +1034,13 @@ install:	\
 	/usr/bin/proto \
 	/usr/bin/pwd \
 	/usr/lib/pwdauth \
+	/usr/bin/ramdisk \
 	/usr/bin/rarpd \
 	/usr/bin/rcp \
+	/usr/bin/rawspeed \
 	/usr/bin/rdate \
 	/usr/bin/readall \
+	/usr/bin/readlink \
 	/usr/bin/readfs \
 	/usr/bin/remsync \
 	/usr/bin/rget \
@@ -1019,17 +1072,21 @@ install:	\
 	/usr/bin/tar \
 	/usr/bin/tcpd \
 	/usr/bin/tcpdp \
+	/usr/bin/tcpstat \
 	/usr/bin/tee \
 	/usr/bin/term \
 	/usr/bin/termcap \
 	/usr/bin/tget \
 	/usr/bin/time \
+	/usr/bin/top \
 	/usr/bin/touch \
 	/usr/bin/tr \
 	/usr/bin/treecmp \
+	/usr/bin/truncate \
 	/usr/bin/tsort \
 	/usr/bin/ttt \
 	/usr/bin/tty \
+	/usr/bin/udpstat \
 	/usr/bin/umount \
 	/usr/bin/uname \
 		/usr/bin/arch \
@@ -1040,7 +1097,6 @@ install:	\
 		/usr/bin/uudecode \
 	/usr/bin/uue \
 		/usr/bin/uuencode \
-	/usr/bin/usyslogd \
 	/usr/bin/vol \
 	/usr/bin/wc \
 	/usr/bin/which \
@@ -1050,6 +1106,7 @@ install:	\
 	/usr/bin/writeisofs \
 	/usr/bin/xargs \
 	/usr/bin/yes \
+	/usr/bin/udpstat \
 	/bin/cat \
 	/bin/date \
 	/bin/fsck \
@@ -1066,6 +1123,9 @@ install:	\
 
 /usr/bin/del_route:	/usr/bin/add_route
 	install -l $? $@
+
+/usr/bin/arp:	arp
+	install -cs -o root -m 4755 $? $@
 
 /usr/bin/at:	at
 	install -cs -o root -m 4755 $? $@
@@ -1097,6 +1157,9 @@ install:	\
 /usr/bin/cdiff:	cdiff
 	install -cs -o bin $? $@
 
+/usr/bin/cdprobe: cdprobe
+	install -cs -o bin $? $@
+
 /usr/bin/cgrep:	cgrep
 	install -cs -o bin $? $@
 
@@ -1109,7 +1172,7 @@ install:	\
 /usr/bin/chown:	chown
 	install -cs -o bin $? $@
 
-/usr/bin/chroot:	chroot
+/bin/chroot:	chroot
 	install -cs -o bin $? $@
 
 /usr/bin/chgrp:	/usr/bin/chown
@@ -1305,6 +1368,9 @@ install:	\
 /usr/bin/life:	life
 	install -cs -o bin $? $@
 
+/usr/bin/loadramdisk:	loadramdisk
+	install -cs -o bin $? $@
+
 /usr/bin/login:	login
 	install -cs -o bin $? $@
 
@@ -1318,6 +1384,9 @@ install:	\
 	install -cs -o daemon -m 4755 $? $@
 
 /usr/bin/ls:	ls
+	install -cs -o bin $? $@
+
+/bin/ls:	ls
 	install -cs -o bin $? $@
 
 /usr/bin/mail:	mail
@@ -1354,6 +1423,9 @@ install:	\
 	install -cs -o root -m 4755 $? $@
 
 /usr/bin/mt:	mt
+	install -cs -o bin $? $@
+
+/usr/bin/newroot:	newroot
 	install -cs -o bin $? $@
 
 /usr/bin/nm:	nm
@@ -1410,10 +1482,16 @@ install:	\
 /usr/lib/pwdauth:	pwdauth
 	install -cs -o root -m 4755 $? $@
 
+/usr/bin/ramdisk:	ramdisk
+	install -cs -o bin $? $@
+
 /usr/bin/rarpd:	rarpd
 	install -cs -o bin $? $@
 
 /usr/bin/rcp:	rcp
+	install -cs -o bin $? $@
+
+/usr/bin/rawspeed:	rawspeed
 	install -cs -o bin $? $@
 
 /usr/bin/rdate:	rdate
@@ -1421,6 +1499,9 @@ install:	\
 
 /usr/bin/readall:	readall
 	install -cs -o bin $? $@
+
+/usr/bin/readlink:	/usr/bin/stat
+	install -l $? $@
 
 /usr/bin/readfs:	readfs
 	install -cs -o bin $? $@
@@ -1518,6 +1599,9 @@ install:	\
 /usr/bin/tcpdp:	tcpdp
 	install -cs -o bin $? $@
 
+/usr/bin/tcpstat:	tcpstat
+	install -cs -o bin $? $@
+
 /usr/bin/tee:	tee
 	install -cs -o bin $? $@
 
@@ -1533,6 +1617,9 @@ install:	\
 /usr/bin/time:	time
 	install -cs -o bin $? $@
 
+/usr/bin/top:	top
+	install -cs -o bin $? $@
+
 /usr/bin/touch:	touch
 	install -cs -o bin $? $@
 
@@ -1542,6 +1629,9 @@ install:	\
 /usr/bin/treecmp:	treecmp
 	install -cs -o bin $? $@
 
+/usr/bin/truncate:	truncate
+	install -cs -o bin $? $@
+
 /usr/bin/tsort:	tsort
 	install -cs -o bin $? $@
 
@@ -1549,6 +1639,9 @@ install:	\
 	install -cs -o bin $? $@
 
 /usr/bin/tty:	tty
+	install -cs -o bin $? $@
+
+/usr/bin/udpstat:	udpstat
 	install -cs -o bin $? $@
 
 /usr/bin/umount:	umount
@@ -1574,9 +1667,6 @@ install:	\
 
 /usr/bin/uudecode:	/usr/bin/uud
 	install -l $? $@
-
-/usr/bin/usyslogd:	usyslogd
-	install -cs -o bin $? $@
 
 /usr/bin/uue:	uue
 	install -cs -o bin $? $@

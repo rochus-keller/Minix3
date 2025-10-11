@@ -23,6 +23,7 @@
 #define F_GETLK            5	/* get record locking information */
 #define F_SETLK            6	/* set record locking information */
 #define F_SETLKW           7	/* set record locking info; wait if blocked */
+#define F_FREESP           8	/* free a section of a regular file */
 
 /* File descriptor flags used for fcntl().  POSIX Table 6-2. */
 #define FD_CLOEXEC         1	/* close on exec flag for third arg of fcntl */
@@ -63,5 +64,13 @@ struct flock {
 _PROTOTYPE( int creat, (const char *_path, _mnx_Mode_t _mode)		);
 _PROTOTYPE( int fcntl, (int _filedes, int _cmd, ...)	  		);
 _PROTOTYPE( int open,  (const char *_path, int _oflag, ...) 		);
+
+/* For locking files. */
+#define LOCK_SH		F_RDLCK		/* Shared lock */
+#define LOCK_EX		F_WRLCK		/* Exclusive lock */
+#define LOCK_NB		0x0080		/* Do not block when locking */
+#define LOCK_UN		F_UNLCK		/* Unlock */
+
+_PROTOTYPE(  int flock, (int fd, int mode)				);
 
 #endif /* _FCNTL_H */

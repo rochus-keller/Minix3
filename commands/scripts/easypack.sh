@@ -24,13 +24,16 @@ esac
 
 # Change to source directory
 ORIG_DIR=`pwd`
-rm -rf Log			# remove old debugging log
-cd $SOURCE_DIR
+rm -f Log			# remove old debugging log
+cd $SOURCE_DIR || exit
 
-# Check for write permission here
-if test ! -w . 
-   then echo You do not have write permission for $SOURCE_DIR
-   exit 1
+if [ "`id -u`" -ne 0 ]
+then
+	# Check for write permission here
+	if test ! -w . 
+	   then echo You do not have write permission for $SOURCE_DIR
+	   exit 1
+	fi
 fi
 
 # Check for -o flag; if found, set OVERWRITE
@@ -42,7 +45,7 @@ fi
 # Loop on the packages
 for i
 do # Check to see if it exists. Don't overwrite unless -o given
-   echo " " ; echo Start fetching $i 
+   echo " " ; echo Start fetching package $i 
    echo " " >>$ORIG_DIR/Log
    echo ------------- Start fetching $i ------------------ >>$ORIG_DIR/Log
    if test -r $i
@@ -57,45 +60,59 @@ do # Check to see if it exists. Don't overwrite unless -o given
     fi
 
    # Remove any junk from previous attempts
-   rm -rf $i.tar.bz2 $i.tar
+   rm -f $i.tar.bz2 $i.tar
 
    # Get the package
    URL=$SOFTWARE_DIR/$i.tar.bz2
    URL1=$URL
-   urlget $URL >$i.tar.bz2
-
-   # See if we got the file or an error
-   if grep "<HTML>" $i.tar.bz2 >/dev/null
-      then # It is not in the directory of tested software. Try beta dir.
-	   URL=$BETA_DIR/$i.tar.bz2
-	   urlget $URL >$i.tar.bz2
-	   if grep "<HTML>" $i.tar.bz2 >/dev/null
-	      then echo Cannot get $i.
+   TARBZ=$i.tar.bz2
+   if urlget $URL >$TARBZ 2>/dev/null
+   then :
+   else # It is not in the directory of tested software. Try beta dir.
+	   URL=$BETA_DIR/$TARBZ
+	   if urlget $URL >$TARBZ 2>/dev/null
+	   then :
+	   else
+	   	   echo Cannot get $i.
 		   echo "   " Tried $URL1
 		   echo "   " Tried $URL
 		   echo "   " Skipping this package
-		   rm -rf $i.tar.bz2
+		   rm -f $TARBZ
 		   continue
 	   fi
    fi
 
    # We got it. Unpack it.
-   bunzip2 $i.tar.bz2 || smallbunzip2 $i.tar.bz2
+   echo Package $i fetched
+   bunzip2 $TARBZ || smallbunzip2 $TARBZ
    tar xf $i.tar
    if test ! -d $i
       then echo Unable to unpack $i
 	   continue
+      else echo Package $i unpacked
    fi
 
    # It is now unpacked. Build it
    cd $i
-   if sh build >>$ORIG_DIR/Log 2>&1
-      then echo $i installed from $URL
-      else echo $i failed to install
+   binsizes big
+   if [ -f build.minix ]
+   then	sh build.minix >>$ORIG_DIR/Log 2>&1
+	r=$?
+   else	sh build >>$ORIG_DIR/Log 2>&1
+	r=$?
    fi
+   if [ $r -eq 0 ] 
+      then echo Package $i installed
+      else echo Package $i failed to install, see Log
+   fi
+   if [ -f .postinstall ]
+   then	echo Running postinstall script.
+	sh -e .postinstall
+   fi
+   binsizes normal
 
    # Clean up
    cd ..
-#   rm -rf $i.tar*
+   rm -f $i.tar $TARBZ # Remove whatever is still lying around
 done
 

@@ -64,6 +64,7 @@ static void usage(void)
 int main(int argc, char **argv)
 {
     tcpport_t port;
+    int last_failed = 0;
     struct nwio_tcpcl tcplistenopt;
     struct nwio_tcpconf tcpconf;
     struct nwio_tcpopt tcpopt;
@@ -173,12 +174,19 @@ int main(int argc, char **argv)
     while (1) {
 	if ((tcp_fd= open(tcp_device, O_RDWR)) < 0) {
 	    report(tcp_device);
+#if 0
 	    if (errno == ENOENT || errno == ENODEV
 			    || errno == ENXIO) {
 		exit(1);
 	    }
+#endif
+	    last_failed = 1;
 	    goto bad;
 	}
+	if(last_failed)
+		fprintf(stderr, "%s %s: %s: Ok\n",
+			arg0, service, tcp_device);
+	last_failed = 0;
 
 	tcpconf.nwtc_flags= NWTC_LP_SET | NWTC_UNSET_RA | NWTC_UNSET_RP;
 	tcpconf.nwtc_locport= port;

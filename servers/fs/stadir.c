@@ -7,12 +7,16 @@
  *   do_stat:	perform the STAT system call
  *   do_fstat:	perform the FSTAT system call
  *   do_fstatfs: perform the FSTATFS system call
+ *   do_lstat:  perform the LSTAT system call
+ *   do_rdlink: perform the RDLNK system call
  */
 
 #include "fs.h"
 #include <sys/stat.h>
 #include <sys/statfs.h>
 #include <minix/com.h>
+#include <string.h>
+#include "buf.h"
 #include "file.h"
 #include "fproc.h"
 #include "inode.h"
@@ -34,6 +38,7 @@ PUBLIC int do_fchdir()
 
 	/* Is the file descriptor valid? */
 	if ( (rfilp = get_filp(m_in.fd)) == NIL_FILP) return(err_code);
+	dup_inode(rfilp->filp_ino);
 	return change_into(&fp->fp_workdir, rfilp->filp_ino);
 }
 
@@ -50,8 +55,11 @@ PUBLIC int do_chdir()
   int r;
   register struct fproc *rfp;
 
-  if (who == PM_PROC_NR) {
-	rfp = &fproc[m_in.slot1];
+  if (who_e == PM_PROC_NR) {
+	int slot;
+	if(isokendpt(m_in.endpt1, &slot) != OK)
+		return EINVAL;
+	rfp = &fproc[slot];
 	put_inode(fp->fp_rootdir);
 	dup_inode(fp->fp_rootdir = rfp->fp_rootdir);
 	put_inode(fp->fp_workdir);
@@ -212,7 +220,7 @@ char *user_addr;		/* user space address where stat buf goes */
 
   /* Copy the struct to user space. */
   r = sys_datacopy(FS_PROC_NR, (vir_bytes) &statbuf,
-  		who, (vir_bytes) user_addr, (phys_bytes) sizeof(statbuf));
+  		who_e, (vir_bytes) user_addr, (phys_bytes) sizeof(statbuf));
   return(r);
 }
 
@@ -232,8 +240,64 @@ PUBLIC int do_fstatfs()
   st.f_bsize = rfilp->filp_ino->i_sp->s_block_size;
 
   r = sys_datacopy(FS_PROC_NR, (vir_bytes) &st,
-  		who, (vir_bytes) m_in.buffer, (phys_bytes) sizeof(st));
+  		who_e, (vir_bytes) m_in.buffer, (phys_bytes) sizeof(st));
 
    return(r);
+}
+
+/*===========================================================================*
+ *                             do_lstat                                     *
+ *===========================================================================*/
+PUBLIC int do_lstat()
+{
+/* Perform the lstat(name, buf) system call. */
+
+  register int r;              /* return value */
+  register struct inode *rip;  /* target inode */
+
+  if (fetch_name(m_in.name1, m_in.name1_length, M1) != OK) return(err_code);
+  if ((rip = parse_path(user_path, (char *) 0, EAT_PATH_OPAQUE)) == NIL_INODE)
+       return(err_code);
+  r = stat_inode(rip, NIL_FILP, m_in.name2);
+  put_inode(rip);
+  return(r);
+}
+
+/*===========================================================================*
+ *                             do_rdlink                                    *
+ *===========================================================================*/
+PUBLIC int do_rdlink()
+{
+/* Perform the readlink(name, buf) system call. */
+
+  register int r;              /* return value */
+  block_t b;                   /* block containing link text */
+  struct buf *bp;              /* buffer containing link text */
+  register struct inode *rip;  /* target inode */
+  int copylen;
+  copylen = m_in.m1_i2;
+  if(copylen < 0) return EINVAL;
+
+  if (fetch_name(m_in.name1, m_in.name1_length, M1) != OK) return(err_code);
+  if ((rip = parse_path(user_path, (char *) 0, EAT_PATH_OPAQUE)) == NIL_INODE)
+       return(err_code);
+
+  r = EACCES;
+  if (S_ISLNK(rip->i_mode) && (b = read_map(rip, (off_t) 0)) != NO_BLOCK) {
+       if (m_in.name2_length <= 0) r = EINVAL;
+       else if (m_in.name2_length < rip->i_size) r = ERANGE;
+       else {
+	       if(rip->i_size < copylen) copylen = rip->i_size;
+               bp = get_block(rip->i_dev, b, NORMAL);
+               r = sys_vircopy(SELF, D, (vir_bytes) bp->b_data,
+		who_e, D, (vir_bytes) m_in.name2, (vir_bytes) copylen);
+
+               if (r == OK) r = copylen;
+               put_block(bp, DIRECTORY_BLOCK);
+       }
+  }
+
+  put_inode(rip);
+  return(r);
 }
 

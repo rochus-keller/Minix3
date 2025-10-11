@@ -29,7 +29,7 @@
  *   DEV_STATUS:     FS wants to know status for SELECT or REVIVE
  *   CANCEL:         terminate a previous incomplete system call immediately
  *
- *    m_type      TTY_LINE   PROC_NR    COUNT   TTY_SPEK  TTY_FLAGS  ADDRESS
+ *    m_type      TTY_LINE   IO_ENDPT    COUNT   TTY_SPEK  TTY_FLAGS  ADDRESS
  * ---------------------------------------------------------------------------
  * | HARD_INT    |         |         |         |         |         |         |
  * |-------------+---------+---------+---------+---------+---------+---------|
@@ -101,6 +101,8 @@ unsigned long rs_irq_set = 0;
 #define do_pty(tp, mp)	((void) 0)
 #endif
 
+struct kmessages kmess;
+
 FORWARD _PROTOTYPE( void tty_timed_out, (timer_t *tp)			);
 FORWARD _PROTOTYPE( void expire_timers, (void)				);
 FORWARD _PROTOTYPE( void settimer, (tty_t *tty_ptr, int enable)		);
@@ -160,18 +162,28 @@ PUBLIC void main(void)
 
   message tty_mess;		/* buffer for all incoming messages */
   unsigned line;
-  int s;
-  char *types[] = {"task","driver","server", "user"};
+  int r, s;
   register struct proc *rp;
   register tty_t *tp;
 
-  /* Initialize the TTY driver. */
-  tty_init();
+#if DEBUG
+  kputc('H');
+  kputc('e');
+  kputc('l');
+  kputc('l');
+  kputc('o');
+  kputc(',');
+  kputc(' ');
+  printf("TTY\n");
+#endif
 
   /* Get kernel environment (protected_mode, pc_at and ega are needed). */ 
   if (OK != (s=sys_getmachine(&machine))) {
     panic("TTY","Couldn't obtain kernel environment.", s);
   }
+
+  /* Initialize the TTY driver. */
+  tty_init();
 
   /* Final one-time keyboard initialization. */
   kb_init_once();
@@ -186,7 +198,9 @@ PUBLIC void main(void)
 	}
 
 	/* Get a request message. */
-	receive(ANY, &tty_mess);
+	r= receive(ANY, &tty_mess);
+	if (r != 0)
+		panic("TTY", "receive failed with %d", r);
 
 	/* First handle all kernel notification types that the TTY supports. 
 	 *  - An alarm went off, expire all timers and handle the events. 
@@ -201,6 +215,9 @@ PUBLIC void main(void)
 	case SYN_ALARM: 		/* fall through */
 		expire_timers();	/* run watchdogs of expired timers */
 		continue;		/* contine to check for events */
+	case DEV_PING:
+		notify(tty_mess.m_source);
+		continue;
 	case HARD_INT: {		/* hardware interrupt notification */
 		if (tty_mess.NOTIFY_ARG & kbd_irq_set)
 			kbd_interrupt(&tty_mess);/* fetch chars from keyboard */
@@ -211,26 +228,27 @@ PUBLIC void main(void)
 		expire_timers();	/* run watchdogs of expired timers */
 		continue;		/* contine to check for events */
 	}
+	case PROC_EVENT: {
+		cons_stop();		/* switch to primary console */
+		printf("TTY got PROC_EVENT, assuming SIGTERM\n");
+#if DEAD_CODE
+		if (irq_hook_id != -1) {
+			sys_irqdisable(&irq_hook_id);
+			sys_irqrmpolicy(KEYBOARD_IRQ, &irq_hook_id);
+		}
+#endif
+		continue;
+	}
 	case SYS_SIG: {			/* system signal */
 		sigset_t sigset = (sigset_t) tty_mess.NOTIFY_ARG;
-
-		if (sigismember(&sigset, SIGKSTOP)) {
-			cons_stop();		/* switch to primary console */
-			if (irq_hook_id != -1) {
-				sys_irqdisable(&irq_hook_id);
-				sys_irqrmpolicy(KEYBOARD_IRQ, &irq_hook_id);
-			}
-		} 
-		if (sigismember(&sigset, SIGTERM)) cons_stop();	
 		if (sigismember(&sigset, SIGKMESS)) do_new_kmess(&tty_mess);
 		continue;
 	}
-	case PANIC_DUMPS:		/* allow panic dumps */
-		cons_stop();		/* switch to primary console */
-		do_panic_dumps(&tty_mess);	
-		continue;
 	case DIAGNOSTICS: 		/* a server wants to print some */
 		do_diagnostics(&tty_mess);
+		continue;
+	case GET_KMESS:
+		do_get_kmess(&tty_mess);
 		continue;
 	case FKEY_CONTROL:		/* (un)register a fkey observer */
 		do_fkey_ctl(&tty_mess);
@@ -248,7 +266,16 @@ PUBLIC void main(void)
 		continue;
 	}
 	line = tty_mess.TTY_LINE;
-	if ((line - CONS_MINOR) < NR_CONS) {
+	if (line == KBD_MINOR) {
+		do_kbd(&tty_mess);
+		continue;
+	} else if (line == KBDAUX_MINOR) {
+		do_kbdaux(&tty_mess);
+		continue;
+	} else if (line == VIDEO_MINOR) {
+		do_video(&tty_mess);
+		continue;
+	} else if ((line - CONS_MINOR) < NR_CONS) {
 		tp = tty_addr(line - CONS_MINOR);
 	} else if (line == LOG_MINOR) {
 		tp = tty_addr(0);
@@ -270,8 +297,11 @@ PUBLIC void main(void)
 	if (tp == NULL || ! tty_active(tp)) {
 		printf("Warning, TTY got illegal request %d from %d\n",
 			tty_mess.m_type, tty_mess.m_source);
-		tty_reply(TASK_REPLY, tty_mess.m_source,
-						tty_mess.PROC_NR, ENXIO);
+		if (tty_mess.m_source != LOG_PROC_NR)
+		{
+			tty_reply(TASK_REPLY, tty_mess.m_source,
+						tty_mess.IO_ENDPT, ENXIO);
+		}
 		continue;
 	}
 
@@ -288,7 +318,7 @@ PUBLIC void main(void)
 		printf("Warning, TTY got unexpected request %d from %d\n",
 			tty_mess.m_type, tty_mess.m_source);
 	    tty_reply(TASK_REPLY, tty_mess.m_source,
-						tty_mess.PROC_NR, EINVAL);
+						tty_mess.IO_ENDPT, EINVAL);
 	}
   }
 }
@@ -315,7 +345,7 @@ message *m_ptr;
 
 		/* I/O for a selected minor device is ready. */
 		m_ptr->m_type = DEV_IO_READY;
-		m_ptr->DEV_MINOR = tp->tty_index;
+		m_ptr->DEV_MINOR = tp->tty_minor;
 		m_ptr->DEV_SEL_OPS = ops;
 
 		tp->tty_select_ops &= ~ops;	/* unmark select event */
@@ -326,7 +356,7 @@ message *m_ptr;
 		
 		/* Suspended request finished. Send a REVIVE. */
 		m_ptr->m_type = DEV_REVIVE;
-  		m_ptr->REP_PROC_NR = tp->tty_inproc;
+  		m_ptr->REP_ENDPT = tp->tty_inproc;
   		m_ptr->REP_STATUS = tp->tty_incum;
 
 		tp->tty_inleft = tp->tty_incum = 0;
@@ -338,7 +368,7 @@ message *m_ptr;
 		
 		/* Suspended request finished. Send a REVIVE. */
 		m_ptr->m_type = DEV_REVIVE;
-  		m_ptr->REP_PROC_NR = tp->tty_outproc;
+  		m_ptr->REP_ENDPT = tp->tty_outproc;
   		m_ptr->REP_STATUS = tp->tty_outcum;
 
 		tp->tty_outcum = 0;
@@ -352,6 +382,8 @@ message *m_ptr;
   if (!event_found)
   	event_found = pty_status(m_ptr);
 #endif
+  if (!event_found)
+	event_found= kbd_status(m_ptr);
 
   if (! event_found) {
 	/* No events of interest were found. Return an empty message. */
@@ -374,24 +406,28 @@ register message *m_ptr;	/* pointer to message sent to the task */
 /* A process wants to read from a terminal. */
   int r, status;
   phys_bytes phys_addr;
+  int more_verbose= (tp == tty_addr(NR_CONS));
 
   /* Check if there is already a process hanging in a read, check if the
    * parameters are correct, do I/O.
    */
   if (tp->tty_inleft > 0) {
+	if (more_verbose) printf("do_read: EIO\n");
 	r = EIO;
   } else
   if (m_ptr->COUNT <= 0) {
+	if (more_verbose) printf("do_read: EINVAL\n");
 	r = EINVAL;
   } else
-  if (sys_umap(m_ptr->PROC_NR, D, (vir_bytes) m_ptr->ADDRESS, m_ptr->COUNT,
+  if (sys_umap(m_ptr->IO_ENDPT, D, (vir_bytes) m_ptr->ADDRESS, m_ptr->COUNT,
 		&phys_addr) != OK) {
+	if (more_verbose) printf("do_read: EFAULT\n");
 	r = EFAULT;
   } else {
 	/* Copy information from the message to the tty struct. */
 	tp->tty_inrepcode = TASK_REPLY;
 	tp->tty_incaller = m_ptr->m_source;
-	tp->tty_inproc = m_ptr->PROC_NR;
+	tp->tty_inproc = m_ptr->IO_ENDPT;
 	tp->tty_in_vir = (vir_bytes) m_ptr->ADDRESS;
 	tp->tty_inleft = m_ptr->COUNT;
 
@@ -435,7 +471,8 @@ register message *m_ptr;	/* pointer to message sent to the task */
 		tp->tty_inrepcode = REVIVE;
 	}
   }
-  tty_reply(TASK_REPLY, m_ptr->m_source, m_ptr->PROC_NR, r);
+  if (more_verbose) printf("do_read: replying %d\n", r);
+  tty_reply(TASK_REPLY, m_ptr->m_source, m_ptr->IO_ENDPT, r);
   if (tp->tty_select_ops)
   	select_retry(tp);
 }
@@ -460,14 +497,14 @@ register message *m_ptr;	/* pointer to message sent to the task */
   if (m_ptr->COUNT <= 0) {
 	r = EINVAL;
   } else
-  if (sys_umap(m_ptr->PROC_NR, D, (vir_bytes) m_ptr->ADDRESS, m_ptr->COUNT,
+  if (sys_umap(m_ptr->IO_ENDPT, D, (vir_bytes) m_ptr->ADDRESS, m_ptr->COUNT,
 		&phys_addr) != OK) {
 	r = EFAULT;
   } else {
 	/* Copy message parameters to the tty structure. */
 	tp->tty_outrepcode = TASK_REPLY;
 	tp->tty_outcaller = m_ptr->m_source;
-	tp->tty_outproc = m_ptr->PROC_NR;
+	tp->tty_outproc = m_ptr->IO_ENDPT;
 	tp->tty_out_vir = (vir_bytes) m_ptr->ADDRESS;
 	tp->tty_outleft = m_ptr->COUNT;
 
@@ -487,7 +524,7 @@ register message *m_ptr;	/* pointer to message sent to the task */
 		tp->tty_outrepcode = REVIVE;
 	}
   }
-  tty_reply(TASK_REPLY, m_ptr->m_source, m_ptr->PROC_NR, r);
+  tty_reply(TASK_REPLY, m_ptr->m_source, m_ptr->IO_ENDPT, r);
 }
 
 /*===========================================================================*
@@ -563,7 +600,7 @@ message *m_ptr;			/* pointer to message sent to task */
     case TCGETS:
 	/* Get the termios attributes. */
 	r = sys_vircopy(SELF, D, (vir_bytes) &tp->tty_termios,
-		m_ptr->PROC_NR, D, (vir_bytes) m_ptr->ADDRESS, 
+		m_ptr->IO_ENDPT, D, (vir_bytes) m_ptr->ADDRESS, 
 		(vir_bytes) size);
 	break;
 
@@ -573,7 +610,7 @@ message *m_ptr;			/* pointer to message sent to task */
 	if (tp->tty_outleft > 0) {
 		/* Wait for all ongoing output processing to finish. */
 		tp->tty_iocaller = m_ptr->m_source;
-		tp->tty_ioproc = m_ptr->PROC_NR;
+		tp->tty_ioproc = m_ptr->IO_ENDPT;
 		tp->tty_ioreq = m_ptr->REQUEST;
 		tp->tty_iovir = (vir_bytes) m_ptr->ADDRESS;
 		r = SUSPEND;
@@ -584,14 +621,14 @@ message *m_ptr;			/* pointer to message sent to task */
 	/*FALL THROUGH*/
     case TCSETS:
 	/* Set the termios attributes. */
-	r = sys_vircopy( m_ptr->PROC_NR, D, (vir_bytes) m_ptr->ADDRESS,
+	r = sys_vircopy( m_ptr->IO_ENDPT, D, (vir_bytes) m_ptr->ADDRESS,
 		SELF, D, (vir_bytes) &tp->tty_termios, (vir_bytes) size);
 	if (r != OK) break;
 	setattr(tp);
 	break;
 
     case TCFLSH:
-	r = sys_vircopy( m_ptr->PROC_NR, D, (vir_bytes) m_ptr->ADDRESS,
+	r = sys_vircopy( m_ptr->IO_ENDPT, D, (vir_bytes) m_ptr->ADDRESS,
 		SELF, D, (vir_bytes) &param.i, (vir_bytes) size);
 	if (r != OK) break;
 	switch (param.i) {
@@ -603,7 +640,7 @@ message *m_ptr;			/* pointer to message sent to task */
 	break;
 
     case TCFLOW:
-	r = sys_vircopy( m_ptr->PROC_NR, D, (vir_bytes) m_ptr->ADDRESS,
+	r = sys_vircopy( m_ptr->IO_ENDPT, D, (vir_bytes) m_ptr->ADDRESS,
 		SELF, D, (vir_bytes) &param.i, (vir_bytes) size);
 	if (r != OK) break;
 	switch (param.i) {
@@ -629,26 +666,26 @@ message *m_ptr;			/* pointer to message sent to task */
 
     case TIOCGWINSZ:
 	r = sys_vircopy(SELF, D, (vir_bytes) &tp->tty_winsize,
-		m_ptr->PROC_NR, D, (vir_bytes) m_ptr->ADDRESS, 
+		m_ptr->IO_ENDPT, D, (vir_bytes) m_ptr->ADDRESS, 
 		(vir_bytes) size);
 	break;
 
     case TIOCSWINSZ:
-	r = sys_vircopy( m_ptr->PROC_NR, D, (vir_bytes) m_ptr->ADDRESS,
+	r = sys_vircopy( m_ptr->IO_ENDPT, D, (vir_bytes) m_ptr->ADDRESS,
 		SELF, D, (vir_bytes) &tp->tty_winsize, (vir_bytes) size);
-	/* SIGWINCH... */
+	sigchar(tp, SIGWINCH);
 	break;
 
 #if ENABLE_SRCCOMPAT
     case TIOCGETP:
 	compat_getp(tp, &param.sg);
 	r = sys_vircopy(SELF, D, (vir_bytes) &param.sg,
-		m_ptr->PROC_NR, D, (vir_bytes) m_ptr->ADDRESS,
+		m_ptr->IO_ENDPT, D, (vir_bytes) m_ptr->ADDRESS,
 		(vir_bytes) size);
 	break;
 
     case TIOCSETP:
-	r = sys_vircopy( m_ptr->PROC_NR, D, (vir_bytes) m_ptr->ADDRESS,
+	r = sys_vircopy( m_ptr->IO_ENDPT, D, (vir_bytes) m_ptr->ADDRESS,
 		SELF, D, (vir_bytes) &param.sg, (vir_bytes) size);
 	if (r != OK) break;
 	compat_setp(tp, &param.sg);
@@ -657,12 +694,12 @@ message *m_ptr;			/* pointer to message sent to task */
     case TIOCGETC:
 	compat_getc(tp, &param.tc);
 	r = sys_vircopy(SELF, D, (vir_bytes) &param.tc,
-		m_ptr->PROC_NR, D, (vir_bytes) m_ptr->ADDRESS, 
+		m_ptr->IO_ENDPT, D, (vir_bytes) m_ptr->ADDRESS, 
 		(vir_bytes) size);
 	break;
 
     case TIOCSETC:
-	r = sys_vircopy( m_ptr->PROC_NR, D, (vir_bytes) m_ptr->ADDRESS,
+	r = sys_vircopy( m_ptr->IO_ENDPT, D, (vir_bytes) m_ptr->ADDRESS,
 		SELF, D, (vir_bytes) &param.tc, (vir_bytes) size);
 	if (r != OK) break;
 	compat_setc(tp, &param.tc);
@@ -702,7 +739,7 @@ message *m_ptr;			/* pointer to message sent to task */
   }
 
   /* Send the reply. */
-  tty_reply(TASK_REPLY, m_ptr->m_source, m_ptr->PROC_NR, r);
+  tty_reply(TASK_REPLY, m_ptr->m_source, m_ptr->IO_ENDPT, r);
 }
 
 /*===========================================================================*
@@ -723,12 +760,12 @@ message *m_ptr;			/* pointer to message sent to task */
 	if (m_ptr->COUNT & R_BIT) r = EACCES;
   } else {
 	if (!(m_ptr->COUNT & O_NOCTTY)) {
-		tp->tty_pgrp = m_ptr->PROC_NR;
+		tp->tty_pgrp = m_ptr->IO_ENDPT;
 		r = 1;
 	}
 	tp->tty_openct++;
   }
-  tty_reply(TASK_REPLY, m_ptr->m_source, m_ptr->PROC_NR, r);
+  tty_reply(TASK_REPLY, m_ptr->m_source, m_ptr->IO_ENDPT, r);
 }
 
 /*===========================================================================*
@@ -749,7 +786,7 @@ message *m_ptr;			/* pointer to message sent to task */
 	tp->tty_winsize = winsize_defaults;
 	setattr(tp);
   }
-  tty_reply(TASK_REPLY, m_ptr->m_source, m_ptr->PROC_NR, OK);
+  tty_reply(TASK_REPLY, m_ptr->m_source, m_ptr->IO_ENDPT, OK);
 }
 
 /*===========================================================================*
@@ -767,7 +804,7 @@ message *m_ptr;			/* pointer to message sent to task */
   int mode;
 
   /* Check the parameters carefully, to avoid cancelling twice. */
-  proc_nr = m_ptr->PROC_NR;
+  proc_nr = m_ptr->IO_ENDPT;
   mode = m_ptr->COUNT;
   if ((mode & R_BIT) && tp->tty_inleft != 0 && proc_nr == tp->tty_inproc) {
 	/* Process was reading when killed.  Clean up input. */
@@ -818,13 +855,12 @@ PUBLIC int select_try(struct tty *tp, int ops)
   		if (tp->tty_outleft > 0)  ready_ops |= SEL_WR;
 		else if ((*tp->tty_devwrite)(tp, 1)) ready_ops |= SEL_WR;
 	}
-
 	return ready_ops;
 }
 
 PUBLIC int select_retry(struct tty *tp)
 {
-	if (select_try(tp, tp->tty_select_ops))
+  	if (tp->tty_select_ops && select_try(tp, tp->tty_select_ops))
 		notify(tp->tty_select_proc);
 	return OK;
 }
@@ -880,7 +916,9 @@ tty_t *tp;			/* TTY to check for events. */
 	}
   }
   if (tp->tty_select_ops)
+  {
   	select_retry(tp);
+  }
 #if NR_PTYS > 0
   if (ispty(tp))
   	select_retry_pty(tp);
@@ -1436,10 +1474,11 @@ int status;			/* reply code */
   message tty_mess;
 
   tty_mess.m_type = code;
-  tty_mess.REP_PROC_NR = proc_nr;
+  tty_mess.REP_ENDPT = proc_nr;
   tty_mess.REP_STATUS = status;
 
   if ((status = send(replyee, &tty_mess)) != OK) {
+	printf("TTY: couldn't reply to %d\n", replyee);
 	panic("TTY","tty_reply failed, status\n", status);
   }
 }
@@ -1493,7 +1532,7 @@ PRIVATE void tty_init()
 
   register tty_t *tp;
   int s;
-  struct sigaction sigact;
+  struct sigaction sa;
 
   /* Initialize the terminal lines. */
   for (tp = FIRST_TTY,s=0; tp < END_TTY; tp++,s++) {
@@ -1509,6 +1548,10 @@ PRIVATE void tty_init()
 								tty_devnop;
   	if (tp < tty_addr(NR_CONS)) {
 		scr_init(tp);
+
+		/* Initialize the keyboard driver. */
+		kb_init(tp);
+
   		tp->tty_minor = CONS_MINOR + s;
   	} else
   	if (tp < tty_addr(NR_CONS+NR_RS_LINES)) {
@@ -1521,12 +1564,16 @@ PRIVATE void tty_init()
   }
 
 #if DEAD_CODE
-  /* Install signal handler to ignore SIGTERM. */
-  sigact.sa_handler = SIG_IGN;
-  sigact.sa_mask = ~0;			/* block all other signals */
-  sigact.sa_flags = 0;			/* default behaviour */
-  if (sigaction(SIGTERM, &sigact, NULL) != OK) 
-      report("TTY","warning, sigaction() failed", errno);
+  /* Install signal handlers. Ask PM to transform signal into message. */
+  sa.sa_handler = SIG_MESS;
+  sigemptyset(&sa.sa_mask);
+  sa.sa_flags = 0;
+  if (sigaction(SIGTERM,&sa,NULL)<0) panic("TTY","sigaction failed", errno);
+  if (sigaction(SIGKMESS,&sa,NULL)<0) panic("TTY","sigaction failed", errno);
+  if (sigaction(SIGKSTOP,&sa,NULL)<0) panic("TTY","sigaction failed", errno);
+#endif
+#if DEBUG
+	printf("end of tty_init\n");
 #endif
 }
 
@@ -1624,8 +1671,8 @@ register message *m_ptr;	/* pointer to message sent to the task */
 {
 	int ops, ready_ops = 0, watch;
 
-	ops = m_ptr->PROC_NR & (SEL_RD|SEL_WR|SEL_ERR);
-	watch = (m_ptr->PROC_NR & SEL_NOTIFY) ? 1 : 0;
+	ops = m_ptr->IO_ENDPT & (SEL_RD|SEL_WR|SEL_ERR);
+	watch = (m_ptr->IO_ENDPT & SEL_NOTIFY) ? 1 : 0;
 
 	ready_ops = select_try(tp, ops);
 
@@ -1634,7 +1681,7 @@ register message *m_ptr;	/* pointer to message sent to the task */
 		tp->tty_select_proc = m_ptr->m_source;
 	}
 
-        tty_reply(TASK_REPLY, m_ptr->m_source, m_ptr->PROC_NR, ready_ops);
+        tty_reply(TASK_REPLY, m_ptr->m_source, m_ptr->IO_ENDPT, ready_ops);
 
         return;
 }
@@ -1920,7 +1967,7 @@ message *m_ptr;
   message reply_mess;
 
   minor = m_ptr->TTY_LINE;
-  proc = m_ptr->PROC_NR;
+  proc = m_ptr->IO_ENDPT;
   func = m_ptr->REQUEST;
   spek = m_ptr->m2_l1;
   flags = m_ptr->m2_l2;
@@ -1968,7 +2015,7 @@ message *m_ptr;
 	r = ENOTTY;
   }
   reply_mess.m_type = TASK_REPLY;
-  reply_mess.REP_PROC_NR = m_ptr->PROC_NR;
+  reply_mess.REP_ENDPT = m_ptr->IO_ENDPT;
   reply_mess.REP_STATUS = r;
   reply_mess.m2_l1 = erki;
   reply_mess.m2_l2 = flags;

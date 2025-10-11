@@ -49,7 +49,7 @@ const char *_sys_errlist[] = {
 	"No locks available",		/* ENOLCK */
 	"Function not implemented",	/* ENOSYS */
 	"Directory not empty",		/* ENOTEMPTY */
-	unknown,			/* 40 */
+	"Too many levels of symbolic links",	/* ELOOP */
 	unknown,			/* 41 */
 	unknown,			/* 42 */
 	unknown,			/* 43 */
@@ -82,6 +82,9 @@ const char *_sys_errlist[] = {
 	"Operation in progress",	/* EINPROGRESS */
 	"Address not available",	/* EADDRNOTAVAIL */
 	"Connection already in progress", /* EALREADY */
+	"Message too long",		/* EMSGSIZE */
+	"Socket operation on non-socket", /* ENOTSOCK */
+	"Protocol not available",	/* ENOPROTOOPT */
 };
 
 const int _sys_nerr = sizeof(_sys_errlist) / sizeof(_sys_errlist[0]);

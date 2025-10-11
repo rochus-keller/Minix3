@@ -8,8 +8,10 @@
  *   put_block:	  return a block previously requested with get_block
  *   alloc_zone:  allocate a new zone (to increase the length of a file)
  *   free_zone:	  release a zone (when a file is removed)
- *   rw_block:	  read or write a block from the disk itself
  *   invalidate:  remove all the cache blocks on some device
+ *
+ * Private functions:
+ *   rw_block:    read or write a block from the disk itself
  */
 
 #include "fs.h"
@@ -20,6 +22,7 @@
 #include "super.h"
 
 FORWARD _PROTOTYPE( void rm_lru, (struct buf *bp) );
+FORWARD _PROTOTYPE( int rw_block, (struct buf *, int) );
 
 /*===========================================================================*
  *				get_block				     *
@@ -149,7 +152,7 @@ int block_type;			/* INODE_BLOCK, DIRECTORY_BLOCK, or whatever */
    * it on the front of the LRU chain where it will be the first one to be
    * taken when a free buffer is needed later.
    */
-  if (bp->b_dev == DEV_RAM || block_type & ONE_SHOT) {
+  if (bp->b_dev == DEV_RAM || (block_type & ONE_SHOT)) {
 	/* Block probably won't be needed quickly. Put it on front of chain.
   	 * It will be the next block to be evicted from the cache.
   	 */
@@ -246,7 +249,7 @@ zone_t numb;				/* zone to be returned */
 /*===========================================================================*
  *				rw_block				     *
  *===========================================================================*/
-PUBLIC void rw_block(bp, rw_flag)
+PRIVATE int rw_block(bp, rw_flag)
 register struct buf *bp;	/* buffer pointer */
 int rw_flag;			/* READING or WRITING */
 {
@@ -280,6 +283,8 @@ int rw_flag;			/* READING or WRITING */
   }
 
   bp->b_dirt = CLEAN;
+
+  return OK;
 }
 
 /*===========================================================================*

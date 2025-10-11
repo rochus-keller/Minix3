@@ -20,15 +20,24 @@ _PROTOTYPE( void main, (void)						);
 _PROTOTYPE( void prepare_shutdown, (int how)				);
 
 /* utility.c */
-_PROTOTYPE( void kprintf, (const char *fmt, ...)			);
+_PROTOTYPE( int kprintf, (const char *fmt, ...)				);
 _PROTOTYPE( void panic, (_CONST char *s, int n)				);
 
 /* proc.c */
-_PROTOTYPE( int sys_call, (int function, int src_dest, message *m_ptr)	);
+_PROTOTYPE( int sys_call, (int call_nr, int src_dst, 
+					message *m_ptr, long bit_map)	);
 _PROTOTYPE( int lock_notify, (int src, int dst)				);
 _PROTOTYPE( int lock_send, (int dst, message *m_ptr)			);
 _PROTOTYPE( void lock_enqueue, (struct proc *rp)			);
 _PROTOTYPE( void lock_dequeue, (struct proc *rp)			);
+_PROTOTYPE( void balance_queues, (struct timer *tp)			);
+#if DEBUG_ENABLE_IPC_WARNINGS
+_PROTOTYPE( int isokendpt_f, (char *file, int line, int e, int *p, int f));
+#define isokendpt_d(e, p, f) isokendpt_f(__FILE__, __LINE__, (e), (p), (f))
+#else
+_PROTOTYPE( int isokendpt_f, (int e, int *p, int f)			);
+#define isokendpt_d(e, p, f) isokendpt_f((e), (p), (f))
+#endif
 
 /* start.c */
 _PROTOTYPE( void cstart, (U16_t cs, U16_t ds, U16_t mds,
@@ -50,6 +59,7 @@ _PROTOTYPE( phys_bytes umap_remote, (struct proc *rp, int seg,
 		vir_bytes vir_addr, vir_bytes bytes)			);
 _PROTOTYPE( phys_bytes umap_bios, (struct proc *rp, vir_bytes vir_addr,
 		vir_bytes bytes)					);
+_PROTOTYPE( void clear_endpoint, (struct proc *rc)			);
 
 #if (CHIP == INTEL)
 
@@ -82,6 +92,9 @@ _PROTOTYPE( void reset, (void)						);
 _PROTOTYPE( void level0, (void (*func)(void))				);
 _PROTOTYPE( void monitor, (void)					);
 _PROTOTYPE( void read_tsc, (unsigned long *high, unsigned long *low)	);
+_PROTOTYPE( unsigned long read_cr0, (void)				);
+_PROTOTYPE( void write_cr0, (unsigned long value)			);
+_PROTOTYPE( void write_cr3, (unsigned long value)			);
 _PROTOTYPE( unsigned long read_cpu_flags, (void)			);
 
 /* mpx*.s */
@@ -141,6 +154,9 @@ _PROTOTYPE( phys_bytes seg2phys, (U16_t seg)				);
 _PROTOTYPE( void phys2seg, (u16_t *seg, vir_bytes *off, phys_bytes phys));
 _PROTOTYPE( void enable_iop, (struct proc *pp)				);
 _PROTOTYPE( void alloc_segments, (struct proc *rp)			);
+
+/* system/do_vm.c */
+_PROTOTYPE( void vm_map_default, (struct proc *pp)			);
 
 #endif /* (CHIP == INTEL) */
 

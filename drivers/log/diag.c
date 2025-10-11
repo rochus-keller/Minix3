@@ -28,10 +28,28 @@ message *m;					/* notification message */
   int bytes;
   int i, r;
 
-  /* Try to get a fresh copy of the buffer with kernel messages. */
-  if ((r=sys_getkmessages(&kmess)) != OK) {
-  	report("LOG","couldn't get copy of kmessages", r);
-  	return EDONTREPLY;
+  if (m->m_source == TTY_PROC_NR)
+  {
+	message mess;
+
+	/* Ask TTY driver for log output */
+	mess.GETKM_PTR= (char *) &kmess;
+	mess.m_type = GET_KMESS;
+	r= sendrec(TTY_PROC_NR, &mess);
+	if (r == OK) r= mess.m_type;
+	if (r != OK)
+	{
+		report("LOG","couldn't get copy of kmessages from TTY", r);
+		return EDONTREPLY;
+	}
+  }
+  else
+  {
+	/* Try to get a fresh copy of the buffer with kernel messages. */
+	if ((r=sys_getkmessages(&kmess)) != OK) {
+		report("LOG","couldn't get copy of kmessages", r);
+		return EDONTREPLY;
+	}
   }
 
   /* Print only the new part. Determine how many new bytes there are with 
@@ -50,9 +68,8 @@ message *m;					/* notification message */
           r ++;
           i ++;
       }
-      /* Now terminate the new message and print it. */
+      /* Now terminate the new message and save it in the log. */
       print_buf[i] = 0;
-      printf("%s", print_buf);
       log_append(print_buf, i);
   }
 
@@ -73,21 +90,16 @@ PUBLIC int do_diagnostics(message *m)
  * user. It also saves a copy in a local buffer so that messages can be 
  * reviewed at a later time.
  */
-  int result;
-  int proc_nr; 
+  int proc_nr_e; 
   vir_bytes src;
   int count;
   char c;
   int i = 0;
   static char diagbuf[10240];
 
-  /* Forward the message to the TTY driver. Inform the TTY driver about the
-   * original sender, so that it knows where the buffer to be printed is.
-   * The message type, DIAGNOSTICS, remains the same.
-   */ 
-  if ((proc_nr = m->DIAG_PROC_NR) == SELF)
-      m->DIAG_PROC_NR = proc_nr = m->m_source;
-  result = _sendrec(TTY_PROC_NR, m);
+  /* Change SELF to actual process number. */
+  if ((proc_nr_e = m->DIAG_ENDPT) == SELF)
+      m->DIAG_ENDPT = proc_nr_e = m->m_source;
 
   /* Now also make a copy for the private buffer at the LOG server, so
    * that the messages can be reviewed at a later time.
@@ -95,7 +107,7 @@ PUBLIC int do_diagnostics(message *m)
   src = (vir_bytes) m->DIAG_PRINT_BUF;
   count = m->DIAG_BUF_COUNT; 
   while (count > 0 && i < sizeof(diagbuf)-1) {
-      if (sys_datacopy(proc_nr, src, SELF, (vir_bytes) &c, 1) != OK) 
+      if (sys_datacopy(proc_nr_e, src, SELF, (vir_bytes) &c, 1) != OK) 
           break;		/* stop copying on error */
       src ++;
       count --;
@@ -103,5 +115,5 @@ PUBLIC int do_diagnostics(message *m)
   }
   log_append(diagbuf, i);
 
-  return result;
+  return OK;
 }

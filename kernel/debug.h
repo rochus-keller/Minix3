@@ -9,6 +9,17 @@
 
 #include "config.h"
 
+/* Enable prints such as
+ *  . send/receive failed due to deadlock or dead source or dead destination
+ *  . trap not allowed
+ *  . bogus message pointer
+ *  . kernel call number not allowed by this process
+ *
+ * Of course the call still fails, but nothing is printed if these warnings
+ * are disabled.
+ */
+#define DEBUG_ENABLE_IPC_WARNINGS	0
+
 /* It's interesting to measure the time spent withing locked regions, because
  * this is the time that the system is deaf to interrupts.
  */
@@ -40,15 +51,6 @@ _PROTOTYPE( void timer_end, (int cat) );
 #define locktimeend(c)
 #endif /* DEBUG_TIME_LOCKS */
 
-/* The locking checks counts relocking situation, which are dangerous because
- * the inner lock may unlock the outer one.
- */
-#if DEBUG_LOCK_CHECK
-#define lockcheck if (!(read_cpu_flags() & X86_FLAG_I)) kinfo.relocking++;
-#else
-#define lockcheck
-#endif /* DEBUG_LOCK_CHECK */
-
 /* This check makes sure that the scheduling queues are in a consistent state.
  * The check is run when the queues are updated with ready() and unready().
  */ 
@@ -62,14 +64,9 @@ _PROTOTYPE( void check_runqueues, (char *when) );
  */
 #if (DEBUG_TIME_LOCKS || DEBUG_LOCK_CHECK)
 #  undef lock
-#  define lock(c, v)	do { lockcheck; \
-	intr_disable(); \
-	locktimestart(c, v); \
-	} while(0)
+#  define lock(c, v)	do { reallock(c, v); locktimestart(c, v); } while(0)
 #  undef unlock
-#  define unlock(c)	do { locktimeend(c); \
-	intr_enable();\
-	 } while(0)
+#  define unlock(c)	do { locktimeend(c); realunlock(c); } while(0)
 #endif
 
 #endif /* DEBUG_H */

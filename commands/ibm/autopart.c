@@ -1691,7 +1691,7 @@ ssize_t boot_readwrite(int rw)
 		if (ioctl(device, DIOCGETP, &geom0) < 0) return -1;
 		geom_seek.base = add64(geom0.base, off64);
 		geom_seek.size = cvu64(cmp64(add64u(off64, SECTOR_SIZE),
-			geom0.size) <= 0 ? STATIC_BLOCK_SIZE : 0);
+			geom0.size) <= 0 ? _STATIC_BLOCK_SIZE : 0);
 		sync();
 		if (ioctl(device, DIOCSETP, &geom_seek) < 0) return -1;
 		if (lseek(device, (off_t) 0, SEEK_SET) == -1) return -1;
@@ -1748,22 +1748,15 @@ int cylinderalign(region_t *reg)
 
 void regionize(void)
 {
-	int free_sec, i, si, sanitycheck = 1;
+	int free_sec, i, si;
 
 	sort();
 
 	free_sec = table[0].lowsec + sectors;
 
-	/* Looks like disk too big - disable sanity check. */
-	if(table[0].size >= (1L << 28) - 1) {
-		fprintf(stderr, "WARNING: disabling sanity checks.\n");
-		sanitycheck = 0;
-	}
-
 	/* Create region data used in autopart mode. */
 	free_regions = used_regions = nr_regions = nr_partitions = 0;
-	if(sanitycheck &&
-		table[0].lowsec > table[sort_order[1]].lowsec &&
+	if(table[0].lowsec > table[sort_order[1]].lowsec &&
 		table[sort_order[1]].sysind != NO_PART) {
 		printf("\nSanity check failed on %s - first partition starts before disk.\n"
 			"Please use expert mode to correct it.\n", curdev->name);
@@ -1792,7 +1785,7 @@ void regionize(void)
 		}
 
 		/* Sanity check. */
-		if(sanitycheck && si > 1) {
+		if(si > 1) {
 			if(table[i].lowsec < table[sort_order[si-1]].lowsec ||
 			   table[i].lowsec < table[sort_order[si-1]].lowsec + table[sort_order[si-1]].size) {
 				printf("\nSanity check failed on %s - partitions overlap.\n"
@@ -1800,7 +1793,7 @@ void regionize(void)
 				exit(1);
 			}
 		}
-		if(sanitycheck && table[i].size > table[0].size) {
+		if(table[i].size > table[0].size) {
 			printf("\nSanity check failed on %s - partition is larger than disk.\n"
 				"Please use expert mode to correct it.\n", curdev->name);
 			exit(1);

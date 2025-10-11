@@ -502,7 +502,9 @@ void initialize(void)
 
 
 	/* Check if data segment crosses a 64K boundary. */
-	if (newaddr + (daddr - caddr) < dma64k) newaddr= dma64k - runsize;
+	if (newaddr + (daddr - caddr) < dma64k)  {
+		newaddr= (dma64k - runsize) & ~0x0000FL;
+	}
 #endif
 
 	/* Set the new caddr for relocate. */
@@ -841,7 +843,7 @@ void get_parameters(void)
 {
 	char params[SECTOR_SIZE + 1];
 	token **acmds;
-	int r, bus;
+	int r, bus, processor;
 	memory *mp;
 	static char bus_type[][4] = {
 		"xt", "at", "mca"
@@ -858,7 +860,9 @@ void get_parameters(void)
 	b_setvar(E_SPECIAL|E_VAR|E_DEV, "ramimagedev", "bootdev");
 	b_setvar(E_SPECIAL|E_VAR, "ramsize", "0");
 #if BIOS
-	b_setvar(E_SPECIAL|E_VAR, "processor", ul2a10(getprocessor()));
+	processor = getprocessor();
+	if(processor == 1586) processor = 686;
+	b_setvar(E_SPECIAL|E_VAR, "processor", ul2a10(processor));
 	b_setvar(E_SPECIAL|E_VAR, "bus", bus_type[get_bus()]);
 	b_setvar(E_SPECIAL|E_VAR, "video", vid_type[get_video()]);
 	b_setvar(E_SPECIAL|E_VAR, "chrome", vid_chrome[get_video() & 1]);
@@ -871,14 +875,6 @@ void get_parameters(void)
 		strcat(params, ul2a(mp->size, 0x10));
 	}
 	b_setvar(E_SPECIAL|E_VAR, "memory", params);
-
-#if 0
-	b_setvar(E_SPECIAL|E_VAR, "c0",
-			DOS ? "dosfile" : get_bus() == 1 ? "at" : "bios");
-#else
-	b_setvar(E_SPECIAL|E_VAR, "label", "AT");
-	b_setvar(E_SPECIAL|E_VAR, "controller", "c0");
-#endif
 
 #if DOS
 	b_setvar(E_SPECIAL|E_VAR, "dosfile-d0", vdisk);

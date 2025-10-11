@@ -14,8 +14,12 @@ case $#:$1 in
 	c0d2 c0d2p0 c0d2p0s0 c0d3 c0d3p0 c0d3p0s0 \
 	c0d4 c0d4p0 c0d4p0s0 c0d5 c0d5p0 c0d5p0s0 \
 	c0d6 c0d6p0 c0d6p0s0 c0d7 c0d7p0 c0d7p0s0 \
-	tty ttyc1 ttyc2 ttyc3 tty00 tty01 tty02 tty03 ttyp0 ttyp1 ttyp2 ttyp3 \
-	eth klog random cmos kbd psm
+	tty ttyc1 ttyc2 ttyc3 tty00 tty01 tty02 tty03 \
+	ttyp0 ttyp1 ttyp2 ttyp3 ttyp4 ttyp5 ttyp6 ttyp7 ttyp8 ttyp9 \
+	ttypa ttypb ttypc ttypd ttype ttypf \
+	ttyq0 ttyq1 ttyq2 ttyq3 ttyq4 ttyq5 ttyq6 ttyq7 ttyq8 ttyq9 \
+	ttyqa ttyqb ttyqc ttyqd ttyqe ttyqf \
+	eth klog random cmos rescue
     ;;
 0:|1:-\?)
     cat >&2 <<EOF
@@ -38,8 +42,10 @@ Where key is one of the following:
   klog                    # Make /dev/klog
   random                  # Make /dev/random, /dev/urandom
   cmos                    # Make /dev/cmos
-  kbd                     # Make /dev/kbd*
-  psm                     # Make /dev/psm*
+  kbd                     # Make /dev/kbd
+  kbdaux                  # Make /dev/kbdaux
+  rescue                  # Make /dev/rescue
+  video                   # Make /dev/video
   std			  # All standard devices
 EOF
     exit 1
@@ -155,9 +161,9 @@ do
 	$e mknod ${n} c $maj `expr $m + 1`
 	$e chmod 660 ${n}n ${n}
 	;;
-    console|lp|tty|log|kbd*|psm*)
+    console|lp|tty|log|kbd|kbdaux|video)
 	# Console, line printer, anonymous tty, diagnostics device,
-	# raw keyboard, ps/2 mouse.
+	# raw keyboard, ps/2 mouse, video.
 	$e mknod console c 4 0
 	$e chmod 600 console
 	$e chgrp tty console
@@ -169,10 +175,13 @@ do
 	$e chmod 200 lp
 	$e mknod log c 4 15
 	$e chmod 222 log
-	$e mknod kbd0 c 4 250
-	$e mknod psm0 c 4 251
-	$e chmod 660 kbd0 psm0
-	$e chgrp operator kbd0 psm0
+	$e mknod kbd c 4 127
+	$e mknod kbdaux c 4 126
+	$e chmod 660 kbd kbdaux
+	$e chgrp operator kbd kbdaux
+	$e mknod video c 4 125
+	$e chmod 600 video
+	$e chgrp operator video
 	;;
     ttyc[1-7])
 	# Virtual consoles.
@@ -223,9 +232,10 @@ do
     audio|mixer)
 	# Audio devices.
 	#
-	$e mknod audio c 13 0
-	$e mknod mixer c 14 0
-	$e chmod 666 audio mixer
+   $e mknod audio c 13 0
+   $e mknod rec c 13 1
+   $e mknod mixer c 13 2
+   $e chmod 666 audio rec mixer
 	;;
     random|urandom)
 	# random data generator.
@@ -237,6 +247,11 @@ do
     	# cmos device (set/get system time).
     	$e mknod cmos c 17 0
 	$e chmod 600 cmos
+	;;
+    rescue)
+    	# rescue device
+    	$e mknod rescue b 9 0
+	$e chmod 644 rescue
 	;;
     klog)
     	# logging device.

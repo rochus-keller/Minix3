@@ -1,4 +1,4 @@
-#define NCALLS		  91	/* number of system calls allowed */
+#define NCALLS		  95	/* number of system calls allowed */
 
 #define EXIT		   1 
 #define FORK		   2 
@@ -39,9 +39,12 @@
 #define DUP		  41 
 #define PIPE		  42 
 #define TIMES		  43
+#define SYMLINK		  45
 #define SETGID		  46
 #define GETGID		  47
 #define SIGNAL		  48
+#define RDLNK		  49
+#define LSTAT		  50
 #define IOCTL		  54
 #define FCNTL		  55
 #define EXEC		  59
@@ -66,7 +69,7 @@
 
 /* MINIX specific calls, e.g., to support system services. */
 #define SVRCTL		  77
-				/* unused */
+#define PROCSTAT          78    /* to PM */
 #define GETSYSINFO	  79	/* to PM or FS */
 #define GETPROCNR         80    /* to PM */
 #define DEVCTL		  81    /* to FS */
@@ -79,3 +82,7 @@
 #define GETPRIORITY       88	/* to PM */
 #define SETPRIORITY       89	/* to PM */
 #define GETTIMEOFDAY      90	/* to PM */
+#define SETEUID		  91	/* to PM */
+#define SETEGID		  92	/* to PM */
+#define TRUNCATE	  93	/* to FS */
+#define FTRUNCATE	  94	/* to FS */

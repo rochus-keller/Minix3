@@ -46,6 +46,7 @@
 #include <net/hton.h>
 #include <net/gen/ether.h>
 #include <net/gen/eth_io.h>
+#include <ibm/pci.h>
 
 #include <timers.h>
 
@@ -58,7 +59,6 @@
 #define vm_1phys2bus(p)		(p)
 
 #include "assert.h"
-#include "../libpci/pci.h"
 #include "fxp.h"
 #include "mii.h"
 
@@ -201,6 +201,7 @@ static fxp_t fxp_table[FXP_PORT_NR];
 static int fxp_tasknr= ANY;
 static u16_t eth_ign_proto;
 static tmra_ut fxp_watchdog;
+static char *progname;
 
 extern int errno;
 
@@ -231,6 +232,7 @@ _PROTOTYPE( static void fxp_ru_ptr_cmd, (fxp_t *fp, int cmd,
 				phys_bytes bus_addr, int check_idle)	);
 _PROTOTYPE( static void fxp_restart_ru, (fxp_t *fp)			);
 _PROTOTYPE( static void fxp_getstat, (message *mp)			);
+_PROTOTYPE( static void fxp_getname, (message *mp)			);
 _PROTOTYPE( static int fxp_handler, (fxp_t *fp)				);
 _PROTOTYPE( static void fxp_check_ints, (fxp_t *fp)			);
 _PROTOTYPE( static void fxp_watchdog_f, (timer_t *tp)			);
@@ -255,15 +257,19 @@ _PROTOTYPE( static void do_outl, (port_t port, u32_t v)			);
 /*===========================================================================*
  *				main					     *
  *===========================================================================*/
-int main(void)
+int main(int argc, char *argv[])
 {
 	message m;
-	int i, r;
+	int i, r, tasknr;
 	fxp_t *fp;
 	long v;
 
 	if ((fxp_tasknr= getprocnr())<0)
 		panic("FXP", "couldn't get proc nr", errno);
+
+	if (argc < 1)
+		panic("FXP", "A head which at this time has no name", NO_NUM);
+	(progname=strrchr(argv[0],'/')) ? progname++ : (progname=argv[0]);
 
 	v= 0;
 #if 0
@@ -277,6 +283,11 @@ int main(void)
 		fxp_init_buf(fp);
 #endif
 
+	/* Try to notify inet that we are present (again) */
+	r = _pm_findproc("inet", &tasknr);
+	if (r == OK)
+		notify(tasknr);
+
 	while (TRUE)
 	{
 		if ((r= receive(ANY, &m)) != OK)
@@ -284,6 +295,7 @@ int main(void)
 
 		switch (m.m_type)
 		{
+		case DEV_PING:  notify(m.m_source);		continue;
 		case DL_WRITEV:	fxp_writev(&m, FALSE, TRUE);	break;
 		case DL_WRITE:	fxp_writev(&m, FALSE, FALSE);	break;
 #if 0
@@ -292,6 +304,7 @@ int main(void)
 		case DL_READV:	fxp_readv(&m, FALSE, TRUE);	break;
 		case DL_INIT:	fxp_init(&m);			break;
 		case DL_GETSTAT: fxp_getstat(&m);		break;
+		case DL_GETNAME: fxp_getname(&m); 		break;
 		case HARD_INT:
 			for (i= 0, fp= &fxp_table[0]; i<FXP_PORT_NR; i++, fp++)
 			{
@@ -315,6 +328,7 @@ int main(void)
 			if (sigismember(&sigset, SIGKSTOP)) fxp_stop();
 			break;
 		}
+		case PROC_EVENT: break;
 		case SYN_ALARM:	fxp_expire_timers();		break;
 		default:
 			panic("FXP"," illegal message", m.m_type);
@@ -538,7 +552,7 @@ fxp_t *fp;
 	pci_reserve(devind);
 
 	bar= pci_attr_r32(devind, PCI_BAR_2) & 0xffffffe0;
-	if ((bar & 0x3ff) >= 0x100-32 || bar < 0x400)
+	if (bar < 0x400)
 	{
 		panic("FXP","fxp_probe: base address is not properly configured",
 			NO_NUM);
@@ -572,12 +586,24 @@ fxp_t *fp;
 	case FXP_REV_82559C:	str= "82559C";			/* 0x08 */
 				fp->fxp_type= FT_82559;
 				break;
-	case FXP_REV_82559ERA:	str= "82559ER-A"; break;	/* 0x09 */
-	case FXP_REV_82550_1:	str= "82550(1)"; break;		/* 0x0C */
-	case FXP_REV_82550_2:	str= "82550(2)"; break;		/* 0x0D */
-	case FXP_REV_82550_3:	str= "82550(3)"; break;		/* 0x0E */
-	case FXP_REV_82551_1:	str= "82551(1)"; break;		/* 0x0F */
-	case FXP_REV_82551_2:	str= "82551(2)"; break;		/* 0x10 */
+	case FXP_REV_82559ERA:	str= "82559ER-A"; 		/* 0x09 */
+				fp->fxp_type= FT_82559;
+				break;
+	case FXP_REV_82550_1:	str= "82550(1)"; 		/* 0x0C */
+				fp->fxp_type= FT_82559;
+				break;
+	case FXP_REV_82550_2:	str= "82550(2)"; 		/* 0x0D */
+				fp->fxp_type= FT_82559;
+				break;
+	case FXP_REV_82550_3:	str= "82550(3)"; 		/* 0x0E */
+				fp->fxp_type= FT_82559;
+				break;
+	case FXP_REV_82551_1:	str= "82551(1)"; 		/* 0x0F */
+				fp->fxp_type= FT_82559;
+				break;
+	case FXP_REV_82551_2:	str= "82551(2)"; 		/* 0x10 */
+				fp->fxp_type= FT_82559;
+				break;
 	}
 
 #if VERBOSE
@@ -1571,6 +1597,23 @@ message *mp;
 	reply(fp, OK, FALSE);
 }
 
+
+/*===========================================================================*
+ *				fxp_getname				     *
+ *===========================================================================*/
+static void fxp_getname(mp)
+message *mp;
+{
+	int r;
+
+	strncpy(mp->DL_NAME, progname, sizeof(mp->DL_NAME));
+	mp->DL_NAME[sizeof(mp->DL_NAME)-1]= '\0';
+	mp->m_type= DL_NAME_REPLY;
+	r= send(mp->m_source, mp);
+	if (r != OK)
+		panic("FXP", "fxp_getname: send failed", r);
+}
+
 /*===========================================================================*
  *				fxp_handler				     *
  *===========================================================================*/
@@ -2417,7 +2460,7 @@ static void micro_delay(unsigned long usecs)
 static u8_t do_inb(port_t port)
 {
 	int r;
-	u8_t value;
+	u32_t value;
 
 	r= sys_inb(port, &value);
 	if (r != OK)

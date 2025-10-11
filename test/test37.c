@@ -19,7 +19,7 @@
 
 int iteration, cumsig, subtest, errct = 0, sig1, sig2;
 
-int sigarray[SIGS] = {SIGHUP, SIGILL, SIGTRAP, SIGABRT, SIGIOT, SIGUNUSED,
+int sigarray[SIGS] = {SIGHUP, SIGILL, SIGTRAP, SIGABRT, SIGIOT, 
 	      SIGFPE, SIGUSR1, SIGSEGV, SIGUSR2, SIGPIPE, SIGALRM,
 	      SIGTERM};
 
@@ -123,7 +123,6 @@ void test37a()
   if (sigismember(&s, SIGTRAP) != 0) e(6);
   if (sigismember(&s, SIGABRT) != 0) e(7);
   if (sigismember(&s, SIGIOT) != 0) e(8);
-  if (sigismember(&s, SIGUNUSED) != 0) e(9);
   if (sigismember(&s, SIGFPE) != 0) e(10);
   if (sigismember(&s, SIGKILL) != 0) e(11);
   if (sigismember(&s, SIGUSR1) != 0) e(12);
@@ -144,7 +143,6 @@ void test37a()
   if (sigismember(&s, SIGTRAP) != 1) e(26);
   if (sigismember(&s, SIGABRT) != 1) e(27);
   if (sigismember(&s, SIGIOT) != 1) e(28);
-  if (sigismember(&s, SIGUNUSED) != 1) e(29);
   if (sigismember(&s, SIGFPE) != 1) e(30);
   if (sigismember(&s, SIGKILL) != 1) e(31);
   if (sigismember(&s, SIGUSR1) != 1) e(32);
@@ -172,7 +170,6 @@ void test37a()
   /* The others should be turned off. */
   if (sigismember(&s, SIGABRT) != 0) e(50);
   if (sigismember(&s, SIGIOT) != 0) e(51);
-  if (sigismember(&s, SIGUNUSED) != 0) e(52);
   if (sigismember(&s, SIGFPE) != 0) e(53);
   if (sigismember(&s, SIGKILL) != 0) e(54);
   if (sigismember(&s, SIGUSR1) != 0) e(55);
@@ -196,7 +193,6 @@ void test37a()
   if (sigismember(&s, SIGTRAP) != 0) e(71);
   if (sigismember(&s, SIGABRT) != 0) e(72);
   if (sigismember(&s, SIGIOT) != 0) e(73);
-  if (sigismember(&s, SIGUNUSED) != 0) e(74);
   if (sigismember(&s, SIGFPE) != 0) e(75);
   if (sigismember(&s, SIGKILL) != 0) e(76);
   if (sigismember(&s, SIGUSR1) != 0) e(77);
@@ -224,7 +220,7 @@ void test37b()
 /* Test sigprocmask and sigpending. */
   int i;
   pid_t p;
-  sigset_t s, s1, s_empty, s_full, s_ill, s_ill_pip, s_nokill;
+  sigset_t s, s1, s_empty, s_full, s_ill, s_ill_pip, s_nokill, s_nokill_stop;
   struct sigaction sa, osa;
 
   subtest = 2;
@@ -240,6 +236,8 @@ void test37b()
   if (sigfillset(&s_full) != 0) e(7);
   s_nokill = s_full;
   if (sigdelset(&s_nokill, SIGKILL) != 0) e(8);
+  s_nokill_stop = s_nokill;
+  if (sigdelset(&s_nokill_stop, SIGSTOP) != 0) e(8);
 #ifndef _MINIX /* XXX - should unsupported signals be <= _NSIG? */
   if (SIGSTOP > _NSIG) e(666);
   if (SIGSTOP <= _NSIG && sigdelset(&s_nokill, SIGSTOP) != 0) e(888);
@@ -295,9 +293,11 @@ void test37b()
   /* Test sigprocmask(SIG_SETMASK, ...). */
   if (sigprocmask(SIG_SETMASK, &s_full, &s1) != 0) e(18);    /* block all */
   if (sigemptyset(&s1) != 0) e(19);
+  errno = 0;
   if (sigprocmask(SIG_SETMASK, &s_empty, &s1) != 0) e(20);   /* block none */
-  if (s1 != s_nokill) e(21);
+  if (s1 != s_nokill_stop) e(21);
   if (sigprocmask(SIG_SETMASK, &s_ill, &s1) != 0) e(22);     /* block SIGILL */
+  errno = 0;
   if (s1 != s_empty) e(23);
   if (sigprocmask(SIG_SETMASK, &s_ill_pip, &s1) != 0) e(24); /* SIGILL+PIP */
   if (s1 != s_ill) e(25);
@@ -306,17 +306,17 @@ void test37b()
 
   /* Test sigprocmask(SIG_UNBLOCK, ...) */
   if (sigprocmask(SIG_UNBLOCK, &s_ill, &s1) != 0) e(28);
-  if (s1 != s_nokill) e(29);
+  if (s1 != s_nokill_stop) e(29);
   if (sigprocmask(SIG_UNBLOCK, &s_ill_pip, &s1) != 0) e(30);
-  s = s_nokill;
+  s = s_nokill_stop;
   if (sigdelset(&s, SIGILL) != 0) e(31);
   if (s != s1) e(32);
   if (sigprocmask(SIG_UNBLOCK, &s_empty, &s1) != 0) e(33);
-  s = s_nokill;
+  s = s_nokill_stop;
   if (sigdelset(&s, SIGILL) != 0) e(34);
   if (sigdelset(&s, SIGPIPE) != 0) e(35);
   if (s != s1) e(36);
-  s1 = s_nokill;
+  s1 = s_nokill_stop;
   if (sigprocmask(SIG_SETMASK, &s_empty, &s1) != 0) e(37);
   if (s != s1) e(38);
 
@@ -333,13 +333,13 @@ void test37b()
   if (sigprocmask(20000, &s_full, &s1) != -1) e(45);
   if (errno != EINVAL) e(46);
   if (sigprocmask(SIG_SETMASK, &s_full, &s1) != 0) e(47);
-  if (s1 != s_nokill) e(48);
+  if (s1 != s_nokill_stop) e(48);
 
   /* If second arg is 0, nothing is set. */
   if (sigprocmask(SIG_SETMASK, (sigset_t *) NULL, &s1) != 0) e(49);
-  if (s1 != s_nokill) e(50);
+  if (s1 != s_nokill_stop) e(50);
   if (sigprocmask(SIG_SETMASK, &s_ill_pip, &s1) != 0) e(51);
-  if (s1 != s_nokill) e(52);
+  if (s1 != s_nokill_stop) e(52);
   if (sigprocmask(SIG_SETMASK, (sigset_t *) NULL, &s1) != 0) e(53);
   if (s1 != s_ill_pip) e(54);
   if (sigprocmask(SIG_BLOCK, (sigset_t *) NULL, &s1) != 0) e(55);

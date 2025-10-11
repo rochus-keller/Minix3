@@ -5,9 +5,12 @@
  *          	    		Magic process numbers			     *
  *===========================================================================*/
 
+/* These may not be any valid endpoint (see <minix/endpoint.h>). */
 #define ANY		0x7ace	/* used to indicate 'any process' */
 #define NONE 		0x6ace  /* used to indicate 'no process at all' */
 #define SELF		0x8ace 	/* used to indicate 'own process' */
+#define _MAX_MAGIC_PROC (SELF)	/* used by <minix/endpoint.h> 
+				   to determine generation size */
 
 /*===========================================================================*
  *            	Process numbers of processes in the system image	     *
@@ -37,7 +40,7 @@
 #define MEM_PROC_NR 	  3  	/* memory driver (RAM disk, null, etc.) */
 #define LOG_PROC_NR	  4	/* log device driver */
 #define TTY_PROC_NR	  5	/* terminal (TTY) driver */
-#define DRVR_PROC_NR      6	/* device driver for boot medium */
+#define DS_PROC_NR	  6    	/* data store server */
 #define INIT_PROC_NR	  7    	/* init -- goes multiuser */
 
 /* Number of processes contained in the system image. */
@@ -55,11 +58,13 @@
  */
 #define NOTIFY_MESSAGE		  0x1000
 #define NOTIFY_FROM(p_nr)	 (NOTIFY_MESSAGE | ((p_nr) + NR_TASKS)) 
+#  define PROC_EVENT	NOTIFY_FROM(PM_PROC_NR) /* process status change */
 #  define SYN_ALARM	NOTIFY_FROM(CLOCK) 	/* synchronous alarm */
 #  define SYS_SIG	NOTIFY_FROM(SYSTEM) 	/* system signal */
 #  define HARD_INT	NOTIFY_FROM(HARDWARE) 	/* hardware interrupt */
 #  define NEW_KSIG	NOTIFY_FROM(HARDWARE)  	/* new kernel signal */
 #  define FKEY_PRESSED	NOTIFY_FROM(TTY_PROC_NR)/* function key press */
+#  define DEV_PING	NOTIFY_FROM(RS_PROC_NR) /* driver liveness ping */
 
 /* Shorthands for message parameters passed with notifications. */
 #define NOTIFY_SOURCE		m_source
@@ -69,6 +74,57 @@
 #define NOTIFY_FLAGS		m2_i1
 
 /*===========================================================================*
+ *                Messages for BUS controller drivers 			     *
+ *===========================================================================*/
+#define BUSC_RQ_BASE	0x300	/* base for request types */
+#define BUSC_RS_BASE	0x380	/* base for response types */
+
+#define BUSC_PCI_INIT		(BUSC_RQ_BASE + 0)	/* First message to
+							 * PCI driver
+							 */
+#define BUSC_PCI_FIRST_DEV	(BUSC_RQ_BASE + 1)	/* Get index (and
+							 * vid/did) of the
+							 * first PCI device
+							 */
+#define BUSC_PCI_NEXT_DEV	(BUSC_RQ_BASE + 2)	/* Get index (and
+							 * vid/did) of the
+							 * next PCI device
+							 */
+#define BUSC_PCI_FIND_DEV	(BUSC_RQ_BASE + 3)	/* Get index of a
+							 * PCI device based on
+							 * bus/dev/function
+							 */
+#define BUSC_PCI_IDS		(BUSC_RQ_BASE + 4)	/* Get vid/did from an
+							 * index
+							 */
+#define BUSC_PCI_DEV_NAME	(BUSC_RQ_BASE + 5)	/* Get the name of a
+							 * PCI device
+							 */
+#define BUSC_PCI_SLOT_NAME	(BUSC_RQ_BASE + 6)	/* Get the name of a
+							 * PCI slot
+							 */
+#define BUSC_PCI_RESERVE	(BUSC_RQ_BASE + 7)	/* Reserve a PCI dev */
+#define BUSC_PCI_ATTR_R8	(BUSC_RQ_BASE + 8)	/* Read 8-bit
+							 * attribute value
+							 */
+#define BUSC_PCI_ATTR_R16	(BUSC_RQ_BASE + 9)	/* Read 16-bit
+							 * attribute value
+							 */
+#define BUSC_PCI_ATTR_R32	(BUSC_RQ_BASE + 10)	/* Read 32-bit
+							 * attribute value
+							 */
+#define BUSC_PCI_ATTR_W8	(BUSC_RQ_BASE + 11)	/* Write 8-bit
+							 * attribute value
+							 */
+#define BUSC_PCI_ATTR_W16	(BUSC_RQ_BASE + 12)	/* Write 16-bit
+							 * attribute value
+							 */
+#define BUSC_PCI_ATTR_W32	(BUSC_RQ_BASE + 13)	/* Write 32-bit
+							 * attribute value
+							 */
+#define BUSC_PCI_RESCAN		(BUSC_RQ_BASE + 14)	/* Rescan bus */
+
+/*===========================================================================*
  *                Messages for BLOCK and CHARACTER device drivers	     *
  *===========================================================================*/
 
@@ -76,7 +132,7 @@
 #define DEV_RQ_BASE   0x400	/* base for device request types */
 #define DEV_RS_BASE   0x500	/* base for device response types */
 
-#define CANCEL       	(DEV_RQ_BASE +  0) /* general req to force a task to cancel */
+#define CANCEL       	(DEV_RQ_BASE +  0) /* force a task to cancel */
 #define DEV_READ	(DEV_RQ_BASE +  3) /* read from minor device */
 #define DEV_WRITE   	(DEV_RQ_BASE +  4) /* write to minor device */
 #define DEV_IOCTL    	(DEV_RQ_BASE +  5) /* I/O control code */
@@ -97,7 +153,7 @@
 
 /* Field names for messages to block and character device drivers. */
 #define DEVICE    	m2_i1	/* major-minor device */
-#define PROC_NR		m2_i2	/* which (proc) wants I/O? */
+#define IO_ENDPT	m2_i2	/* which (proc/endpoint) wants I/O? */
 #define COUNT   	m2_i3	/* how many bytes to transfer */
 #define REQUEST 	m2_i3	/* ioctl request code */
 #define POSITION	m2_l1	/* file offset */
@@ -109,7 +165,7 @@
 #define DEV_SEL_WATCH	m2_i3	/* request notify if no operations are ready */
 
 /* Field names used in reply messages from tasks. */
-#define REP_PROC_NR	m2_i1	/* # of proc on whose behalf I/O was done */
+#define REP_ENDPT	m2_i1	/* # of proc on whose behalf I/O was done */
 #define REP_STATUS	m2_i2	/* bytes transferred or error number */
 #  define SUSPEND 	 -998 	/* status to suspend caller, reply later */
 
@@ -148,19 +204,22 @@
 #define DL_INIT		(DL_RQ_BASE + 7)
 #define DL_STOP		(DL_RQ_BASE + 8)
 #define DL_GETSTAT	(DL_RQ_BASE + 9)
+#define DL_GETNAME	(DL_RQ_BASE +10)
 
 /* Message type for data link layer replies. */
 #define DL_INIT_REPLY	(DL_RS_BASE + 20)
 #define DL_TASK_REPLY	(DL_RS_BASE + 21)
+#define DL_NAME_REPLY	(DL_RS_BASE + 22)
 
 /* Field names for data link layer messages. */
 #define DL_PORT		m2_i1
-#define DL_PROC		m2_i2
+#define DL_PROC		m2_i2	/* endpoint */
 #define DL_COUNT	m2_i3
 #define DL_MODE		m2_l1
 #define DL_CLCK		m2_l2
 #define DL_ADDR		m2_p1
 #define DL_STAT		m2_l1
+#define DL_NAME		m3_ca1
 
 /* Bits in 'DL_STAT' field of DL replies. */
 #  define DL_PACK_SEND		0x01
@@ -216,8 +275,18 @@
 #  define SYS_TIMES	 (KERNEL_CALL + 25)	/* sys_times() */
 #  define SYS_GETINFO    (KERNEL_CALL + 26) 	/* sys_getinfo() */
 #  define SYS_ABORT      (KERNEL_CALL + 27)	/* sys_abort() */
+#  define SYS_IOPENABLE  (KERNEL_CALL + 28)	/* sys_enable_iop() */
+#  define SYS_VM_SETBUF  (KERNEL_CALL + 29)	/* sys_vm_setbuf() */
+#  define SYS_VM_MAP  	 (KERNEL_CALL + 30)	/* sys_vm_map() */
 
-#define NR_SYS_CALLS	28	/* number of system calls */ 
+#define NR_SYS_CALLS	31	/* number of system calls */ 
+
+/* Subfunctions for SYS_PRIVCTL */
+#define SYS_PRIV_INIT		1	/* Initialize a privilege structure */
+#define SYS_PRIV_ADD_IO		2	/* Add I/O range (struct io_range) */
+#define SYS_PRIV_ADD_MEM	3	/* Add memory range (struct mem_range)
+					 */
+#define SYS_PRIV_ADD_IRQ	4	/* Add IRQ */
 
 /* Field names for SYS_MEMSET, SYS_SEGCTL. */
 #define MEM_PTR		m2_p1	/* base */
@@ -240,13 +309,13 @@
 #define DIO_VALUE	m2_l2	/* single I/O value */
 #define DIO_VEC_ADDR	m2_p1   /* address of buffer or (p,v)-pairs */
 #define DIO_VEC_SIZE	m2_l2   /* number of elements in vector */
-#define DIO_VEC_PROC	m2_i2   /* number of process where vector is */
+#define DIO_VEC_ENDPT	m2_i2   /* number of process where vector is */
 
 /* Field names for SYS_SIGNARLM, SYS_FLAGARLM, SYS_SYNCALRM. */
 #define ALRM_EXP_TIME   m2_l1	/* expire time for the alarm call */
 #define ALRM_ABS_TIME   m2_i2	/* set to 1 to use absolute alarm time */
 #define ALRM_TIME_LEFT  m2_l1	/* how many ticks were remaining */
-#define ALRM_PROC_NR    m2_i1	/* which process wants the alarm? */
+#define ALRM_ENDPT      m2_i1	/* which process wants the alarm? */
 #define ALRM_FLAG_PTR	m2_p1   /* virtual address of timeout flag */ 	
 
 /* Field names for SYS_IRQCTL. */
@@ -261,7 +330,7 @@
 #  define IRQ_BYTE      0x100	/* byte values */      
 #  define IRQ_WORD      0x200	/* word values */
 #  define IRQ_LONG      0x400	/* long values */
-#define IRQ_PROC_NR	m5_i2   /* process number, SELF, NONE */
+#define IRQ_ENDPT	m5_i2   /* endpoint number, SELF, NONE */
 #define IRQ_HOOK_ID	m5_l3   /* id of irq hook at kernel */
 
 /* Field names for SYS_SEGCTL. */
@@ -282,16 +351,16 @@
 
 /* Field names for SYS_ABORT. */
 #define ABRT_HOW	m1_i1	/* RBT_REBOOT, RBT_HALT, etc. */
-#define ABRT_MON_PROC   m1_i2	/* process where monitor params are */
+#define ABRT_MON_ENDPT  m1_i2	/* process where monitor params are */
 #define ABRT_MON_LEN	m1_i3	/* length of monitor params */
 #define ABRT_MON_ADDR   m1_p1	/* virtual address of monitor params */
 
 /* Field names for _UMAP, _VIRCOPY, _PHYSCOPY. */
 #define CP_SRC_SPACE 	m5_c1	/* T or D space (stack is also D) */
-#define CP_SRC_PROC_NR	m5_i1	/* process to copy from */
+#define CP_SRC_ENDPT	m5_i1	/* process to copy from */
 #define CP_SRC_ADDR	m5_l1	/* address where data come from */
 #define CP_DST_SPACE	m5_c2	/* T or D space (stack is also D) */
-#define CP_DST_PROC_NR	m5_i2	/* process to copy to */
+#define CP_DST_ENDPT	m5_i2	/* process to copy to */
 #define CP_DST_ADDR	m5_l2	/* address where data go to */
 #define CP_NR_BYTES	m5_l3	/* number of bytes to copy */
 
@@ -317,22 +386,31 @@
 #   define GET_MACHINE 	  12	/* get machine information */
 #   define GET_LOCKTIMING 13	/* get lock()/unlock() latency timing */
 #   define GET_BIOSBUFFER 14	/* get a buffer for BIOS calls */
-#define I_PROC_NR      m7_i4	/* calling process */
+#   define GET_LOADINFO   15	/* get load average information */
+#define I_ENDPT      m7_i4	/* calling process */
 #define I_VAL_PTR      m7_p1	/* virtual address at caller */ 
 #define I_VAL_LEN      m7_i1	/* max length of value */
 #define I_VAL_PTR2     m7_p2	/* second virtual address */ 
-#define I_VAL_LEN2     m7_i2	/* second length, or proc nr */
+#define I_VAL_LEN2_E   m7_i2	/* second length, or proc nr */
+#   define GET_IRQACTIDS  16	/* get the IRQ masks */
 
 /* Field names for SYS_TIMES. */
-#define T_PROC_NR      m4_l1	/* process to request time info for */
+#define T_ENDPT      m4_l1	/* process to request time info for */
 #define T_USER_TIME    m4_l1	/* user time consumed by process */
 #define T_SYSTEM_TIME  m4_l2	/* system time consumed by process */
 #define T_CHILD_UTIME  m4_l3	/* user time consumed by process' children */
 #define T_CHILD_STIME  m4_l4	/* sys time consumed by process' children */
 #define T_BOOT_TICKS   m4_l5	/* number of clock ticks since boot time */
 
-/* Field names for SYS_TRACE, SYS_SVRCTL. */
-#define CTL_PROC_NR    m2_i1	/* process number of the caller */
+/* vm_map */
+#define VM_MAP_ENDPT		m4_l1
+#define VM_MAP_MAPUNMAP		m4_l2
+#define VM_MAP_BASE		m4_l3
+#define VM_MAP_SIZE		m4_l4
+#define VM_MAP_ADDR		m4_l5
+
+/* Field names for SYS_TRACE, SYS_PRIVCTL. */
+#define CTL_ENDPT    m2_i1	/* process number of the caller */
 #define CTL_REQUEST    m2_i2	/* server control request */
 #define CTL_MM_PRIV    m2_i3	/* privilege as seen by PM */
 #define CTL_ARG_PTR    m2_p1	/* pointer to argument */
@@ -346,16 +424,16 @@
 #define S_SENDSIG   	   2	/* POSIX style signal handling */
 #define S_SIGRETURN	   3 	/* return from POSIX handling */
 #define S_KILL		   4 	/* servers kills process with signal */
-#define SIG_PROC       m2_i1	/* process number for inform */
+#define SIG_ENDPT       m2_i1	/* process number for inform */
 #define SIG_NUMBER     m2_i2	/* signal number to send */
 #define SIG_FLAGS      m2_i3	/* signal flags field */
 #define SIG_MAP        m2_l1	/* used by kernel to pass signal bit map */
 #define SIG_CTXT_PTR   m2_p1	/* pointer to info to restore signal context */
 
 /* Field names for SYS_FORK, _EXEC, _EXIT, _NEWMAP. */
-#define PR_PROC_NR     m1_i1	/* indicates a (child) process */
+#define PR_ENDPT       m1_i1	/* indicates a process */
 #define PR_PRIORITY    m1_i2	/* process priority */
-#define PR_PPROC_NR    m1_i2	/* indicates a (parent) process */
+#define PR_SLOT        m1_i2	/* indicates a process slot */
 #define PR_PID	       m1_i3	/* process id at process manager */
 #define PR_STACK_PTR   m1_p1	/* used for stack ptr in sys_exec, sys_getsp */
 #define PR_TRACING     m1_i3	/* flag to indicate tracing is on/ off */
@@ -374,29 +452,44 @@
 #define SEL_TIMEOUT    m8_p4
 
 /*===========================================================================*
- *                Messages for system management server 		     *
+ *                Messages for the Reincarnation Server 		     *
  *===========================================================================*/
 
-#define SRV_RQ_BASE		0x700
+#define RS_RQ_BASE		0x700
 
-#define SRV_UP		(SRV_RQ_BASE + 0)	/* start system service */
-#define SRV_DOWN	(SRV_RQ_BASE + 1)	/* stop system service */
-#define SRV_STATUS	(SRV_RQ_BASE + 2)	/* get service status */
+#define RS_UP		(RS_RQ_BASE + 0)	/* start system service */
+#define RS_DOWN		(RS_RQ_BASE + 1)	/* stop system service */
+#define RS_REFRESH	(RS_RQ_BASE + 2)	/* restart system service */
+#define RS_RESCUE	(RS_RQ_BASE + 3)	/* set rescue directory */
+#define RS_SHUTDOWN	(RS_RQ_BASE + 4)	/* alert about shutdown */
 
-#  define SRV_PATH_ADDR		m1_p1		/* path of binary */
-#  define SRV_PATH_LEN		m1_i1		/* length of binary */
-#  define SRV_ARGS_ADDR         m1_p2		/* arguments to be passed */
-#  define SRV_ARGS_LEN          m1_i2		/* length of arguments */
-#  define SRV_DEV_MAJOR         m1_i3           /* major device number */
-#  define SRV_PRIV_ADDR         m1_p3		/* privileges string */
-#  define SRV_PRIV_LEN          m1_i3		/* length of privileges */
+#  define RS_CMD_ADDR		m1_p1		/* command string */
+#  define RS_CMD_LEN		m1_i1		/* length of command */
+#  define RS_PID		m1_i1		/* pid of system service */
+#  define RS_PERIOD 	        m1_i2		/* heartbeat period */
+#  define RS_DEV_MAJOR          m1_i3           /* major device number */
+
+/*===========================================================================*
+ *                Messages for the Data Store Server			     *
+ *===========================================================================*/
+
+#define DS_RQ_BASE		0x800
+
+#define DS_PUBLISH	(DS_RQ_BASE + 0)	/* publish information */
+#define DS_RETRIEVE	(DS_RQ_BASE + 1)	/* retrieve information */
+#define DS_SUBSCRIBE	(DS_RQ_BASE + 2)	/* subscribe to information */
+
+#  define DS_KEY		m2_i1		/* key for the information */
+#  define DS_FLAGS		m2_i2		/* flags provided by caller */
+#  define DS_AUTH		m2_p1		/* authorization of caller */
+#  define DS_VAL_L1		m2_l1		/* first long data value */
+#  define DS_VAL_L2		m2_l2		/* second long data value */
 
 /*===========================================================================*
  *                Miscellaneous messages used by TTY			     *
  *===========================================================================*/
 
 /* Miscellaneous request types and field names, e.g. used by IS server. */
-#define PANIC_DUMPS  		97  	/* debug dumps at the TTY on RBT_PANIC */
 #define FKEY_CONTROL 		98  	/* control a function key at the TTY */
 #  define FKEY_REQUEST	     m2_i1	/* request to perform at TTY */
 #  define    FKEY_MAP		10	/* observe function key */
@@ -407,6 +500,9 @@
 #define DIAGNOSTICS 	100 	/* output a string without FS in between */
 #  define DIAG_PRINT_BUF      m1_p1
 #  define DIAG_BUF_COUNT      m1_i1
-#  define DIAG_PROC_NR        m1_i2
+#  define DIAG_ENDPT          m1_i2
+#define GET_KMESS	101	/* get kmess from TTY */
+#  define GETKM_PTR	      m1_p1
+
 
 #endif /* _MINIX_COM_H */ 

@@ -45,7 +45,7 @@ Num Sort   Type
  3  p3   00 None         0    0   0     0    0  -1         0         0         0
 
  */
-#define MAXSIZE		99999999L	/* Will 100 G be enough this year? */
+#define MAXSIZE		999999999L	/* Will 1T be enough this year? */
 #define SECTOR_SIZE	512
 #define DEV_FD0		0x200		/* Device number of /dev/fd0 */
 #define DEV_C0D0	0x300		/* Device number of /dev/c0d0 */
@@ -1622,7 +1622,7 @@ ssize_t boot_readwrite(int rw)
 		if (ioctl(device, DIOCGETP, &geom0) < 0) return -1;
 		geom_seek.base = add64(geom0.base, off64);
 		geom_seek.size = cvu64(cmp64(add64u(off64, SECTOR_SIZE),
-			geom0.size) <= 0 ? STATIC_BLOCK_SIZE : 0);
+			geom0.size) <= 0 ? _STATIC_BLOCK_SIZE : 0);
 		sync();
 		if (ioctl(device, DIOCSETP, &geom_seek) < 0) return -1;
 		if (lseek(device, (off_t) 0, SEEK_SET) == -1) return -1;

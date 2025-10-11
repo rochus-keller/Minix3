@@ -4,25 +4,17 @@ u=/usr
 CC=	exec cc
 CFLAGS=	-O -D_MINIX -D_POSIX_SOURCE
 MDEC=	/usr/mdec
-MAKE=	exec make -$(MAKEFLAGS)
 
 # Specify the programs that are part of the system image.
-# Multiple boot medium drivers can be included in the image, 
-# but only one is actually be loaded. The driver to load is
-# determined by the 'label=...' boot monitor parameter. 
 PROGRAMS=	../kernel/kernel \
 	../servers/pm/pm \
 	../servers/fs/fs \
 	../servers/rs/rs \
+	../servers/ds/ds \
 	../drivers/tty/tty \
 	../drivers/memory/memory \
 	../drivers/log/log \
-	AT:../drivers/at_wini/at_wini \
-	BIOS:../drivers/bios_wini/bios_wini \
-	FLOPPY:../drivers/floppy/floppy \
-	../servers/init/init \
-#	bootdev.img
-
+	../servers/init/init
 
 usage:	
 	@echo " " >&2
@@ -80,6 +72,8 @@ services: includes
 	cd ../drivers && $(MAKE) install
 
 libraries: includes
+	cd ../lib && $(MAKE) clean
+	cd ../lib && $(MAKE) all
 	cd ../lib && $(MAKE) install
 
 
@@ -95,7 +89,7 @@ fdboot:	image
 	exec su root mkboot $@
 	@sync
 
-install: services hdboot
+install: includes services hdboot
 
 # clean up compile results
 clean:

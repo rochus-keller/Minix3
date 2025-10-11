@@ -17,7 +17,7 @@ CFLAGS = -I$i
 LDFLAGS = -i
 LIBS = -lsys -lsysutil 
 
-OBJ = is.o dmp.o dmp_kernel.o dmp_pm.o dmp_fs.o 
+OBJ = main.o dmp.o dmp_kernel.o dmp_pm.o dmp_fs.o dmp_rs.o dmp_ds.o 
 
 # build local binary
 all build:	$(SERVER)
@@ -26,10 +26,8 @@ $(SERVER):	$(OBJ)
 #	install -S 256w $@
 
 # install with other servers
-install:	/sbin/$(SERVER)
-/sbin/$(SERVER):	$(SERVER)
-	install -o root -c $? $@
-#	install -o root -cs $? $@
+install:	$(SERVER)
+	install -o root -c $? /sbin/$(SERVER) 
 
 # clean up local files
 clean:

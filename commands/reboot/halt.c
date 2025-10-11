@@ -27,6 +27,7 @@ void usage _ARGS(( void ));
 int main _ARGS(( int argc, char *argv[] ));
 
 char *prog;
+char *reboot_code = "delay; boot";
 
 void
 usage()
@@ -59,18 +60,10 @@ char **argv;
     if (*opt == '-' && opt[1] == 0) break;	/* -- */
 
     while (*opt != 0) switch (*opt++) {
-      case 'h':
-	flag = RBT_HALT;
-	break;
-      case 'r':
-	flag = RBT_REBOOT;
-	break;
-      case 'R':
-	flag = RBT_RESET;
-	break;
-      case 'f':
-	fast = 1;
-	break;
+      case 'h': flag = RBT_HALT; 	break;
+      case 'r': flag = RBT_REBOOT; 	break;
+      case 'R': flag = RBT_RESET; 	break;
+      case 'f': fast = 1; break;
       case 'x':
 	flag = RBT_MONITOR;
 	if (*opt == 0) {
@@ -92,25 +85,22 @@ char **argv;
     exit(1);
   }
 
+  if (flag == RBT_REBOOT) {
+	flag = RBT_MONITOR;		/* set monitor code for reboot */
+	monitor_code = reboot_code;
+  }
+
   if (stat("/usr/bin", &dummy) < 0) {
     /* It seems that /usr isn't present, let's assume "-f." */
     fast = 1;
   }
 
-  write_log();
+  signal(SIGHUP, SIG_IGN);
+  signal(SIGTERM, SIG_IGN);
 
-  if (fast) {
-    /* But not too fast... */
-    signal(SIGTERM, SIG_IGN);
-    kill(1, SIGTERM);
-    printf("Sending SIGTERM to all processes ...\n");
-    kill(-1, SIGTERM);
-    sleep(1);
-  } else {
+  /* Skip this part for fast shut down. */
+  if (! fast) {
     /* Run the shutdown scripts. */
-    signal(SIGHUP, SIG_IGN);
-    signal(SIGTERM, SIG_IGN);
-
     switch ((pid = fork())) {
       case -1:
 	fprintf(stderr, "%s: can't fork(): %s\n", prog, strerror(errno));
@@ -123,15 +113,19 @@ char **argv;
       default:
 	while (waitpid(pid, NULL, 0) != pid) {}
     }
-
-    /* Tell init to stop spawning getty's. */
-    kill(1, SIGTERM);
-
-    /* Give everybody a chance to die peacefully. */
-    printf("Sending SIGTERM to all processes ...\n");
-    kill(-1, SIGTERM);
-    sleep(2);
   }
+
+  /* Tell init to stop spawning getty's. */
+  kill(1, SIGTERM);
+
+  /* Give everybody a chance to die peacefully. */
+  printf("Sending SIGTERM to all processes ...\n");
+  kill(-1, SIGTERM);
+  sleep(1);
+
+  write_log();
+
+  sync();
 
   reboot(flag, monitor_code, strlen(monitor_code));
   fprintf(stderr, "%s: reboot(): %s\n", strerror(errno));

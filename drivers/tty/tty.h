@@ -1,11 +1,19 @@
 /*	tty.h - Terminals	*/
 
 #include <timers.h>
+#include "../../kernel/const.h"
+#include "../../kernel/type.h"
+
+#undef lock
+#undef unlock
 
 /* First minor numbers for the various classes of TTY devices. */
 #define CONS_MINOR	   0
 #define LOG_MINOR	  15
 #define RS232_MINOR	  16
+#define KBD_MINOR	 127
+#define KBDAUX_MINOR	 126
+#define VIDEO_MINOR	 125
 #define TTYPX_MINOR	 128
 #define PTYPX_MINOR	 192
 
@@ -50,26 +58,26 @@ typedef struct tty {
   char tty_reprint;		/* 1 when echoed input messed up, else 0 */
   char tty_escaped;		/* 1 when LNEXT (^V) just seen, else 0 */
   char tty_inhibited;		/* 1 when STOP (^S) just seen (stops output) */
-  char tty_pgrp;		/* slot number of controlling process */
+  int tty_pgrp;			/* slot number of controlling process */
   char tty_openct;		/* count of number of opens of this tty */
 
   /* Information about incomplete I/O requests is stored here. */
   char tty_inrepcode;		/* reply code, TASK_REPLY or REVIVE */
   char tty_inrevived;		/* set to 1 if revive callback is pending */
-  char tty_incaller;		/* process that made the call (usually FS) */
-  char tty_inproc;		/* process that wants to read from tty */
+  int tty_incaller;		/* process that made the call (usually FS) */
+  int tty_inproc;		/* process that wants to read from tty */
   vir_bytes tty_in_vir;		/* virtual address where data is to go */
   int tty_inleft;		/* how many chars are still needed */
   int tty_incum;		/* # chars input so far */
-  char tty_outrepcode;		/* reply code, TASK_REPLY or REVIVE */
-  char tty_outrevived;		/* set to 1 if revive callback is pending */
-  char tty_outcaller;		/* process that made the call (usually FS) */
-  char tty_outproc;		/* process that wants to write to tty */
+  int tty_outrepcode;		/* reply code, TASK_REPLY or REVIVE */
+  int tty_outrevived;		/* set to 1 if revive callback is pending */
+  int tty_outcaller;		/* process that made the call (usually FS) */
+  int tty_outproc;		/* process that wants to write to tty */
   vir_bytes tty_out_vir;	/* virtual address where data comes from */
   int tty_outleft;		/* # chars yet to be output */
   int tty_outcum;		/* # chars output so far */
-  char tty_iocaller;		/* process that made the call (usually FS) */
-  char tty_ioproc;		/* process that wants to do an ioctl */
+  int tty_iocaller;		/* process that made the call (usually FS) */
+  int tty_ioproc;		/* process that wants to do an ioctl */
   int tty_ioreq;		/* ioctl request code */
   vir_bytes tty_iovir;		/* virtual address of ioctl buffer */
 
@@ -95,6 +103,8 @@ extern int irq_hook_id;		/* hook id for keyboard irq */
 
 extern unsigned long kbd_irq_set;
 extern unsigned long rs_irq_set;
+
+extern int panicing;	/* From panic.c in sysutil */
 
 /* Values for the fields. */
 #define NOT_ESCAPED        0	/* previous character is not LNEXT (^V) */
@@ -124,6 +134,9 @@ extern clock_t tty_next_timeout;	/* next TTY timeout */
 /* Memory allocated in tty.c, so extern here. */
 extern struct machine machine;	/* machine information (a.o.: pc_at, ega) */
 
+/* The tty outputs diagnostic messages in a circular buffer. */
+extern struct kmessages kmess;
+
 /* Function prototypes for TTY driver. */
 /* tty.c */
 _PROTOTYPE( void handle_events, (struct tty *tp)			);
@@ -149,10 +162,13 @@ _PROTOTYPE( void kputc, (int c)						);
 _PROTOTYPE( void cons_stop, (void)					);
 _PROTOTYPE( void do_new_kmess, (message *m)				);
 _PROTOTYPE( void do_diagnostics, (message *m)				);
+_PROTOTYPE( void do_get_kmess, (message *m)				);
 _PROTOTYPE( void scr_init, (struct tty *tp)				);
 _PROTOTYPE( void toggle_scroll, (void)					);
 _PROTOTYPE( int con_loadfont, (message *m)				);
 _PROTOTYPE( void select_console, (int cons_line)			);
+_PROTOTYPE( void beep_x, ( unsigned freq, clock_t dur)			);
+_PROTOTYPE( void do_video, (message *m)					);
 
 /* keyboard.c */
 _PROTOTYPE( void kb_init, (struct tty *tp)				);
@@ -161,6 +177,9 @@ _PROTOTYPE( int kbd_loadmap, (message *m)				);
 _PROTOTYPE( void do_panic_dumps, (message *m)				);
 _PROTOTYPE( void do_fkey_ctl, (message *m)				);
 _PROTOTYPE( void kbd_interrupt, (message *m)				);
+_PROTOTYPE( void do_kbd, (message *m)					);
+_PROTOTYPE( void do_kbdaux, (message *m)				);
+_PROTOTYPE( int kbd_status, (message *m_ptr)				);
 
 /* pty.c */
 _PROTOTYPE( void do_pty, (struct tty *tp, message *m_ptr)		);

@@ -9,7 +9,7 @@
  *
  * The drivers support the following operations (using message format m2):
  *
- *    m_type      DEVICE    PROC_NR     COUNT    POSITION  ADRRESS
+ *    m_type      DEVICE    IO_ENDPT    COUNT    POSITION  ADRRESS
  * ----------------------------------------------------------------
  * |  DEV_OPEN  | device  | proc nr |         |         |         |
  * |------------+---------+---------+---------+---------+---------|
@@ -87,33 +87,35 @@ struct driver *dp;	/* Device dependent entry points. */
   while (TRUE) {
 
 	/* Wait for a request to read or write a disk block. */
-	if(receive(ANY, &mess) != OK) continue;
+	if (receive(ANY, &mess) != OK) continue;
 
 	device_caller = mess.m_source;
-	proc_nr = mess.PROC_NR;
+	proc_nr = mess.IO_ENDPT;
 
 	/* Now carry out the work. */
 	switch(mess.m_type) {
-	case DEV_OPEN:		r = (*dp->dr_open)(dp, &mess);	break;
+	case DEV_OPEN:		r = (*dp->dr_open)(dp, &mess);	break;	
 	case DEV_CLOSE:		r = (*dp->dr_close)(dp, &mess);	break;
 	case DEV_IOCTL:		r = (*dp->dr_ioctl)(dp, &mess);	break;
 	case CANCEL:		r = (*dp->dr_cancel)(dp, &mess);break;
 	case DEV_SELECT:	r = (*dp->dr_select)(dp, &mess);break;
-
 	case DEV_READ:	
-	case DEV_WRITE:	  r = do_rdwt(dp, &mess);	break;
+	case DEV_WRITE:	  	r = do_rdwt(dp, &mess);	break;
 	case DEV_GATHER: 
-	case DEV_SCATTER: r = do_vrdwt(dp, &mess);	break;
+	case DEV_SCATTER: 	r = do_vrdwt(dp, &mess);	break;
 
 	case HARD_INT:		/* leftover interrupt or expired timer. */
 				if(dp->dr_hw_int) {
 					(*dp->dr_hw_int)(dp, &mess);
 				}
 				continue;
+	case PROC_EVENT:
 	case SYS_SIG:		(*dp->dr_signal)(dp, &mess);
 				continue;	/* don't reply */
 	case SYN_ALARM:		(*dp->dr_alarm)(dp, &mess);	
 				continue;	/* don't reply */
+	case DEV_PING:		notify(mess.m_source);
+				continue;
 	default:		
 		if(dp->dr_other)
 			r = (*dp->dr_other)(dp, &mess);
@@ -128,13 +130,14 @@ struct driver *dp;	/* Device dependent entry points. */
 	/* Finally, prepare and send the reply message. */
 	if (r != EDONTREPLY) {
 		mess.m_type = TASK_REPLY;
-		mess.REP_PROC_NR = proc_nr;
+		mess.REP_ENDPT = proc_nr;
 		/* Status is # of bytes transferred or error code. */
 		mess.REP_STATUS = r;	
 		send(device_caller, &mess);
 	}
   }
 }
+
 
 /*===========================================================================*
  *				init_buffer				     *
@@ -176,7 +179,7 @@ message *mp;			/* pointer to read or write message */
   if (mp->COUNT < 0) return(EINVAL);
 
   /* Check the user buffer. */
-  sys_umap(mp->PROC_NR, D, (vir_bytes) mp->ADDRESS, mp->COUNT, &phys_addr);
+  sys_umap(mp->IO_ENDPT, D, (vir_bytes) mp->ADDRESS, mp->COUNT, &phys_addr);
   if (phys_addr == 0) return(EFAULT);
 
   /* Prepare for I/O. */
@@ -188,7 +191,7 @@ message *mp;			/* pointer to read or write message */
   iovec1.iov_size = mp->COUNT;
 
   /* Transfer bytes from/to the device. */
-  r = (*dp->dr_transfer)(mp->PROC_NR, opcode, mp->POSITION, &iovec1, 1);
+  r = (*dp->dr_transfer)(mp->IO_ENDPT, opcode, mp->POSITION, &iovec1, 1);
 
   /* Return the number of bytes transferred or an error code. */
   return(r == OK ? (mp->COUNT - iovec1.iov_size) : r);
@@ -213,10 +216,13 @@ message *mp;		/* pointer to read or write message */
 
   nr_req = mp->COUNT;	/* Length of I/O vector */
 
+#if 0
   if (mp->m_source < 0) {
     /* Called by a task, no need to copy vector. */
     iov = (iovec_t *) mp->ADDRESS;
-  } else {
+  } else
+#endif
+  {
     /* Copy the vector from the caller to kernel space. */
     if (nr_req > NR_IOREQS) nr_req = NR_IOREQS;
     iovec_size = (phys_bytes) (nr_req * sizeof(iovec[0]));
@@ -231,13 +237,14 @@ message *mp;		/* pointer to read or write message */
   if ((*dp->dr_prepare)(mp->DEVICE) == NIL_DEV) return(ENXIO);
 
   /* Transfer bytes from/to the device. */
-  r = (*dp->dr_transfer)(mp->PROC_NR, mp->m_type, mp->POSITION, iov, nr_req);
+  r = (*dp->dr_transfer)(mp->IO_ENDPT, mp->m_type, mp->POSITION, iov, nr_req);
 
   /* Copy the I/O vector back to the caller. */
+#if 0
   if (mp->m_source >= 0) {
+#endif
     sys_datacopy(SELF, (vir_bytes) iovec, 
     	mp->m_source, (vir_bytes) mp->ADDRESS, iovec_size);
-  }
   return(r);
 }
 
@@ -351,7 +358,7 @@ message *mp;			/* pointer to ioctl request */
 
   if (mp->REQUEST == DIOCSETP) {
 	/* Copy just this one partition table entry. */
-	if (OK != (s=sys_datacopy(mp->PROC_NR, (vir_bytes) mp->ADDRESS,
+	if (OK != (s=sys_datacopy(mp->IO_ENDPT, (vir_bytes) mp->ADDRESS,
 		SELF, (vir_bytes) &entry, sizeof(entry))))
 	    return s;
 	dv->dv_base = entry.base;
@@ -362,7 +369,7 @@ message *mp;			/* pointer to ioctl request */
 	entry.size = dv->dv_size;
 	(*dp->dr_geometry)(&entry);
 	if (OK != (s=sys_datacopy(SELF, (vir_bytes) &entry,
-		mp->PROC_NR, (vir_bytes) mp->ADDRESS, sizeof(entry))))
+		mp->IO_ENDPT, (vir_bytes) mp->ADDRESS, sizeof(entry))))
 	    return s;
   }
   return(OK);

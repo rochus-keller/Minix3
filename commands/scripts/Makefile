@@ -16,6 +16,8 @@ usr:	\
 	/usr/bin/MAKEDEV \
 	/usr/bin/bigmake \
 	/usr/bin/adduser \
+	/usr/bin/binpackage \
+	/usr/bin/binpackages \
 	/usr/bin/cd \
 		/usr/bin/[ \
 		/usr/bin/command \
@@ -24,6 +26,7 @@ usr:	\
 		/usr/bin/expr \
 		/usr/bin/false \
 		/usr/bin/getopts \
+		/usr/bin/getpack \
 		/usr/bin/read \
 		/usr/bin/test \
 		/usr/bin/true \
@@ -35,10 +38,12 @@ usr:	\
 	/usr/bin/makewhatis \
 	/usr/bin/mkdep \
 	/usr/bin/mkdist \
-	/usr/bin/setup \
+	/bin/setup \
 	/usr/bin/binsizes \
 	/usr/bin/rotate \
 	/usr/bin/floppysetup \
+	/usr/bin/packit \
+	/usr/bin/packman \
 	/usr/bin/spell \
 	/usr/bin/srccrc \
 	/usr/bin/svclog \
@@ -81,6 +86,12 @@ clean:
 /usr/bin/bigmake:	bigmake.sh
 	install -m 755 -c -o bin $? $@
 
+/usr/bin/binpackage:	binpackage.sh
+	install -m 755 -c -o bin $? $@
+
+/usr/bin/binpackages:	binpackages.sh
+	install -m 755 -c -o bin $? $@
+
 /usr/bin/adduser:	adduser.sh
 	install -m 755 -c -o bin $? $@
 
@@ -93,6 +104,9 @@ clean:
 	install -m 755 -l $? $@
 
 /usr/bin/easypack:	easypack.sh
+	install -m 755 -c -o bin $? $@
+
+/usr/bin/getpack:	getpack.sh
 	install -m 755 -c -o bin $? $@
 
 /usr/bin/checkhier:	checkhier.sh
@@ -119,10 +133,16 @@ clean:
 /usr/bin/rotate:	rotate.sh
 	install -m 755 -c -o bin $? $@
 
-/usr/bin/setup:	setup.sh
+/bin/setup:	setup.sh
 	install -m 755 -c -o bin $? $@
 
 /usr/bin/binsizes:	binsizes.sh
+	install -m 755 -c -o bin $? $@
+
+/usr/bin/packit:	packit.sh
+	install -m 755 -c -o bin $? $@
+
+/usr/bin/packman:	packman.sh
 	install -m 755 -c -o bin $? $@
 
 /usr/bin/spell:	spell.sh

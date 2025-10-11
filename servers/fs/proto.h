@@ -15,7 +15,6 @@ _PROTOTYPE( void free_zone, (Dev_t dev, zone_t numb)			);
 _PROTOTYPE( struct buf *get_block, (Dev_t dev, block_t block,int only_search));
 _PROTOTYPE( void invalidate, (Dev_t device)				);
 _PROTOTYPE( void put_block, (struct buf *bp, int block_type)		);
-_PROTOTYPE( void rw_block, (struct buf *bp, int rw_flag)		);
 _PROTOTYPE( void rw_scattered, (Dev_t dev,
 			struct buf **bufq, int bufqsize, int rw_flag)	);
 
@@ -33,15 +32,17 @@ _PROTOTYPE( void dev_close, (Dev_t dev)					);
 _PROTOTYPE( int dev_io, (int op, Dev_t dev, int proc, void *buf,
 			off_t pos, int bytes, int flags)		);
 _PROTOTYPE( int gen_opcl, (int op, Dev_t dev, int proc, int flags)	);
-_PROTOTYPE( void gen_io, (int task_nr, message *mess_ptr)		);
+_PROTOTYPE( int gen_io, (int task_nr, message *mess_ptr)		);
 _PROTOTYPE( int no_dev, (int op, Dev_t dev, int proc, int flags)	);
+_PROTOTYPE( int no_dev_io, (int, message *)				);
 _PROTOTYPE( int tty_opcl, (int op, Dev_t dev, int proc, int flags)	);
 _PROTOTYPE( int ctty_opcl, (int op, Dev_t dev, int proc, int flags)	);
 _PROTOTYPE( int clone_opcl, (int op, Dev_t dev, int proc, int flags)	);
-_PROTOTYPE( void ctty_io, (int task_nr, message *mess_ptr)		);
+_PROTOTYPE( int ctty_io, (int task_nr, message *mess_ptr)		);
 _PROTOTYPE( int do_ioctl, (void)					);
 _PROTOTYPE( int do_setsid, (void)					);
 _PROTOTYPE( void dev_status, (message *)				);
+_PROTOTYPE( void dev_up, (int major)					);
 
 /* dmp.c */
 _PROTOTYPE( int do_fkey_pressed, (void)					);
@@ -50,11 +51,15 @@ _PROTOTYPE( int do_fkey_pressed, (void)					);
 _PROTOTYPE( int do_devctl, (void)					);
 _PROTOTYPE( void build_dmap, (void)					);
 _PROTOTYPE( int map_driver, (int major, int proc_nr, int dev_style)	);
+_PROTOTYPE( int dmap_driver_match, (int proc, int major)		);
+_PROTOTYPE( void dmap_unmap_by_endpt, (int proc_nr)			);
+_PROTOTYPE( void dmap_endpt_up, (int proc_nr)				);
 
 /* filedes.c */
 _PROTOTYPE( struct filp *find_filp, (struct inode *rip, mode_t bits)	);
 _PROTOTYPE( int get_fd, (int start, mode_t bits, int *k, struct filp **fpt) );
 _PROTOTYPE( struct filp *get_filp, (int fild)				);
+_PROTOTYPE( int inval_filp, (struct filp *)				);
 
 /* inode.c */
 _PROTOTYPE( struct inode *alloc_inode, (dev_t dev, mode_t bits)		);
@@ -70,7 +75,10 @@ _PROTOTYPE( void wipe_inode, (struct inode *rip)			);
 _PROTOTYPE( int do_link, (void)						);
 _PROTOTYPE( int do_unlink, (void)					);
 _PROTOTYPE( int do_rename, (void)					);
-_PROTOTYPE( void truncate, (struct inode *rip)				);
+_PROTOTYPE( int do_truncate, (void)					);
+_PROTOTYPE( int do_ftruncate, (void)					);
+_PROTOTYPE( int truncate_inode, (struct inode *rip, off_t len)		);
+_PROTOTYPE( int freesp_inode, (struct inode *rip, off_t st, off_t end)	);
 
 /* lock.c */
 _PROTOTYPE( int lock_op, (struct filp *f, int req)			);
@@ -106,13 +114,16 @@ _PROTOTYPE( int do_lseek, (void)					);
 _PROTOTYPE( int do_mknod, (void)					);
 _PROTOTYPE( int do_mkdir, (void)					);
 _PROTOTYPE( int do_open, (void)						);
+_PROTOTYPE( int do_slink, (void)                                       );
 
 /* path.c */
-_PROTOTYPE( struct inode *advance,(struct inode *dirp, char string[NAME_MAX]));
+_PROTOTYPE( struct inode *advance,(struct inode **dirp, char string[NAME_MAX]));
 _PROTOTYPE( int search_dir, (struct inode *ldir_ptr,
 			char string [NAME_MAX], ino_t *numb, int flag)	);
 _PROTOTYPE( struct inode *eat_path, (char *path)			);
 _PROTOTYPE( struct inode *last_dir, (char *path, char string [NAME_MAX]));
+_PROTOTYPE( struct inode *parse_path, (char *path, char string[NAME_MAX], 
+                                                       int action)     );
 
 /* pipe.c */
 _PROTOTYPE( int do_pipe, (void)						);
@@ -125,6 +136,7 @@ _PROTOTYPE( void suspend, (int task)					);
 _PROTOTYPE( int select_request_pipe, (struct filp *f, int *ops, int bl)	);
 _PROTOTYPE( int select_cancel_pipe, (struct filp *f)			);
 _PROTOTYPE( int select_match_pipe, (struct filp *f)			);
+_PROTOTYPE( void unsuspend_by_endpt, (int)				);
 
 /* protect.c */
 _PROTOTYPE( int do_access, (void)					);
@@ -139,7 +151,7 @@ _PROTOTYPE( int do_read, (void)						);
 _PROTOTYPE( struct buf *rahead, (struct inode *rip, block_t baseblock,
 			off_t position, unsigned bytes_ahead)		);
 _PROTOTYPE( void read_ahead, (void)					);
-_PROTOTYPE( block_t read_map, (struct inode *rip, off_t position)	);
+_PROTOTYPE( block_t read_map, (struct inode *rip, off_t pos)		);
 _PROTOTYPE( int read_write, (int rw_flag)				);
 _PROTOTYPE( zone_t rd_indir, (struct buf *bp, int index)		);
 
@@ -150,6 +162,8 @@ _PROTOTYPE( int do_chroot, (void)					);
 _PROTOTYPE( int do_fstat, (void)					);
 _PROTOTYPE( int do_stat, (void)						);
 _PROTOTYPE( int do_fstatfs, (void)					);
+_PROTOTYPE( int do_rdlink, (void)                                      );
+_PROTOTYPE( int do_lstat, (void)                                       );
 
 /* super.c */
 _PROTOTYPE( bit_t alloc_bit, (struct super_block *sp, int map, bit_t origin));
@@ -170,13 +184,18 @@ _PROTOTYPE( unsigned conv2, (int norm, int w)				);
 _PROTOTYPE( long conv4, (int norm, long x)				);
 _PROTOTYPE( int fetch_name, (char *path, int len, int flag)		);
 _PROTOTYPE( int no_sys, (void)						);
+_PROTOTYPE( int isokendpt_f, (char *f, int l, int e, int *p, int ft));
 _PROTOTYPE( void panic, (char *who, char *mess, int num)		);
+
+#define okendpt(e, p) isokendpt_f(__FILE__, __LINE__, (e), (p), 1)
+#define isokendpt(e, p) isokendpt_f(__FILE__, __LINE__, (e), (p), 0)
 
 /* write.c */
 _PROTOTYPE( void clear_zone, (struct inode *rip, off_t pos, int flag)	);
 _PROTOTYPE( int do_write, (void)					);
 _PROTOTYPE( struct buf *new_block, (struct inode *rip, off_t position)	);
 _PROTOTYPE( void zero_block, (struct buf *bp)				);
+_PROTOTYPE( int write_map, (struct inode *, off_t, zone_t, int)		);
 
 /* select.c */
 _PROTOTYPE( int do_select, (void)					);
@@ -184,6 +203,7 @@ _PROTOTYPE( int select_callback, (struct filp *, int ops)		);
 _PROTOTYPE( void select_forget, (int fproc)				);
 _PROTOTYPE( void select_timeout_check, (timer_t *)			);
 _PROTOTYPE( void init_select, (void)					);
+_PROTOTYPE( void select_unsuspend_by_endpt, (int proc)			);
 _PROTOTYPE( int select_notified, (int major, int minor, int ops)	);
 
 /* timers.c */

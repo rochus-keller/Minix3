@@ -18,8 +18,9 @@
 #define _PTR_SIZE	_EM_WSIZE
 #endif
 
-#define _NR_PROCS	64
+#define _NR_PROCS	100
 #define _NR_SYS_PROCS	32
+#define _NR_HOLES (2*_NR_PROCS+4)  /* No. of memory holes maintained by PM */
 
 /* Set the CHIP type based on the machine selected. The symbol CHIP is actually
  * indicative of more than just the CPU.  For example, machines for which
@@ -66,5 +67,8 @@ error "In <minix/sys_config.h> please define _MINIX_MACHINE to have a legal valu
 #if (_MINIX_MACHINE == 0)
 error "_MINIX_MACHINE has incorrect value (0)"
 #endif
+
+/* Kernel debug checks */
+#define DEBUG_LOCK_CHECK 0	/* Interrupt Lock/unlock sanity checking. */
 
 #endif /* _MINIX_SYS_CONFIG_H */

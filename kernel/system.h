@@ -31,6 +31,7 @@
 #define SYSTEM_H
 
 /* Common includes for the system library. */
+#include "debug.h"
 #include "kernel.h"
 #include "proto.h"
 #include "proc.h"
@@ -91,6 +92,9 @@ _PROTOTYPE( int do_memset, (message *m_ptr) );
 #if ! USE_MEMSET
 #define do_memset do_unused
 #endif
+
+_PROTOTYPE( int do_vm_setbuf, (message *m_ptr) );
+_PROTOTYPE( int do_vm_map, (message *m_ptr) );
 
 _PROTOTYPE( int do_abort, (message *m_ptr) );
 #if ! USE_ABORT
@@ -168,6 +172,8 @@ _PROTOTYPE( int do_setalarm, (message *m_ptr) );
 #if ! USE_SETALARM
 #define do_setalarm do_unused
 #endif
+
+_PROTOTYPE( int do_iopenable, (message *m_ptr) );	
 
 #endif	/* SYSTEM_H */
 

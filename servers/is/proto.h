@@ -23,8 +23,14 @@ _PROTOTYPE( void timing_dmp, (void)					);
 /* dmp_pm.c */
 _PROTOTYPE( void mproc_dmp, (void)					);
 _PROTOTYPE( void sigaction_dmp, (void)					);
+_PROTOTYPE( void holes_dmp, (void)					);
 
 /* dmp_fs.c */
 _PROTOTYPE( void dtab_dmp, (void)					);
 _PROTOTYPE( void fproc_dmp, (void)					);
 
+/* dmp_rs.c */
+_PROTOTYPE( void rproc_dmp, (void)					);
+
+/* dmp_ds.c */
+_PROTOTYPE( void data_store_dmp, (void)					);

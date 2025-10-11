@@ -25,16 +25,14 @@ typedef unsigned long sigset_t;
 #endif
 #endif
 
-#define _NSIG             20	/* number of signals used */
-
+/* Regular signals. */
 #define SIGHUP             1	/* hangup */
 #define SIGINT             2	/* interrupt (DEL) */
 #define SIGQUIT            3	/* quit (ASCII FS) */
 #define SIGILL             4	/* illegal instruction */
 #define SIGTRAP            5	/* trace trap (not reset when caught) */
 #define SIGABRT            6	/* IOT instruction */
-#define SIGIOT             6	/* SIGABRT for people who speak PDP-11 */
-#define SIGUNUSED          7	/* spare code */
+#define SIGBUS             7	/* bus error */
 #define SIGFPE             8	/* floating point exception */
 #define SIGKILL            9	/* kill (cannot be caught or ignored) */
 #define SIGUSR1           10	/* user defined signal # 1 */
@@ -43,17 +41,9 @@ typedef unsigned long sigset_t;
 #define SIGPIPE           13	/* write on a pipe with no one to read it */
 #define SIGALRM           14	/* alarm clock */
 #define SIGTERM           15	/* software termination signal from kill */
+#define SIGEMT		  16	/* EMT instruction */
 #define SIGCHLD           17	/* child process terminated or stopped */
-
-#define SIGEMT             7	/* obsolete */
-#define SIGBUS            10	/* obsolete */
-
-/* MINIX specific signals. These signals are not used by user proceses, 
- * but meant to inform system processes, like the PM, about system events.
- */
-#define SIGKMESS   	  18	/* new kernel message */
-#define SIGKSIG    	  19	/* kernel signal pending */
-#define SIGKSTOP    	  20	/* kernel shutting down */
+#define SIGWINCH    	  21	/* window size has changed */
 
 /* POSIX requires the following signals to be defined, even if they are
  * not supported.  Here are the definitions, but they are not supported.
@@ -61,8 +51,22 @@ typedef unsigned long sigset_t;
 #define SIGCONT           18	/* continue if stopped */
 #define SIGSTOP           19	/* stop signal */
 #define SIGTSTP           20	/* interactive stop signal */
-#define SIGTTIN           21	/* background process wants to read */
-#define SIGTTOU           22	/* background process wants to write */
+#define SIGTTIN           22	/* background process wants to read */
+#define SIGTTOU           23	/* background process wants to write */
+
+#define _NSIG             23	/* number of signals used */
+
+#ifdef _MINIX
+#define SIGIOT             SIGABRT /* for people who speak PDP-11 */
+
+/* MINIX specific signals. These signals are not used by user proceses, 
+ * but meant to inform system processes, like the PM, about system events.
+ */
+#define SIGKMESS   	  29	/* new kernel message */
+#define SIGKSIG    	  30	/* kernel signal pending */
+#define SIGKSTOP    	  31	/* kernel shutting down */
+
+#endif
 
 /* The sighandler_t type is not allowed unless _POSIX_SOURCE is defined. */
 typedef void _PROTOTYPE( (*__sighandler_t), (int) );

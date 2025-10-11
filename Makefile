@@ -3,21 +3,21 @@
 MAKE	= exec make -$(MAKEFLAGS)
 
 usage:
-	@echo "" >&2
-	@echo "Master Makefile for MINIX commands and utilities." >&2
-	@echo "Root privileges are required for some actions." >&2
-	@echo "" >&2
-	@echo "Usage:" >&2
-	@echo "	make world      # Compile everything (libraries & commands)" >&2
-	@echo "	make includes   # Install include files from src/" >&2
-	@echo "	make libraries  # Compile and install libraries" >&2
-	@echo "	make cmds       # Compile all, commands, but don't install" >&2
-	@echo "	make install    # Compile and install commands" >&2
-	@echo "	make depend     # Generate required .depend files" >&2
-	@echo "	make clean      # Remove all compiler results" >&2
-	@echo "" >&2
-	@echo "Run 'make' in tools/ to create a new MINIX configuration." >&2; exit 0
-	@echo "" >&2
+	@echo "" 
+	@echo "Master Makefile for MINIX commands and utilities." 
+	@echo "Root privileges are required for some actions." 
+	@echo "" 
+	@echo "Usage:" 
+	@echo "	make world      # Compile everything (libraries & commands)" 
+	@echo "	make includes   # Install include files from src/" 
+	@echo "	make libraries  # Compile and install libraries" 
+	@echo "	make cmds       # Compile all, commands, but don't install" 
+	@echo "	make install    # Compile and install commands" 
+	@echo "	make depend     # Generate required .depend files" 
+	@echo "	make clean      # Remove all compiler results" 
+	@echo "" 
+	@echo "Run 'make' in tools/ to create a new MINIX configuration." 
+	@echo "" 
 
 # world has to be able to make a new system, even if there
 # is no complete old system. it has to install commands, for which
@@ -30,10 +30,10 @@ usage:
 world: includes depend libraries cmds install postinstall
 
 includes:
-	cd include && $(MAKE) install
+	cd include && $(MAKE) install gcc
 
 libraries:
-	cd lib && $(MAKE) install
+	cd lib && $(MAKE) all install
 
 cmds:
 	if [ -f commands/Makefile ] ; then cd commands && $(MAKE) all; fi

@@ -13,6 +13,7 @@
 #include <minix/keymap.h>
 #include <minix/callnr.h>
 #include <minix/com.h>
+#include <minix/endpoint.h>
 #include <signal.h>
 #include <stdlib.h>
 #include <fcntl.h>
@@ -32,6 +33,7 @@ FORWARD _PROTOTYPE( int get_nice_value, (int queue)			);
 FORWARD _PROTOTYPE( void get_mem_chunks, (struct memory *mem_chunks) 	);
 FORWARD _PROTOTYPE( void patch_mem_chunks, (struct memory *mem_chunks, 
 	struct mem_map *map_ptr) 	);
+FORWARD _PROTOTYPE( void do_x86_vm, (struct memory mem_chunks[NR_MEMS])	);
 
 #define click_to_round_k(n) \
 	((unsigned) ((((unsigned long) (n) << CLICK_SHIFT) + 512) / 1024))
@@ -58,7 +60,9 @@ PUBLIC int main()
 		result = SUSPEND;		/* don't reply */
 	} else if (call_nr == SYS_SIG) {	/* signals pending */
 		sigset = m_in.NOTIFY_ARG;
-		if (sigismember(&sigset, SIGKSIG))  (void) ksig_pending();
+		if (sigismember(&sigset, SIGKSIG))  {
+			(void) ksig_pending();
+		} 
 		result = SUSPEND;		/* don't reply */
 	}
 	/* Else, if the system call number is valid, perform the call. */
@@ -69,7 +73,7 @@ PUBLIC int main()
 	}
 
 	/* Send the results back to the user to indicate completion. */
-	if (result != SUSPEND) setreply(who, result);
+	if (result != SUSPEND) setreply(who_p, result);
 
 	swap_in();		/* maybe a process can be swapped in? */
 
@@ -84,8 +88,10 @@ PUBLIC int main()
 		 */
 		if ((rmp->mp_flags & (REPLY | ONSWAP | IN_USE | ZOMBIE)) ==
 		   (REPLY | IN_USE)) {
-			if ((s=send(proc_nr, &rmp->mp_reply)) != OK) {
-				panic(__FILE__,"PM can't reply to", proc_nr);
+			if ((s=send(rmp->mp_endpoint, &rmp->mp_reply)) != OK) {
+				printf("PM can't reply to %d (%s)\n",
+					rmp->mp_endpoint, rmp->mp_name);
+				panic(__FILE__, "PM can't reply", NO_NUM);
 			}
 			rmp->mp_flags &= ~REPLY;
 		}
@@ -100,15 +106,22 @@ PUBLIC int main()
 PRIVATE void get_work()
 {
 /* Wait for the next message and extract useful information from it. */
-  if (receive(ANY, &m_in) != OK) panic(__FILE__,"PM receive error", NO_NUM);
-  who = m_in.m_source;		/* who sent the message */
+  if (receive(ANY, &m_in) != OK)
+	panic(__FILE__,"PM receive error", NO_NUM);
+  who_e = m_in.m_source;	/* who sent the message */
+  if(pm_isokendpt(who_e, &who_p) != OK)
+	panic(__FILE__, "PM got message from invalid endpoint", who_e);
   call_nr = m_in.m_type;	/* system call number */
 
   /* Process slot of caller. Misuse PM's own process slot if the kernel is
    * calling. This can happen in case of synchronous alarms (CLOCK) or or 
    * event like pending kernel signals (SYSTEM).
    */
-  mp = &mproc[who < 0 ? PM_PROC_NR : who];
+  mp = &mproc[who_p < 0 ? PM_PROC_NR : who_p];
+  if(who_p >= 0 && mp->mp_endpoint != who_e) {
+	panic(__FILE__, "PM endpoint number out of sync with source",
+		mp->mp_endpoint);
+  }
 }
 
 /*===========================================================================*
@@ -123,6 +136,9 @@ int result;			/* result of call (usually OK or error #) */
  * value, and for setting the "must send reply" flag.
  */
   register struct mproc *rmp = &mproc[proc_nr];
+
+  if(proc_nr < 0 || proc_nr >= NR_PROCS)
+      panic(__FILE__,"setreply arg out of range", proc_nr);
 
   rmp->mp_reply.reply_res = result;
   rmp->mp_flags |= REPLY;	/* reply pending */
@@ -153,8 +169,10 @@ PRIVATE void pm_init()
   register struct boot_image *ip;
   static char core_sigs[] = { SIGQUIT, SIGILL, SIGTRAP, SIGABRT,
 			SIGEMT, SIGFPE, SIGUSR1, SIGSEGV, SIGUSR2 };
-  static char ign_sigs[] = { SIGCHLD };
+  static char ign_sigs[] = { SIGCHLD, SIGWINCH, SIGCONT };
+  static char mess_sigs[] = { SIGTERM, SIGHUP, SIGABRT, SIGQUIT };
   register struct mproc *rmp;
+  register int i;
   register char *sig_ptr;
   phys_clicks total_clicks, minix_clicks, free_clicks;
   message mess;
@@ -208,19 +226,25 @@ PRIVATE void pm_init()
   		strncpy(rmp->mp_name, ip->proc_name, PROC_NAME_LEN); 
 		rmp->mp_parent = RS_PROC_NR;
 		rmp->mp_nice = get_nice_value(ip->priority);
+  		sigemptyset(&rmp->mp_sig2mess);
+  		sigemptyset(&rmp->mp_ignore);	
+  		sigemptyset(&rmp->mp_sigmask);
+  		sigemptyset(&rmp->mp_catch);
 		if (ip->proc_nr == INIT_PROC_NR) {	/* user process */
-  			rmp->mp_pid = INIT_PID;
+  			rmp->mp_procgrp = rmp->mp_pid = INIT_PID;
 			rmp->mp_flags |= IN_USE; 
-  		        sigemptyset(&rmp->mp_ignore);	
 		}
 		else {					/* system process */
   			rmp->mp_pid = get_free_pid();
 			rmp->mp_flags |= IN_USE | DONT_SWAP | PRIV_PROC; 
-  			sigfillset(&rmp->mp_ignore);	
+  			for (sig_ptr = mess_sigs; 
+				sig_ptr < mess_sigs+sizeof(mess_sigs); 
+				sig_ptr++)
+			sigaddset(&rmp->mp_sig2mess, *sig_ptr);
 		}
-  		sigemptyset(&rmp->mp_sigmask);
-  		sigemptyset(&rmp->mp_catch);
-  		sigemptyset(&rmp->mp_sig2mess);
+
+		/* Get kernel endpoint identifier. */
+		rmp->mp_endpoint = ip->endpoint;
 
   		/* Get memory map for this process from the kernel. */
 		if ((s=get_mem_map(ip->proc_nr, rmp->mp_seg)) != OK)
@@ -231,8 +255,9 @@ PRIVATE void pm_init()
   		patch_mem_chunks(mem_chunks, rmp->mp_seg);
 
 		/* Tell FS about this system process. */
-		mess.PR_PROC_NR = ip->proc_nr;
+		mess.PR_SLOT = ip->proc_nr;
 		mess.PR_PID = rmp->mp_pid;
+		mess.PR_ENDPT = rmp->mp_endpoint;
   		if (OK != (s=send(FS_PROC_NR, &mess)))
 			panic(__FILE__,"can't sync up with FS", s);
   		printf(" %s", ip->proc_name);	/* display process name */
@@ -240,12 +265,13 @@ PRIVATE void pm_init()
   }
   printf(".\n");				/* last process done */
 
-  /* Override some details. PM is somewhat special. */
-  mproc[PM_PROC_NR].mp_pid = PM_PID;		/* magically override pid */
-  mproc[PM_PROC_NR].mp_parent = PM_PROC_NR;	/* PM doesn't have parent */
+  /* Override some details. INIT, PM, FS and RS are somewhat special. */
+  mproc[PM_PROC_NR].mp_pid = PM_PID;		/* PM has magic pid */
+  mproc[RS_PROC_NR].mp_parent = INIT_PROC_NR;	/* INIT is root */
+  sigfillset(&mproc[PM_PROC_NR].mp_ignore); 	/* guard against signals */
 
   /* Tell FS that no more system processes follow and synchronize. */
-  mess.PR_PROC_NR = NONE;
+  mess.PR_ENDPT = NONE;
   if (sendrec(FS_PROC_NR, &mess) != OK || mess.m_type != OK)
 	panic(__FILE__,"can't sync up with FS", NO_NUM);
 
@@ -258,6 +284,9 @@ PRIVATE void pm_init()
       patch_mem_chunks(mem_chunks, mem_map);
   }
 #endif /* ENABLE_BOOTDEV */
+
+  /* Withhold some memory from x86 VM */
+  do_x86_vm(mem_chunks);
 
   /* Initialize tables to all physical memory and print memory information. */
   printf("Physical memory:");
@@ -380,3 +409,64 @@ struct mem_map *map_ptr;			/* memory to remove */
   }
 }
 
+#define PAGE_SIZE	4096
+#define PAGE_TABLE_COVER (1024*PAGE_SIZE)
+/*=========================================================================*
+ *				do_x86_vm				   *
+ *=========================================================================*/
+PRIVATE void do_x86_vm(mem_chunks)
+struct memory mem_chunks[NR_MEMS];
+{
+	phys_bytes high, bytes;
+	phys_clicks clicks, base_click;
+	unsigned pages;
+	int i, r;
+
+	/* Compute the highest memory location */
+	high= 0;
+	for (i= 0; i<NR_MEMS; i++)
+	{
+		if (mem_chunks[i].size == 0)
+			continue;
+		if (mem_chunks[i].base + mem_chunks[i].size > high)
+			high= mem_chunks[i].base + mem_chunks[i].size;
+	}
+
+	high <<= CLICK_SHIFT;
+#if VERBOSE_VM
+	printf("do_x86_vm: found high 0x%x\n", high);
+#endif
+
+	/* The number of pages we need is one for the page directory, enough
+	 * page tables to cover the memory, and one page for alignement.
+	 */
+	pages= 1 + (high + PAGE_TABLE_COVER-1)/PAGE_TABLE_COVER + 1;
+	bytes= pages*PAGE_SIZE;
+	clicks= (bytes + CLICK_SIZE-1) >> CLICK_SHIFT;
+
+#if VERBOSE_VM
+	printf("do_x86_vm: need %d pages\n", pages);
+	printf("do_x86_vm: need %d bytes\n", bytes);
+	printf("do_x86_vm: need %d clicks\n", clicks);
+#endif
+
+	for (i= 0; i<NR_MEMS; i++)
+	{
+		if (mem_chunks[i].size <= clicks)
+			continue;
+		break;
+	}
+	if (i >= NR_MEMS)
+		panic("PM", "not enough memory for VM page tables?", NO_NUM);
+	base_click= mem_chunks[i].base;
+	mem_chunks[i].base += clicks;
+	mem_chunks[i].size -= clicks;
+
+#if VERBOSE_VM
+	printf("do_x86_vm: using 0x%x clicks @ 0x%x\n", clicks, base_click);
+#endif
+	r= sys_vm_setbuf(base_click << CLICK_SHIFT, clicks << CLICK_SHIFT,
+		high);
+	if (r != 0)
+		printf("do_x86_vm: sys_vm_setbuf failed: %d\n", r);
+}

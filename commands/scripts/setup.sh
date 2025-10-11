@@ -12,6 +12,12 @@ LOCALRC=/usr/etc/rc.local
 MYLOCALRC=/mnt/etc/rc.local
 ROOTMB=16
 ROOTSECTS="`expr $ROOTMB '*' 1024 '*' 2`"
+USRKBFILE=/.usrkb
+if [ ! -f "$USRKBFILE" ]
+then	echo "Are you really running from CD?"
+	echo "No $USRKBFILE file."
+	exit 1
+fi
 USRKB="`cat /.usrkb`"
 TOTALMB="`expr 3 + $USRKB / 1024 + $ROOTMB`"
 ROOTFILES="`cat /.rootfiles`"
@@ -549,8 +555,8 @@ mount /dev/$usr /mnt >/dev/null || exit		# Mount the intended /usr.
 
 (cd /usr || exit 1
  if [ "$nobigsource" = 1 ]
- then	list="`ls | fgrep -v src.`"
- else	list="`ls`"
+ then	list="`ls | fgrep -v src. | fgrep -v install`"
+ else	list="`ls | fgrep -v install`"
  fi
  for d in $list
  do	
@@ -568,14 +574,6 @@ fi
 					# Set inet.conf to correct driver
 if [ -n "$driver" ]
 then	echo "$driverargs" >$MYLOCALRC
-	disable=""
-else	disable="disable=inet;"
-fi
-					# Set inet.conf to correct driver
-if [ -n "$driver" ]
-then	echo "$driverargs" >$MYLOCALRC
-	disable=""
-else	disable="disable=inet;"
 fi
 
 umount /dev/$usr >/dev/null || exit		# Unmount the intended /usr.
@@ -583,6 +581,11 @@ mount /dev/$root /mnt >/dev/null || exit
 
 # Running from the installation CD.
 cpdir -vx / /mnt | progressbar "$ROOTFILES" || exit	
+cp /mnt/etc/motd.install /mnt/etc/motd
+
+# Fix /var/log
+rm /mnt/var/log
+ln -s /usr/log /mnt/var/log
 
 if [ -n "$driver" ]
 then	echo "eth0 $driver 0 { default; };" >/mnt/etc/inet.conf
@@ -608,13 +611,14 @@ mount /dev/$usr /mnt >/dev/null || exit
 # Make bootable.
 installboot -d /dev/$root /usr/mdec/bootblock /boot/boot >/dev/null || exit
 
-edparams /dev/$root "rootdev=$root; ramimagedev=$root; $disable; minix(1,Start MINIX 3 (requires at least 16 MB RAM)) { unset image; boot; }; smallminix(2,Start Small MINIX 3 (intended for 8 MB RAM systems)) { image=/boot/image_small; ramsize=0; boot; }; main() { echo By default, MINIX 3 will automatically load in 3 seconds.; echo Press ESC to enter the monitor for special configuration.; trap 3000 boot; menu; }; save" || exit
+edparams /dev/$root "rootdev=$root; ramimagedev=$root; minix(1,Start MINIX 3 (requires at least 16 MB RAM)) { image=/boot/image_big; boot; }; smallminix(2,Start Small MINIX 3 (intended for 8 MB RAM systems)) { image=/boot/image_small; boot; }; newminix(3,Start Custom MINIX 3) { unset image; boot }; main() { echo By default, MINIX 3 will automatically load in 3 seconds.; echo Press ESC to enter the monitor for special configuration.; trap 3000 boot; menu; }; save" || exit
 pfile="/mnt/src/tools/fdbootparams"
-echo "rootdev=$root; ramimagedev=$root; $disable; save" >$pfile
+echo "rootdev=$root; ramimagedev=$root; save" >$pfile
+# Save name of CD drive
+cddrive="`mount | grep usr | awk '{ print $1 }' | sed 's/p.*//'`" 
+echo "cddrive=$cddrive" >>/mnt/etc/rc.package
 
-sync
-
-bios="`echo $primary | sed 's/d./dX/g'`"
+bios="`echo $primary | sed -e 's/d./dX/g' -e 's/c.//g'`"
 
 if [ ! "$auto" = "r" ]
 then	if mount /dev/$home /home 2>/dev/null

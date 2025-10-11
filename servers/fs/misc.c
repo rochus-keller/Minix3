@@ -21,6 +21,7 @@
 #include <fcntl.h>
 #include <unistd.h>	/* cc runs out of memory with unistd.h :-( */
 #include <minix/callnr.h>
+#include <minix/endpoint.h>
 #include <minix/com.h>
 #include <sys/svrctl.h>
 #include "buf.h"
@@ -29,6 +30,10 @@
 #include "inode.h"
 #include "param.h"
 #include "super.h"
+
+FORWARD _PROTOTYPE( int free_proc, (struct fproc *freed, int flags));
+
+#define FP_EXITING	1
 
 /*===========================================================================*
  *				do_getsysinfo				     *
@@ -59,7 +64,7 @@ PUBLIC int do_getsysinfo()
   }
 
   dst_addr = (vir_bytes) m_in.info_where;
-  if (OK != (s=sys_datacopy(SELF, src_addr, who, dst_addr, len)))
+  if (OK != (s=sys_datacopy(SELF, src_addr, who_e, dst_addr, len)))
   	return(s);
   return(OK);
 
@@ -100,6 +105,7 @@ PUBLIC int do_dup()
   /* Success. Set up new file descriptors. */
   f->filp_count++;
   fp->fp_filp[m_in.fd2] = f;
+  FD_SET(m_in.fd2, &fp->fp_filp_inuse);
   return(m_in.fd2);
 }
 
@@ -156,6 +162,54 @@ PUBLIC int do_fcntl()
 	/* Set or clear a file lock. */
 	r = lock_op(f, m_in.request);
 	return(r);
+
+     case F_FREESP:
+     {
+	/* Free a section of a file. Preparation is done here,
+	 * actual freeing in freesp_inode().
+	 */
+	off_t start, end;
+	struct flock flock_arg;
+	signed long offset;
+
+	/* Check if it's a regular file. */
+	if((f->filp_ino->i_mode & I_TYPE) != I_REGULAR) {
+		return EINVAL;
+	}
+
+	/* Copy flock data from userspace. */
+	if((r = sys_datacopy(who_e, (vir_bytes) m_in.name1, 
+	  SELF, (vir_bytes) &flock_arg,
+	  (phys_bytes) sizeof(flock_arg))) != OK)
+		return r;
+
+	/* Convert starting offset to signed. */
+	offset = (signed long) flock_arg.l_start;
+
+	/* Figure out starting position base. */
+	switch(flock_arg.l_whence) {
+		case SEEK_SET: start = 0; if(offset < 0) return EINVAL; break;
+		case SEEK_CUR: start = f->filp_pos; break;
+		case SEEK_END: start = f->filp_ino->i_size; break;
+		default: return EINVAL;
+	}
+
+	/* Check for overflow or underflow. */
+	if(offset > 0 && start + offset < start) { return EINVAL; }
+	if(offset < 0 && start + offset > start) { return EINVAL; }
+	start += offset;
+	if(flock_arg.l_len > 0) {
+		end = start + flock_arg.l_len;
+		if(end <= start) {
+			return EINVAL;
+		}
+		r = freesp_inode(f->filp_ino, start, end);
+	} else {
+		r = truncate_inode(f->filp_ino, start);
+	}
+	return r;
+     }
+
      default:
 	return(EINVAL);
   }
@@ -208,10 +262,15 @@ PUBLIC int do_reboot()
   struct inode dummy;
 
   /* Only PM may make this call directly. */
-  if (who != PM_PROC_NR) return(EGENERIC);
+  if (who_e != PM_PROC_NR) return(EGENERIC);
 
-  /* Do exit processing for all leftover processes and servers. */
-  for (i = 0; i < NR_PROCS; i++) { m_in.slot1 = i; do_exit(); }
+  /* Do exit processing for all leftover processes and servers,
+   * but don't actually exit them (if they were really gone, PM
+   * will tell us about it).
+   */
+  for (i = 0; i < NR_PROCS; i++)
+	if((m_in.endpt1 = fproc[i].fp_endpoint) != NONE)
+		free_proc(&fproc[i], 0);
 
   /* The root file system is mounted onto itself, which keeps it from being
    * unmounted.  Pull an inode out of thin air and put the root on it.
@@ -230,6 +289,9 @@ PUBLIC int do_reboot()
 	}
   }
 
+  /* Sync any unwritten buffers. */
+  do_sync();
+
   return(OK);
 }
 
@@ -245,24 +307,44 @@ PUBLIC int do_fork()
  */
 
   register struct fproc *cp;
-  int i;
+  int i, parentno, childno;
 
   /* Only PM may make this call directly. */
-  if (who != PM_PROC_NR) return(EGENERIC);
+  if (who_e != PM_PROC_NR) return(EGENERIC);
+
+  /* Check up-to-dateness of fproc. */
+  okendpt(m_in.parent_endpt, &parentno);
+
+  /* PM gives child endpoint, which implies process slot information.
+   * Don't call isokendpt, because that will verify if the endpoint
+   * number is correct in fproc, which it won't be.
+   */
+  childno = _ENDPOINT_P(m_in.child_endpt);
+  if(childno < 0 || childno >= NR_PROCS)
+	panic(__FILE__, "FS: bogus child for forking", m_in.child_endpt);
+  if(fproc[childno].fp_pid != PID_FREE)
+	panic(__FILE__, "FS: forking on top of in-use child", childno);
 
   /* Copy the parent's fproc struct to the child. */
-  fproc[m_in.child] = fproc[m_in.parent];
+  fproc[childno] = fproc[parentno];
 
   /* Increase the counters in the 'filp' table. */
-  cp = &fproc[m_in.child];
+  cp = &fproc[childno];
   for (i = 0; i < OPEN_MAX; i++)
 	if (cp->fp_filp[i] != NIL_FILP) cp->fp_filp[i]->filp_count++;
 
-  /* Fill in new process id. */
+  /* Fill in new process and endpoint id. */
   cp->fp_pid = m_in.pid;
+  cp->fp_endpoint = m_in.child_endpt;
 
   /* A child is not a process leader. */
   cp->fp_sesldr = 0;
+
+  /* This child has not exec()ced yet. */
+  cp->fp_execced = 0;
+#if 0
+printf("do_fork: child %d, slot %d\n", m_in.child_endpt, cp-fproc);
+#endif
 
   /* Record the fact that both root and working dir have another user. */
   dup_inode(cp->fp_rootdir);
@@ -279,50 +361,54 @@ PUBLIC int do_exec()
  * MM does an EXEC, it calls FS to allow FS to find these files and close them.
  */
 
-  register int i;
+  int i, proc;
   long bitmap;
 
   /* Only PM may make this call directly. */
-  if (who != PM_PROC_NR) return(EGENERIC);
+  if (who_e != PM_PROC_NR) return(EGENERIC);
 
   /* The array of FD_CLOEXEC bits is in the fp_cloexec bit map. */
-  fp = &fproc[m_in.slot1];		/* get_filp() needs 'fp' */
+  okendpt(m_in.endpt1, &proc);
+  fp = &fproc[proc];		/* get_filp() needs 'fp' */
   bitmap = fp->fp_cloexec;
-  if (bitmap == 0) return(OK);	/* normal case, no FD_CLOEXECs */
-
-  /* Check the file desriptors one by one for presence of FD_CLOEXEC. */
-  for (i = 0; i < OPEN_MAX; i++) {
-	m_in.fd = i;
-	if ( (bitmap >> i) & 01) (void) do_close();
+  if (bitmap) {
+    /* Check the file desriptors one by one for presence of FD_CLOEXEC. */
+    for (i = 0; i < OPEN_MAX; i++) {
+	  m_in.fd = i;
+	  if ( (bitmap >> i) & 01) (void) do_close();
+    }
   }
 
-  return(OK);
+  /* This child has now exec()ced. */
+  fp->fp_execced = 1;
+
+  /* Reply to caller (PM) directly. */
+  reply(who_e, OK);
+
+  /* Check if this is a driver that can now be useful. */
+  dmap_endpt_up(fp->fp_endpoint);
+
+  /* Suppress reply to caller (caller already replied to). */
+  return SUSPEND;
 }
 
 /*===========================================================================*
- *				do_exit					     *
+ *				free_proc				     *
  *===========================================================================*/
-PUBLIC int do_exit()
+PRIVATE int free_proc(struct fproc *exiter, int flags)
 {
-/* Perform the file system portion of the exit(status) system call. */
-
-  register int i, exitee, task;
+  int i, task;
   register struct fproc *rfp;
   register struct filp *rfilp;
   register struct inode *rip;
   dev_t dev;
 
-  /* Only PM may do the EXIT call directly. */
-  if (who != PM_PROC_NR) return(EGENERIC);
-
-  /* Nevertheless, pretend that the call came from the user. */
-  fp = &fproc[m_in.slot1];		/* get_filp() needs 'fp' */
-  exitee = m_in.slot1;
+  fp = exiter;		/* get_filp() needs 'fp' */
 
   if (fp->fp_suspended == SUSPENDED) {
 	task = -fp->fp_task;
 	if (task == XPIPE || task == XPOPEN) susp_count--;
-	m_in.pro = exitee;
+	m_in.ENDPT = fp->fp_endpoint;
 	(void) do_unpause();	/* this always succeeds for MM */
 	fp->fp_suspended = NOT_SUSPENDED;
   }
@@ -339,24 +425,35 @@ PUBLIC int do_exit()
   fp->fp_rootdir = NIL_INODE;
   fp->fp_workdir = NIL_INODE;
 
-  /* If a session leader exits then revoke access to its controlling tty from
-   * all other processes using it.
+  /* Check if any process is SUSPENDed on this driver.
+   * If a driver exits, unmap its entries in the dmap table.
+   * (unmapping has to be done after the first step, because the
+   * dmap table is used in the first step.)
    */
-  if (!fp->fp_sesldr) {
-	fp->fp_pid = PID_FREE;
-  	return(OK);		/* not a session leader */
-  }
-  fp->fp_sesldr = FALSE;
-  if (fp->fp_tty == 0) {
-	fp->fp_pid = PID_FREE;
-  	return(OK);		/* no controlling tty */
-  }
-  dev = fp->fp_tty;
+  unsuspend_by_endpt(fp->fp_endpoint);
 
-  for (rfp = &fproc[0]; rfp < &fproc[NR_PROCS]; rfp++) {
-	if (rfp->fp_tty == dev) rfp->fp_tty = 0;
+  /* The rest of these actions is only done when processes actually
+   * exit.
+   */
+  if(!(flags & FP_EXITING))
+	return OK;
 
-	for (i = 0; i < OPEN_MAX; i++) {
+  dmap_unmap_by_endpt(fp->fp_endpoint);
+  /* Invalidate endpoint number for error and sanity checks. */
+  fp->fp_endpoint = NONE;
+
+  /* If a session leader exits and it has a controlling tty, then revoke 
+   * access to its controlling tty from all other processes using it.
+   */
+  if (fp->fp_sesldr && fp->fp_tty != 0) {
+
+      dev = fp->fp_tty;
+
+      for (rfp = &fproc[0]; rfp < &fproc[NR_PROCS]; rfp++) {
+	  if(rfp->fp_pid == PID_FREE) continue;
+          if (rfp->fp_tty == dev) rfp->fp_tty = 0;
+
+          for (i = 0; i < OPEN_MAX; i++) {
 		if ((rfilp = rfp->fp_filp[i]) == NIL_FILP) continue;
 		if (rfilp->filp_mode == FILP_CLOSED) continue;
 		rip = rfilp->filp_ino;
@@ -364,12 +461,31 @@ PUBLIC int do_exit()
 		if ((dev_t) rip->i_zone[0] != dev) continue;
 		dev_close(dev);
 		rfilp->filp_mode = FILP_CLOSED;
-	}
+          }
+      }
   }
 
-  /* Mark slot as free. */
+  /* Exit done. Mark slot as free. */
   fp->fp_pid = PID_FREE;
   return(OK);
+
+}
+
+/*===========================================================================*
+ *				do_exit					     *
+ *===========================================================================*/
+PUBLIC int do_exit()
+{
+  int exitee_p, exitee_e;
+/* Perform the file system portion of the exit(status) system call. */
+
+  /* Only PM may do the EXIT call directly. */
+  if (who_e != PM_PROC_NR) return(EGENERIC);
+
+  /* Nevertheless, pretend that the call came from the user. */
+  exitee_e = m_in.endpt1;
+  okendpt(exitee_e, &exitee_p);
+  return free_proc(&fproc[exitee_p], FP_EXITING);
 }
 
 /*===========================================================================*
@@ -380,11 +496,13 @@ PUBLIC int do_set()
 /* Set uid_t or gid_t field. */
 
   register struct fproc *tfp;
+  int proc;
 
   /* Only PM may make this call directly. */
-  if (who != PM_PROC_NR) return(EGENERIC);
+  if (who_e != PM_PROC_NR) return(EGENERIC);
 
-  tfp = &fproc[m_in.slot1];
+  okendpt(m_in.endpt1, &proc);
+  tfp = &fproc[proc];
   if (call_nr == SETUID) {
 	tfp->fp_realuid = (uid_t) m_in.real_user_id;
 	tfp->fp_effuid =  (uid_t) m_in.eff_user_id;
@@ -410,8 +528,7 @@ PUBLIC int do_revive()
  * 'SUSPEND' pseudo error, and the reply to the blocked process is done
  * explicitly in revive().
  */
-
-  revive(m_in.REP_PROC_NR, m_in.REP_STATUS);
+  revive(m_in.REP_ENDPT, m_in.REP_STATUS);
   return(SUSPEND);		/* don't reply to the TTY task */
 }
 
@@ -424,19 +541,47 @@ PUBLIC int do_svrctl()
   case FSSIGNON: {
 	/* A server in user space calls in to manage a device. */
 	struct fssignon device;
-	int r, major;
+	int r, major, proc_nr_n;
 
-	if (fp->fp_effuid != SU_UID) return(EPERM);
+	if (fp->fp_effuid != SU_UID && fp->fp_effuid != SERVERS_UID)
+		return(EPERM);
 
 	/* Try to copy request structure to FS. */
-	if ((r = sys_datacopy(who, (vir_bytes) m_in.svrctl_argp,
+	if ((r = sys_datacopy(who_e, (vir_bytes) m_in.svrctl_argp,
 		FS_PROC_NR, (vir_bytes) &device,
 		(phys_bytes) sizeof(device))) != OK) 
 	    return(r);
 
+	if (isokendpt(who_e, &proc_nr_n) != OK)
+		return(EINVAL);
+
 	/* Try to update device mapping. */
 	major = (device.dev >> MAJOR) & BYTE;
-	r=map_driver(major, who, device.style);
+	r=map_driver(major, who_e, device.style);
+	if (r == OK)
+	{
+		/* If a driver has completed its exec(), it can be announced
+		 * to be up.
+		*/
+		if(fproc[proc_nr_n].fp_execced) {
+			dev_up(major);
+		} else {
+			dmap[major].dmap_flags |= DMAP_BABY;
+		}
+	}
+
+	return(r);
+  }
+  case FSDEVUNMAP: {
+	struct fsdevunmap fdu;
+	int r, major;
+	/* Try to copy request structure to FS. */
+	if ((r = sys_datacopy(who_e, (vir_bytes) m_in.svrctl_argp,
+		FS_PROC_NR, (vir_bytes) &fdu,
+		(phys_bytes) sizeof(fdu))) != OK) 
+	    return(r);
+	major = (fdu.dev >> MAJOR) & BYTE;
+	r=map_driver(major, NONE, 0);
 	return(r);
   }
   default:
