@@ -11,7 +11,7 @@ h = $i/minix
 k = $u/src/kernel
 
 # programs, flags, etc.
-CC = tcc
+CC ?= tcc
 CFLAGS = -m32 -I$i -I../../include -O -D_MINIX -D_POSIX_SOURCE -D_SYSTEM
 LDFLAGS = -m32 -nostdlib
 

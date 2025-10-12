@@ -8,9 +8,9 @@ l = $u/lib
 s = system
 
 # Programs, flags, etc.
-CC = tcc
-AS = as
-LD = ld
+CC ?= tcc
+AS ?= as
+LD ?= ld
 CFLAGS = -m32 -I$i -I../include -D_MINIX -D_SYSTEM -D_KERNEL \
          -fno-builtin -fno-stack-protector
 ASFLAGS = --32

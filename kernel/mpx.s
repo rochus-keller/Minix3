@@ -3,7 +3,7 @@
 
 #include <minix/config.h>
 #if _WORD_SIZE == 2
-#include "mpx88.s"
+#error "16 bit mpx no longer supported"
 #else
 #include "mpx386.s"
 #endif

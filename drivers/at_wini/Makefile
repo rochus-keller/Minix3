@@ -14,7 +14,7 @@ p = ../libpci
 
 # programs, flags, etc.
 MAKE = exec make
-CC = tcc
+CC ?= tcc
 CFLAGS = -m32 -I$i -I../../include -D_MINIX -D_SYSTEM
 LDFLAGS = -m32 -nostdlib
 LIBS = -ldriver -lpci -lsysutil -lsys -ltimers

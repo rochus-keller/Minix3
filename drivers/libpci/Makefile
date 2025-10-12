@@ -11,9 +11,9 @@ b = $i/ibm
 m = $i/minix
 
 # Programs, flags, etc.
-CC = tcc
-AR = ar
-RANLIB = ranlib
+CC ?= tcc
+AR ?= ar
+RANLIB ?= ranlib
 CFLAGS = -m32 -I$i -I../../include -D_MINIX -D_SYSTEM
 LDFLAGS = -m32
 LIBS = -lsys -lsysutil

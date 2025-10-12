@@ -16,7 +16,7 @@ MINIX_ROOT=$(pwd)
 BUILD_JOBS=${BUILD_JOBS:-1}
 
 # Export compiler settings
-export CC=tcc
+export CC=gcc
 export AS=as
 export LD=ld
 export AR=ar

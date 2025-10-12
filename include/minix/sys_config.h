@@ -7,12 +7,16 @@
  * source code directory for information on alternatives omitted here.
  */
 
+#include <ansi.h>
+
 /*===========================================================================*
  *		This section contains user-settable parameters		     *
  *===========================================================================*/
 #define _MINIX_MACHINE       _MACHINE_IBM_PC
 
 #define _MACHINE_IBM_PC             1	/* any  8088 or 80x86-based system */
+
+#define _EM_WSIZE 4 // RK: aparently an ACK internal define
 
 /* Word size in bytes (a constant equal to sizeof(int)). */
 #if __ACK__ || __GNUC__

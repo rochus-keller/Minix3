@@ -3,7 +3,7 @@
 
 #include <minix/config.h>
 #if _WORD_SIZE == 2
-#include "klib88.s"
+#error "16 bit klib no longer supported"
 #else
 #include "klib386.s"
 #endif

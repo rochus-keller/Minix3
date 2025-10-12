@@ -3,7 +3,7 @@
 
 LK = /usr/lib/keymaps
 
-CC = tcc
+CC ?= tcc
 CFLAGS = -m32 -I../../../include
 
 .SUFFIXES: .src .map

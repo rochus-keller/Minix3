@@ -3,6 +3,7 @@
 
 #include <minix/sys_config.h>
 #include <minix/ipc.h>
+#include <sys/types.h>
 
 /*===========================================================================*
  *               	 Device <-> Driver Table  			     *

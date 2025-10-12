@@ -10,7 +10,7 @@ s = $i/sys
 h = $i/minix
 
 # programs, flags, etc.
-CC = tcc
+CC ?= tcc
 CFLAGS = -m32 -I$i -I../../include -D_MINIX -D_POSIX_SOURCE -D_SYSTEM $(EXTRA_OPTS)
 LDFLAGS = -m32 -nostdlib
 LIBS = -lsys -lsysutil -ltimers

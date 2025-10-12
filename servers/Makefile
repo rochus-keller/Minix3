@@ -2,7 +2,7 @@
 # Modified for TCC compilation
 
 MAKE = exec make -$(MAKEFLAGS)
-CC = tcc
+CC ?= tcc
 EXTRA_OPTS = -m32 -D_MINIX -D_POSIX_SOURCE
 
 export CC EXTRA_OPTS

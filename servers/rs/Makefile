@@ -12,7 +12,7 @@ m = $i/minix
 b = $i/ibm
 
 # programs, flags, etc.
-CC = tcc
+CC ?= tcc
 CFLAGS = -m32 -I$i -I../../include -D_MINIX -D_POSIX_SOURCE -D_SYSTEM
 LDFLAGS = -m32 -nostdlib
 UTIL_LIBS = -lsys

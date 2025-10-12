@@ -137,7 +137,6 @@ If successful, the system will build and boot in QEMU.
 | Script | Purpose | Usage |
 |--------|---------|-------|
 | `build.sh` | Complete build from scratch | `./build.sh` |
-| `quick-build.sh` | Rebuild only changed files | `./quick-build.sh` |
 | `clean.sh` | Remove all build artifacts | `./clean.sh` |
 | `mkbootimg.sh` | Create bootable image | `./mkbootimg.sh` |
 | `run-qemu.sh` | Test in QEMU | `./run-qemu.sh` |
@@ -207,11 +206,9 @@ BUILD_JOBS=4 ./build.sh
 minix3/
 ├── README.md                    # This file
 ├── LICENSE                      # BSD license
-├── QUICKSTART.md               # 5-minute guide
 ├── TESTING.md                  # Testing documentation
 │
 ├── build.sh                    # Main build script
-├── quick-build.sh              # Fast rebuild
 ├── clean.sh                    # Clean script
 ├── mkbootimg.sh                # Boot image creator
 ├── run-qemu.sh                 # QEMU launcher

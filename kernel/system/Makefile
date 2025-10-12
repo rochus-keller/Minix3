@@ -6,9 +6,9 @@ u = /usr
 i = $u/include
 
 # Programs, flags, etc.
-CC = tcc
-AR = ar
-RANLIB = ranlib
+CC ?= tcc
+AR ?= ar
+RANLIB ?= ranlib
 CFLAGS = -m32 -I$i -I../../include -D_MINIX -D_SYSTEM -D_KERNEL \
          -fno-builtin -fno-stack-protector
 
