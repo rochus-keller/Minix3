@@ -23,7 +23,7 @@ OBJS = start.o protect.o klib.o table.o main.o proc.o \
 
 SYSTEM = system.a
 
-LIBS = -ltimers
+LIBS = 
 
 # What to make.
 all: build
@@ -48,10 +48,10 @@ depend:
 
 # Assembly files for i386
 mpx.o: mpx386.s
-	$(AS) $(ASFLAGS) mpx386.s -o mpx.o
+	$(CC) -E -traditional $(CFLAGS) mpx386.s | $(AS) $(ASFLAGS) -o mpx.o
 
 klib.o: klib386.s
-	$(AS) $(ASFLAGS) klib386.s -o klib.o
+	$(CC) -E -traditional $(CFLAGS) klib386.s | $(AS) $(ASFLAGS) -o klib.o
 
 # Pattern rule for C files
 %.o: %.c

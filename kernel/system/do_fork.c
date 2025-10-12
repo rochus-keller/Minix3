@@ -8,7 +8,7 @@
 
 #include "../system.h"
 #include <signal.h>
-#if (CHIP == INTEL)
+#if (_CHIP_INTEL)
 #include "../protect.h"
 #endif
 
@@ -21,7 +21,7 @@ PUBLIC int do_fork(m_ptr)
 register message *m_ptr;	/* pointer to request message */
 {
 /* Handle sys_fork().  PR_PPROC_NR has forked.  The child is PR_PROC_NR. */
-#if (CHIP == INTEL)
+#if (_CHIP_INTEL)
   reg_t old_ldt_sel;
 #endif
   register struct proc *rpc;		/* child process pointer */
@@ -33,7 +33,7 @@ register message *m_ptr;	/* pointer to request message */
   if (isemptyp(rpp) || ! isemptyp(rpc)) return(EINVAL);
 
   /* Copy parent 'proc' struct to child. And reinitialize some fields. */
-#if (CHIP == INTEL)
+#if (_CHIP_INTEL)
   old_ldt_sel = rpc->p_ldt_sel;		/* backup local descriptors */
   *rpc = *rpp;				/* copy 'proc' struct */
   rpc->p_ldt_sel = old_ldt_sel;		/* restore descriptors */

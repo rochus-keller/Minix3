@@ -29,7 +29,7 @@
 
 /* Set the CHIP type based on the machine selected. The symbol CHIP is actually
  * indicative of more than just the CPU.  For example, machines for which
- * CHIP == INTEL are expected to have 8259A interrrupt controllers and the
+ * _CHIP_INTEL are expected to have 8259A interrrupt controllers and the
  * other properties of IBM PC/XT/AT/386 types machines in general. */
 #define _CHIP_INTEL     1	/* CHIP type for PC, XT, AT, 386 and clones */
 

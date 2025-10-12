@@ -8,7 +8,7 @@ i = $u/include
 CC ?= tcc
 CFLAGS = -m32 -I$i -I../../include -I../../usr/include -D_MINIX -D_POSIX_SOURCE -D_SYSTEM
 LDFLAGS = -m32 -nostdlib
-LIBS = -lsys -lsysutil -ltimers
+LIBS = -lsys -lsysutil
 
 OBJ = main.o forkexit.o break.o exec.o time.o timers.o \
       signal.o alloc.o utility.o table.o trace.o getset.o misc.o

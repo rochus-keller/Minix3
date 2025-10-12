@@ -13,7 +13,7 @@ h = $i/minix
 CC ?= tcc
 CFLAGS = -m32 -I$i -I../../include -D_MINIX -D_POSIX_SOURCE -D_SYSTEM $(EXTRA_OPTS)
 LDFLAGS = -m32 -nostdlib
-LIBS = -lsys -lsysutil -ltimers
+LIBS = -lsys -lsysutil
 
 OBJ = main.o open.o read.o write.o pipe.o dmap.o \
       device.o path.o mount.o link.o super.o inode.o \

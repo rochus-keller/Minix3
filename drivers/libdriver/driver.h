@@ -45,13 +45,13 @@ struct driver {
   _PROTOTYPE( int (*dr_hw_int), (struct driver *dp, message *m_ptr) );
 };
 
-#if (CHIP == INTEL)
+#if (_CHIP_INTEL)
 
 /* Number of bytes you can DMA before hitting a 64K boundary: */
 #define dma_bytes_left(phys)    \
    ((unsigned) (sizeof(int) == 2 ? 0 : 0x10000) - (unsigned) ((phys) & 0xFFFF))
 
-#endif /* CHIP == INTEL */
+#endif /* _CHIP_INTEL */
 
 /* Base and size of a partition in bytes. */
 struct device {
@@ -83,7 +83,7 @@ _PROTOTYPE( int do_diocntl, (struct driver *dp, message *m_ptr) );
 #define USE_EXTRA_DMA_BUF  0	/* usually not needed */
 #define DMA_BUF_SIZE	(DMA_SECTORS * SECTOR_SIZE)
 
-#if (CHIP == INTEL)
+#if (_CHIP_INTEL)
 extern u8_t *tmp_buf;			/* the DMA buffer */
 #else
 extern u8_t tmp_buf[];			/* the DMA buffer */

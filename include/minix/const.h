@@ -71,7 +71,7 @@
 #define MIN(a, b)   ((a) < (b) ? (a) : (b))
 
 /* Memory is allocated in clicks. */
-#if (CHIP == INTEL)
+#if (_CHIP_INTEL)
 #define CLICK_SIZE      1024	/* unit in which memory is allocated */
 #define CLICK_SHIFT       10	/* log2 of CLICK_SIZE */
 #endif

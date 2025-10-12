@@ -43,7 +43,7 @@ struct randomness {
   } bin[RANDOM_SOURCES];
 };
 
-#if (CHIP == INTEL)
+#if (_CHIP_INTEL)
 typedef unsigned reg_t;		/* machine register */
 
 /* The stack frame layout is determined by the software, but for efficiency
@@ -101,7 +101,7 @@ typedef struct irq_hook {
 
 typedef int (*irq_handler_t)(struct irq_hook *);
 
-#endif /* (CHIP == INTEL) */
+#endif /* (_CHIP_INTEL) */
 
 #if (CHIP == M68000)
 /* M68000 specific types go here. */

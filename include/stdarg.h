@@ -21,10 +21,20 @@
 #ifndef _STDARG_H
 #define _STDARG_H
 
-#ifdef __GNUC__
-/* The GNU C-compiler uses its own, but similar varargs mechanism. */
+#if defined __TINYC__
 
-typedef char *va_list;
+typedef __builtin_va_list va_list;
+#define va_start __builtin_va_start
+#define va_arg __builtin_va_arg
+#define va_copy __builtin_va_copy
+#define va_end __builtin_va_end
+
+/* fix a buggy dependency on GCC in libio.h */
+typedef va_list __gnuc_va_list;
+#define _VA_LIST_DEFINED
+
+#elif defined __GNUC__
+/* The GNU C-compiler uses its own, but similar varargs mechanism. */
 
 /* Amount of space required in an argument list for an arg of type TYPE.
  * TYPE may alternatively be an expression whose type is used.
@@ -35,6 +45,7 @@ typedef char *va_list;
 
 #if __GNUC__ < 2
 
+typedef char *va_list;
 #ifndef __sparc__
 #define va_start(AP, LASTARG)                                           \
  (AP = ((char *) &(LASTARG) + __va_rounded_size (LASTARG)))
@@ -51,8 +62,18 @@ void va_end (va_list);          /* Defined in gnulib */
  (AP += __va_rounded_size (TYPE),                                       \
   *((TYPE *) (AP - __va_rounded_size (TYPE))))
 
+#elif __GNUC__ >= 4
+
+typedef __builtin_va_list va_list;
+#define va_copy(d,s)	__builtin_va_copy(d,s)
+#define va_start(v,l)	__builtin_va_start(v,l)
+#define va_end(v)	__builtin_va_end(v)
+#define va_arg(v,l)	__builtin_va_arg(v,l)
+#define _VA_LIST_DEFINED
+
 #else	/* __GNUC__ >= 2 */
 
+typedef char *va_list;
 #ifndef __sparc__
 #define va_start(AP, LASTARG) 						\
  (AP = ((char *) __builtin_next_arg ()))

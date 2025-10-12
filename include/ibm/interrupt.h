@@ -3,7 +3,9 @@
 #ifndef _INTERRUPT_H
 #define _INTERRUPT_H
 
-#if (CHIP == INTEL)
+#include <minix/sys_config.h>
+
+#if (_CHIP_INTEL)
 
 /* 8259A interrupt controller ports. */
 #define INT_CTL         0x20	/* I/O port for interrupt controller */
@@ -55,6 +57,9 @@
 #define VECTOR(irq)	\
 	(((irq) < 8 ? IRQ0_VECTOR : IRQ8_VECTOR) + ((irq) & 0x07))
 
-#endif /* (CHIP == INTEL) */
+#define MASK_IRQS1 (~((1<<CLOCK_IRQ)|(1<<FLOPPY_IRQ)|(1<<HD_IRQ)))
+#define MASK_IRQS2 (~((1<<CASCADE_IRQ)|(1<<CLOCK_IRQ)|(1<<FLOPPY_IRQ)|(1<<HD_IRQ)))
+
+#endif /* (_CHIP_INTEL) */
 
 #endif /* _INTERRUPT_H */

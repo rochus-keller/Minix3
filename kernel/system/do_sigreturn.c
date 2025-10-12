@@ -52,7 +52,7 @@ message *m_ptr;			/* pointer to request message */
   }
   sc.sc_psw  = rp->p_reg.psw;
 
-#if (CHIP == INTEL)
+#if (_CHIP_INTEL)
   /* Don't panic kernel if user gave bad selectors. */
   sc.sc_cs = rp->p_reg.cs;
   sc.sc_ds = rp->p_reg.ds;
