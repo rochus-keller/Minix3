@@ -61,43 +61,43 @@ begbss:
 # link to an entity declared in the assembly code but does not create
 # the entity.
 
-.globl _restart
+.globl restart
 .globl save
-.globl _divide_error
-.globl _single_step_exception
-.globl _nmi
-.globl _breakpoint_exception
-.globl _overflow
-.globl _bounds_check
-.globl _inval_opcode
-.globl _copr_not_available
-.globl _double_fault
-.globl _copr_seg_overrun
-.globl _inval_tss
-.globl _segment_not_present
-.globl _stack_exception
-.globl _general_protection
-.globl _page_fault
-.globl _copr_error
-.globl _hwint00		# handlers for hardware interrupts
-.globl _hwint01
-.globl _hwint02
-.globl _hwint03
-.globl _hwint04
-.globl _hwint05
-.globl _hwint06
-.globl _hwint07
-.globl _hwint08
-.globl _hwint09
-.globl _hwint10
-.globl _hwint11
-.globl _hwint12
-.globl _hwint13
-.globl _hwint14
-.globl _hwint15
-.globl _s_call
-.globl _p_s_call
-.globl _level0_call
+.globl divide_error
+.globl single_step_exception
+.globl nmi
+.globl breakpoint_exception
+.globl overflow
+.globl bounds_check
+.globl inval_opcode
+.globl copr_not_available
+.globl double_fault
+.globl copr_seg_overrun
+.globl inval_tss
+.globl segment_not_present
+.globl stack_exception
+.globl general_protection
+.globl page_fault
+.globl copr_error
+.globl hwint00		# handlers for hardware interrupts
+.globl hwint01
+.globl hwint02
+.globl hwint03
+.globl hwint04
+.globl hwint05
+.globl hwint06
+.globl hwint07
+.globl hwint08
+.globl hwint09
+.globl hwint10
+.globl hwint11
+.globl hwint12
+.globl hwint13
+.globl hwint14
+.globl hwint15
+.globl s_call
+.globl p_s_call
+.globl level0_call
 
 # Exported variables.
 .globl begbss
@@ -128,8 +128,8 @@ over_flags:
 	push	%edi
 	cmpl	$0, 4(%ebp)		# monitor return vector is
 	jz	noret			# nonzero if return possible
-	incl	(_mon_return)
-noret:	movl	%esp, (_mon_sp)		# save stack pointer for later return
+	incl	(mon_return)
+noret:	movl	%esp, (mon_sp)		# save stack pointer for later return
 
 # Copy the monitor global descriptor table to the address space of kernel and
 # switch over to it. Prot_init() can then update it with immediate effect.
@@ -154,7 +154,7 @@ copygdt:
 	movl	8(%ebp), %ebx		# boot parameters offset
 	movl	12(%ebp), %edx		# boot parameters length
 	movl	16(%ebp), %eax		# address of a.out headers
-	movl	%eax, (_aout)
+	movl	%eax, (aout)
 	mov	%ds, %ax		# kernel data
 	mov	%ax, %es
 	mov	%ax, %fs
@@ -168,7 +168,7 @@ copygdt:
 	push	$SS_SELECTOR
 	push	$DS_SELECTOR
 	push	$CS_SELECTOR
-	call	_cstart			# cstart(cs, ds, mds, parmoff, parmlen)
+	call	cstart			# cstart(cs, ds, mds, parmoff, parmlen)
 	add	$5*4, %esp
 
 # Reload gdtr, idtr and the segment registers to global descriptor table set
@@ -203,10 +203,10 @@ csinit:
 # Note this is a macro, it just looks like a subroutine.
 .macro hwint_master irq
 	call	save		/* save interrupted process state */
-	push	(_irq_handlers+4*\irq)	/* irq_handlers[irq] */
-	call	_intr_handle	/* intr_handle(irq_handlers[irq]) */
+	push	(irq_handlers+4*\irq)	/* irq_handlers[irq] */
+	call	intr_handle	/* intr_handle(irq_handlers[irq]) */
 	pop	%ecx
-	cmpl	$0, (_irq_actids+4*\irq)	/* interrupt still active? */
+	cmpl	$0, (irq_actids+4*\irq)	/* interrupt still active? */
 	jz	0f
 	inb	$INT_CTLMASK	/* get current mask */
 	orb	$(1<<\irq), %al	/* mask irq */
@@ -218,35 +218,35 @@ csinit:
 
 # Each of these entry points is an expansion of the hwint_master macro
 	.align	16
-_hwint00:		# Interrupt routine for irq 0 (the clock).
+hwint00:		# Interrupt routine for irq 0 (the clock).
 	hwint_master 0
 
 	.align	16
-_hwint01:		# Interrupt routine for irq 1 (keyboard)
+hwint01:		# Interrupt routine for irq 1 (keyboard)
 	hwint_master 1
 
 	.align	16
-_hwint02:		# Interrupt routine for irq 2 (cascade!)
+hwint02:		# Interrupt routine for irq 2 (cascade!)
 	hwint_master 2
 
 	.align	16
-_hwint03:		# Interrupt routine for irq 3 (second serial)
+hwint03:		# Interrupt routine for irq 3 (second serial)
 	hwint_master 3
 
 	.align	16
-_hwint04:		# Interrupt routine for irq 4 (first serial)
+hwint04:		# Interrupt routine for irq 4 (first serial)
 	hwint_master 4
 
 	.align	16
-_hwint05:		# Interrupt routine for irq 5 (XT winchester)
+hwint05:		# Interrupt routine for irq 5 (XT winchester)
 	hwint_master 5
 
 	.align	16
-_hwint06:		# Interrupt routine for irq 6 (floppy)
+hwint06:		# Interrupt routine for irq 6 (floppy)
 	hwint_master 6
 
 	.align	16
-_hwint07:		# Interrupt routine for irq 7 (printer)
+hwint07:		# Interrupt routine for irq 7 (printer)
 	hwint_master 7
 
 #*===========================================================================*
@@ -255,10 +255,10 @@ _hwint07:		# Interrupt routine for irq 7 (printer)
 # Note this is a macro, it just looks like a subroutine.
 .macro hwint_slave irq
 	call	save		/* save interrupted process state */
-	push	(_irq_handlers+4*\irq)	/* irq_handlers[irq] */
-	call	_intr_handle	/* intr_handle(irq_handlers[irq]) */
+	push	(irq_handlers+4*\irq)	/* irq_handlers[irq] */
+	call	intr_handle	/* intr_handle(irq_handlers[irq]) */
 	pop	%ecx
-	cmpl	$0, (_irq_actids+4*\irq)	/* interrupt still active? */
+	cmpl	$0, (irq_actids+4*\irq)	/* interrupt still active? */
 	jz	0f
 	inb	$INT2_CTLMASK
 	orb	$(1<<(\irq-8)), %al
@@ -271,35 +271,35 @@ _hwint07:		# Interrupt routine for irq 7 (printer)
 
 # Each of these entry points is an expansion of the hwint_slave macro
 	.align	16
-_hwint08:		# Interrupt routine for irq 8 (realtime clock)
+hwint08:		# Interrupt routine for irq 8 (realtime clock)
 	hwint_slave 8
 
 	.align	16
-_hwint09:		# Interrupt routine for irq 9 (irq 2 redirected)
+hwint09:		# Interrupt routine for irq 9 (irq 2 redirected)
 	hwint_slave 9
 
 	.align	16
-_hwint10:		# Interrupt routine for irq 10
+hwint10:		# Interrupt routine for irq 10
 	hwint_slave 10
 
 	.align	16
-_hwint11:		# Interrupt routine for irq 11
+hwint11:		# Interrupt routine for irq 11
 	hwint_slave 11
 
 	.align	16
-_hwint12:		# Interrupt routine for irq 12
+hwint12:		# Interrupt routine for irq 12
 	hwint_slave 12
 
 	.align	16
-_hwint13:		# Interrupt routine for irq 13 (FPU exception)
+hwint13:		# Interrupt routine for irq 13 (FPU exception)
 	hwint_slave 13
 
 	.align	16
-_hwint14:		# Interrupt routine for irq 14 (AT winchester)
+hwint14:		# Interrupt routine for irq 14 (AT winchester)
 	hwint_slave 14
 
 	.align	16
-_hwint15:		# Interrupt routine for irq 15
+hwint15:		# Interrupt routine for irq 15
 	hwint_slave 15
 
 #*===========================================================================*
@@ -321,22 +321,22 @@ save:
 	mov	%dx, %ds		# load rest of kernel segments
 	mov	%dx, %es		# kernel does not use fs, gs
 	movl	%esp, %eax		# prepare to return
-	incl	(_k_reenter)		# from -1 if not reentering
+	incl	(k_reenter)		# from -1 if not reentering
 	jnz	set_restart1		# stack is already kernel stack
 	movl	$k_stktop, %esp
-	push	$_restart		# build return address for int handler
+	push	$restart		# build return address for int handler
 	xorl	%ebp, %ebp		# for stacktrace
 	jmp	*RETADR-P_STACKBASE(%eax)
 set_restart1:
-	push	$_restart
+	push	$restart
 	jmp	*RETADR-P_STACKBASE(%eax)
 
 #*===========================================================================*
-#* _s_call *
+#* s_call *
 #*===========================================================================*
 	.align	16
-_s_call:
-_p_s_call:
+s_call:
+p_s_call:
 	cld				# set direction flag to a known value
 	sub	$6*4, %esp		# skip RETADR, eax, ecx, edx, ebx, est
 	push	%ebp			# stack already points into proc table
@@ -349,7 +349,7 @@ _p_s_call:
 	mov	%ss, %dx
 	mov	%dx, %ds
 	mov	%dx, %es
-	incl	(_k_reenter)
+	incl	(k_reenter)
 	movl	%esp, %esi		# assumes P_STACKBASE == 0
 	movl	$k_stktop, %esp
 	xorl	%ebp, %ebp		# for stacktrace
@@ -358,33 +358,33 @@ _p_s_call:
 	push	%ebx			# pointer to user message
 	push	%eax			# src/dest
 	push	%ecx			# SEND/RECEIVE/BOTH
-	call	_sys_call		# sys_call(function, src_dest, m_ptr)
+	call	sys_call		# sys_call(function, src_dest, m_ptr)
 					# caller is now explicitly in proc_ptr
-	movl	(_proc_ptr), %ebx	# return directly to caller
+	movl	(proc_ptr), %ebx	# return directly to caller
 	addl	$3*4, %esp		# clean up parameters
 	movl	%eax, AXREG(%ebx)	# sys_call MUST PRESERVE si, di, bp
 
 #*===========================================================================*
-#* _restart *
+#* restart *
 #*===========================================================================*
-_restart:
+restart:
 
 # Restart the current process or the next process if it is set.
 
-	cmpl	$0, (_next_ptr)		# see if another process is scheduled
+	cmpl	$0, (next_ptr)		# see if another process is scheduled
 	jz	0f
-	movl	(_next_ptr), %eax
-	movl	%eax, (_proc_ptr)
-	movl	$0, (_next_ptr)
+	movl	(next_ptr), %eax
+	movl	%eax, (proc_ptr)
+	movl	$0, (next_ptr)
 0:
-	cmpl	$0, (_sched_ticks)	# check if quantum is up
+	cmpl	$0, (sched_ticks)	# check if quantum is up
 	jle	switch_ticks		# or interrupts were masked
 check_sigs:
-	movl	(_proc_ptr), %esp	# will assume P_STACKBASE == 0
+	movl	(proc_ptr), %esp	# will assume P_STACKBASE == 0
 	lldt	P_LDT_SEL(%esp)		# enable process' segment descriptors
 	movl	$TSS3_S_SP0+tss, %eax	# set kernel stack pointer in tss
 	movl	%esp, (%eax)
-	decl	(_k_reenter)
+	decl	(k_reenter)
 	pop	%gs
 	pop	%fs
 	pop	%es
@@ -394,78 +394,78 @@ check_sigs:
 	iret				# continue process
 
 switch_ticks:
-	movl	(_bill_ptr), %eax	# pay the current process
+	movl	(bill_ptr), %eax	# pay the current process
 	incl	COUNTER(%eax)		# for the tick it last ran
-	movl	$1, (_sched_ticks)	# reset quantum
-	cmpl	(_proc_ptr), %eax	# is it the current process?
+	movl	$1, (sched_ticks)	# reset quantum
+	cmpl	(proc_ptr), %eax	# is it the current process?
 	jne	check_sigs		# if not, don't reschedule
-	call	_sched			# if it is, reschedule
+	call	sched			# if it is, reschedule
 	jmp	check_sigs
 
 #*===========================================================================*
 #* exception handlers *
 #*===========================================================================*
-_divide_error:
+divide_error:
 	push	$DIVIDE_VECTOR
 	jmp	exception
 
-_single_step_exception:
+single_step_exception:
 	push	$DEBUG_VECTOR
 	jmp	exception
 
-_nmi:
+nmi:
 	push	$NMI_VECTOR
 	jmp	exception
 
-_breakpoint_exception:
+breakpoint_exception:
 	push	$BREAKPOINT_VECTOR
 	jmp	exception
 
-_overflow:
+overflow:
 	push	$OVERFLOW_VECTOR
 	jmp	exception
 
-_bounds_check:
+bounds_check:
 	push	$BOUNDS_VECTOR
 	jmp	exception
 
-_inval_opcode:
+inval_opcode:
 	push	$INVAL_OP_VECTOR
 	jmp	exception
 
-_copr_not_available:
+copr_not_available:
 	push	$COPROC_NOT_VECTOR
 	jmp	exception
 
-_double_fault:
+double_fault:
 	push	$DOUBLE_FAULT_VECTOR
 	jmp	errexception
 
-_copr_seg_overrun:
+copr_seg_overrun:
 	push	$COPROC_SEG_VECTOR
 	jmp	exception
 
-_inval_tss:
+inval_tss:
 	push	$INVAL_TSS_VECTOR
 	jmp	errexception
 
-_segment_not_present:
+segment_not_present:
 	push	$SEG_NOT_VECTOR
 	jmp	errexception
 
-_stack_exception:
+stack_exception:
 	push	$STACK_FAULT_VECTOR
 	jmp	errexception
 
-_general_protection:
+general_protection:
 	push	$PROTECTION_VECTOR
 	jmp	errexception
 
-_page_fault:
+page_fault:
 	push	$PAGE_FAULT_VECTOR
 	jmp	errexception
 
-_copr_error:
+copr_error:
 	push	$COPROC_ERR_VECTOR
 	jmp	exception
 
@@ -476,20 +476,20 @@ _copr_error:
 
 	.align	16
 exception:
-	sseg
+	#TODO sseg
 	push	$0			# push fake error code
-	sseg
+	#TODO sseg
 	push	%eax			# eax is scratch register
 	movl	4(%esp), %eax		# old eip
-	sseg
+	#TODO sseg
 	movl	%eax, 8(%esp)
 	movl	(%esp), %eax
-	sseg
+	#TODO sseg
 	movl	%eax, 4(%esp)
 	popl	%eax
 	call	save
 	push	%eax			# push exception vector
-	call	_exception		# exception(vec_nr)
+	call	exception		# exception(vec_nr)
 	addl	$4, %esp
 	cli
 	ret
@@ -501,21 +501,21 @@ exception:
 
 	.align	16
 errexception:
-	sseg
+	#TODO sseg
 	push	%eax			# eax is scratch register
 	movl	4(%esp), %eax		# old eip
-	sseg
+	#TODO sseg
 	movl	%eax, 12(%esp)
 	movl	8(%esp), %eax		# old cs
-	sseg
+	#TODO sseg
 	movl	%eax, 8(%esp)
 	movl	4(%esp), %eax		# old error code
-	sseg
+	#TODO sseg
 	movl	%eax, 4(%esp)
 	popl	%eax
 	call	save
 	push	%eax			# push exception vector
-	call	_exception		# exception(vec_nr)
+	call	exception		# exception(vec_nr)
 	addl	$4, %esp
 	cli
 	ret
@@ -523,7 +523,7 @@ errexception:
 #*===========================================================================*
 #* level0_call *
 #*===========================================================================*
-_level0_call:
+level0_call:
 	call	save
 	jmp	*(_level0_func)
 

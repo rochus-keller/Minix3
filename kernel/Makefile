@@ -18,7 +18,7 @@ LDFLAGS = -m elf_i386 -nostdlib -Ttext 0x00100000
 
 HEAD = mpx.o
 
-OBJS = start.o protect.o klib.o table.o main.o proc.o \
+OBJS = start.o protect.o table.o main.o proc.o \
        i8259.o exception.o system.o clock.o utility.o
 
 SYSTEM = system.a
@@ -28,9 +28,9 @@ LIBS =
 # What to make.
 all: build
 
-kernel build: $(HEAD) $(OBJS) $(SYSTEM)
+kernel build: $(HEAD) klib.o $(OBJS) $(SYSTEM)
 	$(LD) $(LDFLAGS) -o kernel \
-		$(HEAD) $(OBJS) \
+		$(HEAD) klib.o $(OBJS) \
 		$(SYSTEM) $(LIBS)
 
 install: kernel
@@ -47,11 +47,11 @@ depend:
 	@echo "Dependencies updated for TCC build"
 
 # Assembly files for i386
-mpx.o: mpx386.s
-	$(CC) -E -traditional $(CFLAGS) mpx386.s | $(AS) $(ASFLAGS) -o mpx.o
+mpx.o: mpx386.S
+	$(CC) -c $(CFLAGS) mpx386.S -o mpx.o
 
-klib.o: klib386.s
-	$(CC) -E -traditional $(CFLAGS) klib386.s | $(AS) $(ASFLAGS) -o klib.o
+klib.o: klib386.S
+	$(AS) $(ASFLAGS) klib386.S -o klib.o
 
 # Pattern rule for C files
 %.o: %.c

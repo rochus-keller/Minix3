@@ -15,27 +15,27 @@
 # This file contains a number of assembly code utility routines needed by the
 # kernel. They are:
 
-.globl _monitor          # exit Minix and return to the monitor
-.globl _int86            # let the monitor make an 8086 interrupt call
-.globl _cp_mess          # copies messages from source to destination
-.globl _exit             # dummy for library routines
-.globl __exit            # dummy for library routines
-.globl ___exit           # dummy for library routines
-.globl ___main           # dummy for GCC
-.globl _phys_insw        # transfer data from (disk controller) port to memory
-.globl _phys_insb        # likewise byte by byte
-.globl _phys_outsw       # transfer data from memory to (disk controller) port
-.globl _phys_outsb       # likewise byte by byte
-.globl _enable_irq       # enable an irq at the 8259 controller
-.globl _disable_irq      # disable an irq
-.globl _phys_copy        # copy data from anywhere to anywhere in memory
-.globl _phys_memset      # write pattern anywhere in memory
-.globl _mem_rdw          # copy one word from [segment:offset]
-.globl _reset            # reset the system
-.globl _idle_task        # task executed when there is no work
-.globl _level0           # call a function at level 0
-.globl _read_tsc         # read the cycle counter (Pentium and up)
-.globl _read_cpu_flags   # read the cpu flags
+.globl monitor          # exit Minix and return to the monitor
+.globl int86            # let the monitor make an 8086 interrupt call
+.globl cp_mess          # copies messages from source to destination
+.globl exit             # dummy for library routines
+.globl _exit            # dummy for library routines
+.globl __exit           # dummy for library routines
+.globl __main           # dummy for GCC
+.globl phys_insw        # transfer data from (disk controller) port to memory
+.globl phys_insb        # likewise byte by byte
+.globl phys_outsw       # transfer data from memory to (disk controller) port
+.globl phys_outsb       # likewise byte by byte
+.globl enable_irq       # enable an irq at the 8259 controller
+.globl disable_irq      # disable an irq
+.globl phys_copy        # copy data from anywhere to anywhere in memory
+.globl phys_memset      # write pattern anywhere in memory
+.globl mem_rdw          # copy one word from [segment:offset]
+.globl reset            # reset the system
+.globl idle_task        # task executed when there is no work
+.globl level0           # call a function at level 0
+.globl read_tsc         # read the cycle counter (Pentium and up)
+.globl read_cpu_flags   # read the cpu flags
 
 # The routines only guarantee to preserve the registers the C compiler
 # expects to be preserved (ebx, esi, edi, ebp, esp, segment registers, and
@@ -50,8 +50,8 @@
 # PUBLIC void monitor();
 # Return to the monitor.
 
-_monitor:
-    movl (_mon_sp), %esp        # restore monitor stack pointer
+monitor:
+    movl (mon_sp), %esp        # restore monitor stack pointer
     movw $SS_SELECTOR, %dx      # monitor data segment
     movw %dx, %ds
     movw %dx, %es
@@ -68,12 +68,12 @@ _monitor:
 #*===========================================================================*
 # PUBLIC void int86();
 
-_int86:
-    cmpb $0, (_mon_return)      # is the monitor there?
+int86:
+    cmpb $0, (mon_return)      # is the monitor there?
     jnz 0f
     movb $0x01, %ah             # an int 13 error seems appropriate
-    movb %ah, (_reg86+ 0)       # reg86.w.f = 1 (set carry flag)
-    movb %ah, (_reg86+13)       # reg86.b.ah = 0x01 = "invalid command"
+    movb %ah, (reg86+ 0)       # reg86.w.f = 1 (set carry flag)
+    movb %ah, (reg86+13)       # reg86.b.ah = 0x01 = "invalid command"
     ret
 
 0:  pushl %ebp                  # save C registers
@@ -87,16 +87,16 @@ _int86:
     movb %al, %ah
     inb $INT_CTLMASK
     pushl %eax                  # save interrupt masks
-    movl (_irq_use), %eax       # map of in-use IRQ's
+    movl (irq_use), %eax       # map of in-use IRQ's
     andl $MASK_IRQS1, %eax
-    movl %eax, (_irq_use)
+    movl %eax, (irq_use)
     movb %ah, %al
     outb $INT2_CTLMASK          # disable all irq's
     movb $MASK_IRQS2, %al
     outb $INT_CTLMASK
 
-    movl $(_reg86), %ebx        # power of monitor access reg86
-    call *_mon_return           # set-up trap and switching by monitor
+    movl $(reg86), %ebx        # power of monitor access reg86
+    call *mon_return           # set-up trap and switching by monitor
     sti
 
     popl %eax
@@ -131,7 +131,7 @@ CM_ARGS     =   4 + 4 + 4 + 4 + 4       # 4 + 4 + 4 + 4 + 4
 #               es  ds edi esi eip       proc scl sof dcl dof
 
         .align  16
-_cp_mess:
+cp_mess:
     cld
     pushl %esi
     pushl %edi
@@ -168,15 +168,15 @@ _cp_mess:
 # PUBLIC void exit();
 # Some library routines use exit, so provide a dummy version.
 # Actual calls to exit cannot occur in the kernel.
-# GNU CC likes to call ___main from main() for nonobvious reasons.
+# GNU CC likes to call __main from main() for nonobvious reasons.
 
+exit:
 _exit:
 __exit:
-___exit:
     sti
-    jmp ___exit
+    jmp __exit
 
-___main:
+__main:
     ret
 
 #*===========================================================================*
@@ -185,7 +185,7 @@ ___main:
 # PUBLIC void phys_insw(Port_t port, phys_bytes buf, size_t count);
 # Input an array from an I/O port.  Absolute address version of insw().
 
-_phys_insw:
+phys_insw:
     pushl %ebp
     movl %esp, %ebp
     cld
@@ -209,7 +209,7 @@ _phys_insw:
 # PUBLIC void phys_insb(Port_t port, phys_bytes buf, size_t count);
 # Input an array from an I/O port.  Absolute address version of insb().
 
-_phys_insb:
+phys_insb:
     pushl %ebp
     movl %esp, %ebp
     cld
@@ -233,7 +233,7 @@ _phys_insb:
 # Output an array to an I/O port.  Absolute address version of outsw().
 
         .align  16
-_phys_outsw:
+phys_outsw:
     pushl %ebp
     movl %esp, %ebp
     cld
@@ -257,7 +257,7 @@ _phys_outsw:
 # PUBLIC void phys_outsb(Port_t port, phys_bytes buf, size_t count);
 # Output an array to an I/O port.  Absolute address version of outsb().
 
-_phys_outsb:
+phys_outsb:
     pushl %ebp
     movl %esp, %ebp
     cld
@@ -280,11 +280,11 @@ _phys_outsb:
 # PUBLIC void enable_irq(irq_hook_t *hook)
 # Enable an interrupt request line by clearing an 8259 bit.
 # Equivalent C code for irq < 8:
-#   if ((irq_actids[hook->irq] &= ~hook->id) == 0)
-#       outb(INT_CTLMASK, inb(INT_CTLMASK) & ~(1 << irq));
+/*   if ((irq_actids[hook->irq] &= ~hook->id) == 0)
+       outb(INT_CTLMASK, inb(INT_CTLMASK) & ~(1 << irq)); */
 
         .align  16
-_enable_irq:
+enable_irq:
     pushl %ebp
     movl %esp, %ebp
     pushf
@@ -293,7 +293,7 @@ _enable_irq:
     movl 8(%eax), %ecx              # irq
     movl 12(%eax), %eax             # id bit
     notl %eax
-    andl %eax, _irq_actids(,%ecx,4) # clear this id bit
+    andl %eax, irq_actids(,%ecx,4) # clear this id bit
     jnz en_done                     # still masked by other handlers?
     movb $~1, %ah
     rolb %cl, %ah                   # ah = ~(1 << (irq % 8))
@@ -320,7 +320,7 @@ en_done:
 # Returns true iff the interrupt was not already disabled.
 
         .align  16
-_disable_irq:
+disable_irq:
     pushl %ebp
     movl %esp, %ebp
     pushf
@@ -328,7 +328,7 @@ _disable_irq:
     movl 8(%ebp), %eax              # hook
     movl 8(%eax), %ecx              # irq
     movl 12(%eax), %eax             # id bit
-    orl %eax, _irq_actids(,%ecx,4)  # set this id bit
+    orl %eax, irq_actids(,%ecx,4)  # set this id bit
     movb $1, %ah
     rolb %cl, %ah                   # ah = (1 << (irq % 8))
     movl $INT_CTLMASK, %edx         # disable irq < 8 at the master 8259
@@ -362,7 +362,7 @@ PC_ARGS =   4 + 4 + 4 + 4           # 4 + 4 + 4
 #           es edi esi eip           src dst len
 
         .align  16
-_phys_copy:
+phys_copy:
     cld
     pushl %esi
     pushl %edi
@@ -407,7 +407,7 @@ pc_small:
 # Fill a block of physical memory with pattern.
 
         .align  16
-_phys_memset:
+phys_memset:
     pushl %ebp
     movl %esp, %ebp
     pushl %esi
@@ -455,7 +455,7 @@ fill_done:
 # Load and return word at far pointer segment:offset.
 
         .align  16
-_mem_rdw:
+mem_rdw:
     movw %ds, %cx
     movw 4(%esp), %ds               # segment
     movl 4+4(%esp), %eax            # offset
@@ -469,7 +469,7 @@ _mem_rdw:
 # PUBLIC void reset();
 # Reset the system by loading IDT with offset 0 and interrupting.
 
-_reset:
+reset:
     lidt (idt_zero)
     int $3                          # anything goes, the 386 will not like it
 
@@ -482,13 +482,13 @@ idt_zero: .long 0, 0
 #*                           idle_task                                       *
 #*===========================================================================*
 
-_idle_task:
+idle_task:
     # This task is called when the system has nothing else to do. The HLT
     # instruction puts the processor in a state where it draws minimum power.
     pushl $halt
-    call _level0                    # level0(halt)
+    call level0                    # level0(halt)
     popl %eax
-    jmp _idle_task
+    jmp idle_task
 
 halt:
     sti
@@ -503,7 +503,7 @@ halt:
 # Call a function at permission level 0. This allows kernel tasks to do
 # things that are only possible at the most privileged CPU level.
 
-_level0:
+level0:
     movl 4(%esp), %eax
     movl %eax, (_level0_func)
     int $LEVEL0_VECTOR
@@ -516,7 +516,7 @@ _level0:
 # Read the cycle counter of the CPU. Pentium and up.
 
         .align  16
-_read_tsc:
+read_tsc:
     .byte 0x0f                      # this is the RDTSC instruction
     .byte 0x31                      # it places the TSC in EDX:EAX
     pushl %ebp
@@ -534,7 +534,7 @@ _read_tsc:
 # Read CPU status flags from C.
 
         .align  16
-_read_cpu_flags:
+read_cpu_flags:
     pushf
     movl (%esp), %eax
     popf
@@ -550,7 +550,7 @@ Register and Immediate Notation: Registers now require the % prefix (%eax instea
 Size Suffixes: GAS requires explicit size suffixes on instructions. Generic mov instructions became movl (long/32-bit),
   movw (word/16-bit), or movb (byte/8-bit) based on operand context.
 Instruction-Specific Changes:
-Memory Addressing: ACK's memory syntax (eax) became GAS's (%eax), and complex addressing modes like _irq_actids(ecx*4) were converted to _irq_actids(,%ecx,4).
+Memory Addressing: ACK's memory syntax (eax) became GAS's (%eax), and complex addressing modes like irq_actids(ecx*4) were converted to irq_actids(,%ecx,4).
 Segment Overrides: ACK's eseg movsb prefix became GAS's es movsb syntax.
 String Operations: Instructions like movs were expanded to size-specific forms (movsl for 32-bit, movsb for 8-bit).
 Special Instructions: The o16 prefix (operand size override) combined with retf was translated to lretw (far return with 16-bit operand).
