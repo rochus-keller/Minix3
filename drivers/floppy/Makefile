@@ -14,7 +14,7 @@ MAKE = exec make
 CC =	exec cc
 CFLAGS = -I$i $(CPROFILE)
 LDFLAGS = -i -L../libdriver
-LIBS = -lsysutil -ldriver  -lsys -ltimers
+LIBS = -ldriver -lsys  -ltimers
 
 OBJ = floppy.o 
 
@@ -22,7 +22,7 @@ OBJ = floppy.o
 all build:	$(DRIVER)
 $(DRIVER):	$(OBJ)
 	$(CC) -o $@ $(LDFLAGS) $(OBJ) $(LIBS)
-	install -S 8k $(DRIVER)
+	install -S 16k $(DRIVER)
 
 # install with other drivers
 install:	/sbin/$(DRIVER)

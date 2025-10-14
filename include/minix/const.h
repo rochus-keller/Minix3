@@ -11,7 +11,7 @@
 #define TRUE               1	/* used for turning integers into Booleans */
 #define FALSE              0	/* used for turning integers into Booleans */
 
-#define HZ	          60	/* clock freq (software settable on IBM-PC) */
+#define DEFAULT_HZ        60	/* clock freq (software settable on IBM-PC) */
 
 #define SUPER_USER (uid_t) 0	/* uid_t of superuser */
 
@@ -19,7 +19,7 @@
 #define CPVEC_NR          16	/* max # of entries in a SYS_VCOPY request */
 #define CPVVEC_NR         64	/* max # of entries in a SYS_VCOPY request */
 #define SCPVEC_NR	  64	/* max # of entries in a SYS_VSAFECOPY* request */
-#define NR_IOREQS	MIN(NR_BUFS, 64)
+#define NR_IOREQS	  64
 				/* maximum number of entries in an iorequest */
 
 /* Message passing constants. */
@@ -45,6 +45,12 @@
 #define PHYS_SEG      0x0400	/* flag indicating entire physical memory */
 
 #define GRANT_SEG     0x0800	/* flag indicating grant for umap */
+
+#define LOCAL_VM_SEG  0x1000	/* same as LOCAL_SEG, but with vm lookup */
+#define VM_D		(LOCAL_VM_SEG | D)
+#define VM_T		(LOCAL_VM_SEG | T)
+#define MEM_GRANT	3
+#define VM_GRANT	(LOCAL_VM_SEG | MEM_GRANT)
 
 /* Labels used to disable code sections for different reasons. */
 #define DEAD_CODE	   0	/* unused code in normal configuration */
@@ -77,6 +83,13 @@
 #define CLICK_SHIFT	  12	/* log2 of CLICK_SIZE */
 #endif
 
+/* Sizes of memory tables. The boot monitor distinguishes three memory areas,
+ * namely low mem below 1M, 1M-16M, and mem after 16M. More chunks are needed
+ * for DOS MINIX.
+*/
+#define NR_MEMS            8 
+
+
 /* Click to byte conversions (and vice versa). */
 #define HCLICK_SHIFT       4	/* log2 of HCLICK_SIZE */
 #define HCLICK_SIZE       16	/* hardware segment conversion magic */
@@ -108,8 +121,6 @@
 #define I_NOT_ALLOC     0000000	/* this inode is free */
 
 /* Some limits. */
-#define MAX_BLOCK_NR  ((block_t) 077777777)	/* largest block number */
-#define HIGHEST_ZONE   ((zone_t) 077777777)	/* largest zone number */
 #define MAX_INODE_NR ((ino_t) 037777777777)	/* largest inode number */
 #define MAX_FILE_POS ((off_t) 0x7FFFFFFF)	/* largest legal file offset */
 
@@ -119,3 +130,16 @@
 #define NO_ENTRY                ((ino_t) 0)	/* absence of a dir entry */
 #define NO_ZONE                ((zone_t) 0)	/* absence of a zone number */
 #define NO_DEV                  ((dev_t) 0)	/* absence of a device numb */
+
+#define SERVARNAME		"cttyline"
+
+/* Bits for the system property flags in boot image processes. */
+#define PREEMPTIBLE     0x02    /* kernel tasks are not preemptible */
+#define BILLABLE        0x04    /* some processes are not billable */
+ 
+#define SYS_PROC        0x10    /* system processes have own priv structure */
+#define CHECK_IO_PORT   0x20    /* check if I/O request is allowed */
+#define CHECK_IRQ       0x40    /* check if IRQ can be used */
+#define CHECK_MEM       0x80    /* check if (VM) mem map request is allowed */
+#define PROC_FULLVM    0x100    /* VM sets and manages full pagetable */
+

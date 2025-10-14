@@ -16,11 +16,15 @@ usage:
 build: all
 all install depend clean:
 	cd ./libdriver && $(MAKE) $@
+	cd ./libdriver_asyn && $(MAKE) $@
 	cd ./tty && $(MAKE) $@
+	cd ./amddev && $(MAKE) $@
 	cd ./at_wini && $(MAKE) $@
+	cd ./audio && $(MAKE) $@
 	cd ./floppy && $(MAKE) $@
 	cd ./printer && $(MAKE) $@
 	cd ./rtl8139 && $(MAKE) $@
+	cd ./orinoco && $(MAKE) $@
 	cd ./fxp && $(MAKE) $@
 	cd ./dpeth && $(MAKE) $@
 	cd ./log && $(MAKE) $@
@@ -36,6 +40,7 @@ all install depend clean:
 
 image:
 	cd ./libdriver && $(MAKE) build
+	cd ./libdriver_asyn && $(MAKE) build
 	cd ./tty && $(MAKE) build
 	cd ./at_wini && $(MAKE) build
 	cd ./floppy && $(MAKE) build

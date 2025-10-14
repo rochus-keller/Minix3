@@ -14,12 +14,12 @@
 #include <minix/com.h>
 #include <minix/endpoint.h>
 #include <unistd.h>
+#include <stdlib.h>
+#include <assert.h>
 #include "file.h"
 #include "fproc.h"
 #include "param.h"
 #include "vmnt.h"
-
-PRIVATE int panicking;		/* inhibits recursive panics during sync */
 
 /*===========================================================================*
  *				fetch_name				     *
@@ -29,7 +29,7 @@ char *path;			/* pointer to the path in user space */
 int len;			/* path length, including 0 byte */
 int flag;			/* M3 means path may be in message */
 {
-/* Go get path and put it in 'user_path'.
+/* Go get path and put it in 'user_fullpath'.
  * If 'flag' = M3 and 'len' <= M3_STRING, the path is present in 'message'.
  * If it is not, go copy it from user space.
  */
@@ -37,6 +37,10 @@ int flag;			/* M3 means path may be in message */
   int r;
 
   if (len > PATH_MAX) {
+#if 0
+	printf("VFS: fetch_name: len (%d) > %d\n", len, PATH_MAX);
+	util_stacktrace();
+#endif
 	err_code = ENAMETOOLONG;
 	return(EGENERIC);
   }
@@ -49,11 +53,12 @@ int flag;			/* M3 means path may be in message */
   if (len <= 0) {
 	err_code = EINVAL;
 	printf("vfs: fetch_name: len %d?\n", len);
+	util_stacktrace();
 	return(EGENERIC);
   }
 
   if (flag == M3 && len <= M3_STRING) {
-	/* Just copy the path from the message to 'user_path'. */
+	/* Just copy the path from the message to 'user_fullpath'. */
 	rpu = &user_fullpath[0];
 	rpm = m_in.pathname;		/* contained in input message */
 	do { *rpu++ = *rpm++; } while (--len);
@@ -84,30 +89,8 @@ PUBLIC int no_sys()
 {
 /* Somebody has used an illegal system call number */
   printf("VFSno_sys: call %d from %d\n", call_nr, who_e);
-  return(SUSPEND);
+  return(ENOSYS);
 }
-
-/*===========================================================================*
- *				panic					     *
- *===========================================================================*/
-PUBLIC void panic(who, mess, num)
-char *who;			/* who caused the panic */
-char *mess;			/* panic message string */
-int num;			/* number to go with it */
-{
-/* Something awful has happened.  Panics are caused when an internal
- * inconsistency is detected, e.g., a programming error or illegal value of a
- * defined constant.
- */
-  if (panicking) return;	/* do not panic during a sync */
-  panicking = TRUE;		/* prevent another panic during the sync */
-
-  printf("VFS panic (%s): %s ", who, mess);
-  if (num != NO_NUM) printf("%d",num); 
-  (void) do_sync();		/* flush everything to the disk */
-  sys_exit(SELF);
-}
-
 
 /*===========================================================================*
  *				isokendpt_f				     *
@@ -115,15 +98,26 @@ int num;			/* number to go with it */
 PUBLIC int isokendpt_f(char *file, int line, int endpoint, int *proc, int fatal)
 {
     int failed = 0;
+    endpoint_t ke;
     *proc = _ENDPOINT_P(endpoint);
-    if(*proc < 0 || *proc >= NR_PROCS) {
+    if(endpoint == NONE) {
+        printf("vfs:%s: endpoint is NONE\n", file, line, endpoint);
+        failed = 1;
+    } else if(*proc < 0 || *proc >= NR_PROCS) {
         printf("vfs:%s:%d: proc (%d) from endpoint (%d) out of range\n",
                 file, line, *proc, endpoint);
         failed = 1;
-    } else if(fproc[*proc].fp_endpoint != endpoint) {
-        printf("vfs:%s:%d: proc (%d) from endpoint (%d) doesn't match "
-                "known endpoint (%d)\n",
-                file, line, *proc, endpoint, fproc[*proc].fp_endpoint);
+    } else if((ke=fproc[*proc].fp_endpoint) != endpoint) {
+	if(ke == NONE) {
+        	printf("vfs:%s:%d: endpoint (%d) points to NONE slot (%d)\n",
+                	file, line, endpoint, *proc);
+		assert(fproc[*proc].fp_pid == PID_FREE);
+	} else {
+	        printf("vfs:%s:%d: proc (%d) from endpoint (%d) doesn't match "
+       	         "known endpoint (%d)\n",
+       	         file, line, *proc, endpoint, fproc[*proc].fp_endpoint);
+		assert(fproc[*proc].fp_pid != PID_FREE);
+	}
         failed = 1;
     }
 
@@ -143,10 +137,14 @@ PUBLIC time_t clock_time()
  * rate and that such things as leap seconds do not exist.
  */
 
-  register int k;
+  register int r;
   clock_t uptime;
+  time_t boottime;
 
-  if ( (k=getuptime(&uptime)) != OK) panic(__FILE__,"clock_time err", k);
-  return( (time_t) (boottime + (uptime/HZ)));
+  r= getuptime2(&uptime, &boottime);
+  if (r != OK)
+	panic(__FILE__,"clock_time err", r);
+
+  return( (time_t) (boottime + (uptime/system_hz)));
 }
 

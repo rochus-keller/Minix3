@@ -7,6 +7,7 @@
  */
 
 #include "../system.h"
+#include "../vm.h"
 #include <signal.h>
 
 #include <minix/endpoint.h>
@@ -31,9 +32,24 @@ register message *m_ptr;	/* pointer to request message */
 
   if(!isokendpt(m_ptr->PR_ENDPT, &p_proc))
 	return EINVAL;
+
   rpp = proc_addr(p_proc);
   rpc = proc_addr(m_ptr->PR_SLOT);
   if (isemptyp(rpp) || ! isemptyp(rpc)) return(EINVAL);
+
+  vmassert(!(rpp->p_misc_flags & MF_DELIVERMSG));
+
+  /* needs to be receiving so we know where the message buffer is */
+  if(!RTS_ISSET(rpp, RECEIVING)) {
+	printf("kernel: fork not done synchronously?\n");
+	return EINVAL;
+  }
+
+  /* memory becomes readonly */
+  if (priv(rpp)->s_asynsize > 0) {
+	printf("kernel: process with waiting asynsend table can't fork\n");
+	return EINVAL;
+  }
 
   map_ptr= (struct mem_map *) m_ptr->PR_MEM_PTR;
 
@@ -41,10 +57,10 @@ register message *m_ptr;	/* pointer to request message */
   gen = _ENDPOINT_G(rpc->p_endpoint);
 #if (_MINIX_CHIP == _CHIP_INTEL)
   old_ldt_sel = rpc->p_seg.p_ldt_sel;	/* backup local descriptors */
+#endif
   *rpc = *rpp;				/* copy 'proc' struct */
+#if (_MINIX_CHIP == _CHIP_INTEL)
   rpc->p_seg.p_ldt_sel = old_ldt_sel;	/* restore descriptors */
-#else
-  *rpc = *rpp;				/* copy 'proc' struct */
 #endif
   if(++gen >= _ENDPOINT_MAX_GENERATION)	/* increase generation */
 	gen = 1;			/* generation number wraparound */
@@ -54,6 +70,8 @@ register message *m_ptr;	/* pointer to request message */
   rpc->p_reg.retreg = 0;	/* child sees pid = 0 to know it is child */
   rpc->p_user_time = 0;		/* set all the accounting times to 0 */
   rpc->p_sys_time = 0;
+
+  rpc->p_reg.psw &= ~TRACEBIT;		/* clear trace bit */
 
   /* Parent and child have to share the quantum that the forked process had,
    * so that queued processes do not have to wait longer because of the fork.
@@ -73,9 +91,16 @@ register message *m_ptr;	/* pointer to request message */
 
   /* Calculate endpoint identifier, so caller knows what it is. */
   m_ptr->PR_ENDPT = rpc->p_endpoint;
+  m_ptr->PR_FORK_MSGADDR = (char *) rpp->p_delivermsg_vir;
 
   /* Install new map */
   r = newmap(rpc, map_ptr);
+  FIXLINMSG(rpc);
+
+  /* Don't schedule process in VM mode until it has a new pagetable. */
+  if(m_ptr->PR_FORK_FLAGS & PFF_VMINHIBIT) {
+  	RTS_LOCK_SET(rpc, VMINHIBIT);
+  }
 
   /* Only one in group should have SIGNALED, child doesn't inherit tracing. */
   RTS_LOCK_UNSET(rpc, (SIGNALED | SIG_PENDING | P_STOP));

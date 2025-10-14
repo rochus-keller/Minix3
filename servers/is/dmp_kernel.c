@@ -4,6 +4,7 @@
 #include <timers.h>
 #include <ibm/interrupt.h>
 #include <minix/endpoint.h>
+#include <minix/sysutil.h>
 #include <minix/sys_config.h>
 #include "../../kernel/const.h"
 #include "../../kernel/config.h"
@@ -11,6 +12,29 @@
 #include "../../kernel/type.h"
 #include "../../kernel/proc.h"
 #include "../../kernel/ipc.h"
+
+#define LINES 22
+
+#define PRINTRTS(rp) { \
+	char *procname = "";	\
+	printf(" %s", p_rts_flags_str(rp->p_rts_flags));	\
+	if (rp->p_rts_flags & (SENDING|RECEIVING)) {		\
+		procname = proc_name(_ENDPOINT_P(rp->p_getfrom_e)); \
+	} \
+	printf(" %-7.7s", procname);	\
+}
+
+static int pagelines;
+
+#define PROCLOOP(rp, oldrp) \
+	pagelines = 0; \
+	for (rp = oldrp; rp < END_PROC_ADDR; rp++) { \
+	  oldrp = BEG_PROC_ADDR; \
+	  if (isemptyp(rp)) continue; \
+	  if (++pagelines > LINES) { oldrp = rp; printf("--more--\n"); break; }\
+	  if (proc_nr(rp) == IDLE) 	printf("(%2d) ", proc_nr(rp));  \
+	  else if (proc_nr(rp) < 0) 	printf("[%2d] ", proc_nr(rp)); 	\
+	  else 				printf(" %2d  ", proc_nr(rp));
 
 #define click_to_round_k(n) \
 	((unsigned) ((((unsigned long) (n) << CLICK_SHIFT) + 512) / 1024))
@@ -34,10 +58,7 @@ PUBLIC struct boot_image image[NR_BOOT_PROCS];
  *===========================================================================*/
 PUBLIC void timing_dmp()
 {
-#if ! DEBUG_TIME_LOCKS
-  printf("Enable the DEBUG_TIME_LOCKS definition in src/kernel/config.h\n");
-#else
-  static struct lock_timingdata timingdata[TIMING_CATEGORIES];
+  static struct util_timingdata timingdata[TIMING_CATEGORIES];
   int r, c, f, skipped = 0, printed = 0, maxlines = 23, x = 0;
   static int offsetlines = 0;
 
@@ -66,7 +87,6 @@ PUBLIC void timing_dmp()
 	}
   	if (x > 0) printf("\n");
   }
-#endif
 }
 
 /*===========================================================================*
@@ -75,7 +95,7 @@ PUBLIC void timing_dmp()
 PUBLIC void kmessages_dmp()
 {
   struct kmessages kmess;		/* get copy of kernel messages */
-  char print_buf[KMESS_BUF_SIZE+1];	/* this one is used to print */
+  char print_buf[_KMESS_BUF_SIZE+1];	/* this one is used to print */
   int start;				/* calculate start of messages */
   int r;
 
@@ -89,10 +109,10 @@ PUBLIC void kmessages_dmp()
    * buffer into a print-buffer. This is done because the messages in the
    * copy may wrap (the kernel buffer is circular).
    */
-  start = ((kmess.km_next + KMESS_BUF_SIZE) - kmess.km_size) % KMESS_BUF_SIZE;
+  start = ((kmess.km_next + _KMESS_BUF_SIZE) - kmess.km_size) % _KMESS_BUF_SIZE;
   r = 0;
   while (kmess.km_size > 0) {
-  	print_buf[r] = kmess.km_buf[(start+r) % KMESS_BUF_SIZE];
+  	print_buf[r] = kmess.km_buf[(start+r) % _KMESS_BUF_SIZE];
   	r ++;
   	kmess.km_size --;
   }
@@ -204,54 +224,6 @@ PUBLIC void image_dmp()
   printf("\n");
 }
 
-/*===========================================================================*
- *				sched_dmp    				     *
- *===========================================================================*/
-PUBLIC void sched_dmp()
-{
-  struct proc *rdy_head[NR_SCHED_QUEUES];
-  struct kinfo kinfo;
-  register struct proc *rp;
-  vir_bytes ptr_diff;
-  int r;
-
-  /* First obtain a scheduling information. */
-  if ((r = sys_getschedinfo(proc, rdy_head)) != OK) {
-      report("IS","warning: couldn't get copy of process table", r);
-      return;
-  }
-  /* Then obtain kernel addresses to correct pointer information. */
-  if ((r = sys_getkinfo(&kinfo)) != OK) {
-      report("IS","warning: couldn't get kernel addresses", r);
-      return;
-  }
-
-  /* Update all pointers. Nasty pointer algorithmic ... */
-  ptr_diff = (vir_bytes) proc - (vir_bytes) kinfo.proc_addr;
-  for (r=0;r<NR_SCHED_QUEUES; r++)
-      if (rdy_head[r] != NIL_PROC)
-          rdy_head[r] = 
-              (struct proc *)((vir_bytes) rdy_head[r] + ptr_diff);
-  for (rp=BEG_PROC_ADDR; rp < END_PROC_ADDR; rp++)
-      if (rp->p_nextready != NIL_PROC)
-          rp->p_nextready =
-               (struct proc *)((vir_bytes) rp->p_nextready + ptr_diff);
-
-  /* Now show scheduling queues. */
-  printf("Dumping scheduling queues.\n");
-
-  for (r=0;r<NR_SCHED_QUEUES; r++) {
-      rp = rdy_head[r];
-      if (!rp) continue;
-      printf("%2d: ", r);
-      while (rp != NIL_PROC) {
-          printf("%3d ", rp->p_nr);
-          rp = rp->p_nextready;
-      }
-      printf("\n");
-  }
-  printf("\n");
-}
 
 /*===========================================================================*
  *				kenv_dmp				     *
@@ -283,21 +255,14 @@ PUBLIC void kenv_dmp()
     printf("- data_base:  %5u\n", kinfo.data_base); 
     printf("- data_size:  %5u\n", kinfo.data_size); 
     printf("- proc_addr:  %5u\n", kinfo.proc_addr); 
-    printf("- kmem_base:  %5u\n", kinfo.kmem_base); 
-    printf("- kmem_size:  %5u\n", kinfo.kmem_size); 
     printf("- bootdev_base:  %5u\n", kinfo.bootdev_base); 
     printf("- bootdev_size:  %5u\n", kinfo.bootdev_size); 
     printf("- ramdev_base:   %5u\n", kinfo.ramdev_base); 
     printf("- ramdev_size:   %5u\n", kinfo.ramdev_size); 
-    printf("- params_base:   %5u\n", kinfo.params_base); 
-    printf("- params_size:   %5u\n", kinfo.params_size); 
     printf("- nr_procs:     %3u\n", kinfo.nr_procs); 
     printf("- nr_tasks:     %3u\n", kinfo.nr_tasks); 
     printf("- release:      %.6s\n", kinfo.release); 
     printf("- version:      %.6s\n", kinfo.version); 
-#if DEBUG_LOCK_CHECK
-    printf("- relocking:    %d\n", kinfo.relocking); 
-#endif
     printf("\n");
 }
 
@@ -317,8 +282,8 @@ PRIVATE char *s_flags_str(int flags)
 PRIVATE char *s_traps_str(int flags)
 {
 	static char str[10];
-	str[0] = (flags & (1 << ECHO)) ? 'E' : '-';
-	str[1] = (flags & (1 << SEND))  ? 'S' : '-';
+	str[0] = (flags & (1 << SEND))  ? 'S' : '-';
+	str[1] = (flags & (1 << SENDA)) ? 'A' : '-';
 	str[2] = (flags & (1 << RECEIVE))  ? 'R' : '-';
 	str[3] = (flags & (1 << SENDREC))  ? 'B' : '-';
 	str[4] = (flags & (1 << NOTIFY)) ? 'N' : '-';
@@ -347,14 +312,9 @@ PUBLIC void privileges_dmp()
       return;
   }
 
-  printf("\n--nr-id-name---- -flags- -traps- grants -ipc_to-- -system calls--\n");
+  printf("\n--nr-id-name---- -flags- -traps- grants -ipc_to-- -ipc_sr-- -system calls--\n");
 
-  for (rp = oldrp; rp < END_PROC_ADDR; rp++) {
-	if (isemptyp(rp)) continue;
-	if (++n > 23) break;
-	if (proc_nr(rp) == IDLE) 	printf("(%2d) ", proc_nr(rp));  
-	else if (proc_nr(rp) < 0) 	printf("[%2d] ", proc_nr(rp));
-	else 				printf(" %2d  ", proc_nr(rp));
+  PROCLOOP(rp, oldrp)
         r = -1;
         for (sp = &priv[0]; sp < &priv[NR_SYS_PROCS]; sp++) 
             if (sp->s_proc_nr == rp->p_nr) { r ++; break; }
@@ -368,6 +328,9 @@ PUBLIC void privileges_dmp()
         for (i=0; i < NR_SYS_PROCS; i += BITCHUNK_BITS) {
 	    printf(" %04x", get_sys_bits(sp->s_ipc_to, i));
        	}
+        for (i=0; i < NR_SYS_PROCS; i += BITCHUNK_BITS) {
+	    printf(" %04x", get_sys_bits(sp->s_ipc_sendrec, i));
+       	}
 
 	printf(" ");
         for (i=0; i < NR_SYS_CALLS; i += BITCHUNK_BITS) {
@@ -376,58 +339,6 @@ PUBLIC void privileges_dmp()
 	printf("\n");
 
   }
-  if (rp == END_PROC_ADDR) rp = BEG_PROC_ADDR; else printf("--more--\r");
-  oldrp = rp;
-
-}
-
-/*===========================================================================*
- *				sendmask_dmp   				     *
- *===========================================================================*/
-PUBLIC void sendmask_dmp()
-{
-  register struct proc *rp;
-  static struct proc *oldrp = BEG_PROC_ADDR;
-  int r, i,j, n = 0;
-
-  /* First obtain a fresh copy of the current process table. */
-  if ((r = sys_getproctab(proc)) != OK) {
-      report("IS","warning: couldn't get copy of process table", r);
-      return;
-  }
-
-  printf("\n\n");
-  printf("Sendmask dump for process table. User processes (*) don't have [].");
-  printf("\n");
-  printf("The rows of bits indicate to which processes each process may send.");
-  printf("\n\n");
-
-#if DEAD_CODE
-  printf("              ");
-  for (j=proc_nr(BEG_PROC_ADDR); j< INIT_PROC_NR+1; j++) {
-     printf("%3d", j);
-  }
-  printf("  *\n");
-
-  for (rp = oldrp; rp < END_PROC_ADDR; rp++) {
-        if (isemptyp(rp)) continue;
-        if (++n > 20) break;
-
-    	printf("%8s ", rp->p_name);
-	if (proc_nr(rp) == IDLE) 	printf("(%2d) ", proc_nr(rp));  
-	else if (proc_nr(rp) < 0) 	printf("[%2d] ", proc_nr(rp));
-	else 				printf(" %2d  ", proc_nr(rp));
-
-    	for (j=proc_nr(BEG_PROC_ADDR); j<INIT_PROC_NR+2; j++) {
-    	    if (isallowed(rp->p_sendmask, j))	printf(" 1 ");
-    	    else 				printf(" 0 ");
-    	}
-        printf("\n");
-  }
-  if (rp == END_PROC_ADDR) { printf("\n"); rp = BEG_PROC_ADDR; }
-  else printf("--more--\r");
-  oldrp = rp;
-#endif
 }
 
 PRIVATE char *p_rts_flags_str(int flags)
@@ -464,35 +375,49 @@ PUBLIC void proctab_dmp()
       return;
   }
 
-  printf("\n-nr-----gen---endpoint-name--- -prior-quant- -user----sys----size-rts flags\n");
+  printf("\n-nr-----gen---endpoint-name--- -prior-quant- -user----sys--rts flags\n");
 
-  for (rp = oldrp; rp < END_PROC_ADDR; rp++) {
-	if (isemptyp(rp)) continue;
-	if (++n > 23) break;
+  PROCLOOP(rp, oldrp)
 	text = rp->p_memmap[T].mem_phys;
 	data = rp->p_memmap[D].mem_phys;
 	size = rp->p_memmap[T].mem_len
 		+ ((rp->p_memmap[S].mem_phys + rp->p_memmap[S].mem_len) - data);
-	if (proc_nr(rp) == IDLE) 	printf("(%2d) ", proc_nr(rp));  
-	else if (proc_nr(rp) < 0) 	printf("[%2d] ", proc_nr(rp));
-	else 				printf(" %2d  ", proc_nr(rp));
 	printf(" %5d %10d ", _ENDPOINT_G(rp->p_endpoint), rp->p_endpoint);
-	printf("%-8.8s %02u/%02u %02d/%02u %6lu %6lu %5uK %s",
+	printf("%-8.8s %02u/%02u %02d/%02u %6lu %6lu",
 	       rp->p_name,
 	       rp->p_priority, rp->p_max_priority,
 	       rp->p_ticks_left, rp->p_quantum_size, 
-	       rp->p_user_time, rp->p_sys_time,
-	       click_to_round_k(size),
-	       p_rts_flags_str(rp->p_rts_flags));
-	if (rp->p_rts_flags & (SENDING|RECEIVING)) {
-		printf(" %-7.7s", proc_name(_ENDPOINT_P(rp->p_getfrom_e)));
-	} 
+	       rp->p_user_time, rp->p_sys_time);
+	PRINTRTS(rp);
 	printf("\n");
   }
-  if (rp == END_PROC_ADDR) rp = BEG_PROC_ADDR; else printf("--more--\r");
-  oldrp = rp;
 }
 #endif				/* (CHIP == INTEL) */
+
+/*===========================================================================*
+ *				procstack_dmp  				     *
+ *===========================================================================*/
+PUBLIC void procstack_dmp()
+{
+/* Proc table dump, with stack */
+
+  register struct proc *rp;
+  static struct proc *oldrp = BEG_PROC_ADDR;
+  int r, n = 0;
+
+  /* First obtain a fresh copy of the current process table. */
+  if ((r = sys_getproctab(proc)) != OK) {
+      report("IS","warning: couldn't get copy of process table", r);
+      return;
+  }
+
+  printf("\n-nr-rts flags--      --stack--\n");
+
+  PROCLOOP(rp, oldrp)
+	PRINTRTS(rp);
+	sys_sysctl_stacktrace(rp->p_endpoint);
+  }
+}
 
 /*===========================================================================*
  *				memmap_dmp    				     *
@@ -510,26 +435,20 @@ PUBLIC void memmap_dmp()
       return;
   }
 
-  printf("\n-nr/name--- --pc-- --sp-- -----text----- -----data----- ----stack----- --size-\n");
-  for (rp = oldrp; rp < END_PROC_ADDR; rp++) {
-	if (isemptyp(rp)) continue;
-	if (++n > 23) break;
+  printf("\n-nr/name--- --pc--   --sp-- -text---- -data---- -stack--- -cr3-\n");
+  PROCLOOP(rp, oldrp)
 	size = rp->p_memmap[T].mem_len
 		+ ((rp->p_memmap[S].mem_phys + rp->p_memmap[S].mem_len)
 						- rp->p_memmap[D].mem_phys);
-	printf("%3d %-7.7s%7lx%7lx %4x %4x %4x %4x %4x %4x %4x %4x %4x %5uK\n",
-	       proc_nr(rp),
+	printf("%-7.7s%7lx %8lx %4x %4x %4x %4x %5x %5x %8lx\n",
 	       rp->p_name,
 	       (unsigned long) rp->p_reg.pc,
 	       (unsigned long) rp->p_reg.sp,
-	       rp->p_memmap[T].mem_vir, rp->p_memmap[T].mem_phys, rp->p_memmap[T].mem_len,
-	       rp->p_memmap[D].mem_vir, rp->p_memmap[D].mem_phys, rp->p_memmap[D].mem_len,
-	       rp->p_memmap[S].mem_vir, rp->p_memmap[S].mem_phys, rp->p_memmap[S].mem_len,
-	       click_to_round_k(size));
+	       rp->p_memmap[T].mem_phys, rp->p_memmap[T].mem_len,
+	       rp->p_memmap[D].mem_phys, rp->p_memmap[D].mem_len,
+	       rp->p_memmap[S].mem_phys, rp->p_memmap[S].mem_len,
+	       rp->p_seg.p_cr3);
   }
-  if (rp == END_PROC_ADDR) rp = proc; 
-  else printf("--more--\r");
-  oldrp = rp;
 }
 
 /*===========================================================================*
@@ -538,7 +457,12 @@ PUBLIC void memmap_dmp()
 PRIVATE char *proc_name(proc_nr)
 int proc_nr;
 {
+  struct proc *p;
   if (proc_nr == ANY) return "ANY";
-  return cproc_addr(proc_nr)->p_name;
+  if (proc_nr == NONE) return "NONE";	/* bogus */
+  if (proc_nr < -NR_TASKS || proc_nr >= NR_PROCS) return "BOGUS";
+  p = cproc_addr(proc_nr);
+  if (isemptyp(p)) return "EMPTY";	/* bogus */
+  return p->p_name;
 }
 

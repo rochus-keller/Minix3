@@ -29,8 +29,8 @@ PUBLIC int do_time()
   if ( (s=getuptime(&uptime)) != OK) 
   	panic(__FILE__,"do_time couldn't get uptime", s);
 
-  mp->mp_reply.reply_time = (time_t) (boottime + (uptime/HZ));
-  mp->mp_reply.reply_utime = (uptime%HZ)*1000000/HZ;
+  mp->mp_reply.reply_time = (time_t) (boottime + (uptime/system_hz));
+  mp->mp_reply.reply_utime = (uptime%system_hz)*1000000/system_hz;
   return(OK);
 }
 
@@ -51,16 +51,13 @@ PUBLIC int do_stime()
   }
   if ( (s=getuptime(&uptime)) != OK) 
       panic(__FILE__,"do_stime couldn't get uptime", s);
-  boottime = (long) m_in.stime - (uptime/HZ);
+  boottime = (long) m_in.stime - (uptime/system_hz);
 
-  if (mp->mp_fs_call != PM_IDLE)
-	panic("pm", "do_stime: not idle", mp->mp_fs_call);
-  mp->mp_fs_call= PM_STIME;
-  s= notify(FS_PROC_NR);
-  if (s != OK) panic("pm", "do_stime: unable to notify FS", s);
+  s= sys_stime(boottime);		/* Tell kernel about boottime */
+  if (s != OK)
+	panic(__FILE__, "pm: sys_stime failed", s);
 
-  /* Do not reply until FS is ready to process the stime request */
-  return(SUSPEND);
+  return(OK);
 }
 
 /*===========================================================================*
@@ -70,16 +67,16 @@ PUBLIC int do_times()
 {
 /* Perform the times(buffer) system call. */
   register struct mproc *rmp = mp;
-  clock_t t[5];
+  clock_t user_time, sys_time, uptime;
   int s;
 
-  if (OK != (s=sys_times(who_e, t)))
+  if (OK != (s=sys_times(who_e, &user_time, &sys_time, &uptime)))
       panic(__FILE__,"do_times couldn't get times", s);
-  rmp->mp_reply.reply_t1 = t[0];		/* user time */
-  rmp->mp_reply.reply_t2 = t[1];		/* system time */
+  rmp->mp_reply.reply_t1 = user_time;		/* user time */
+  rmp->mp_reply.reply_t2 = sys_time;		/* system time */
   rmp->mp_reply.reply_t3 = rmp->mp_child_utime;	/* child user time */
   rmp->mp_reply.reply_t4 = rmp->mp_child_stime;	/* child system time */
-  rmp->mp_reply.reply_t5 = t[4];		/* uptime since boot */
+  rmp->mp_reply.reply_t5 = uptime;		/* uptime since boot */
 
   return(OK);
 }

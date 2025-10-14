@@ -59,6 +59,7 @@
 #include <net/hton.h>
 #include <net/gen/ether.h>
 #include <net/gen/eth_io.h>
+#include <sys/vm_i386.h>
 #include <sys/vm.h>
 #include "assert.h"
 
@@ -70,6 +71,8 @@
 static dpeth_t de_table[DE_PORT_NR];
 static u16_t eth_ign_proto;
 static char *progname;
+
+u32_t system_hz;
 
 /* Configuration */
 typedef struct dp_conf
@@ -208,6 +211,8 @@ int main(int argc, char *argv[])
 	int i, irq, r, tasknr;
 	dpeth_t *dep;
 	long v;
+
+	system_hz = sys_hz();
 
 	if (argc < 1)
 	{
@@ -398,7 +403,10 @@ static void pci_conf()
 		for (i= 0, dep= de_table; i<DE_PORT_NR; i++, dep++)
 		{
 			if (!dep->de_pci)
+			{
+				printf("pci: no pci for port %d\n", i);
 				continue;
+			}
 			if (((dep->de_pcibus | dep->de_pcidev |
 				dep->de_pcifunc) != 0) != h)
 			{
@@ -821,7 +829,7 @@ dpeth_t *dep;
 static void do_getstat(mp)
 message *mp;
 {
-	int port;
+	int port, r;
 	dpeth_t *dep;
 
 	port = mp->DL_PORT;
@@ -833,7 +841,13 @@ message *mp;
 	{
 		put_userdata(mp->DL_PROC, (vir_bytes) mp->DL_ADDR,
 			(vir_bytes) sizeof(dep->de_stat), &dep->de_stat);
-		reply(dep, OK, FALSE);
+		
+		mp->m_type= DL_STAT_REPLY;
+		mp->DL_PORT= port;
+		mp->DL_STAT= OK;
+		r= send(mp->m_source, mp);
+		if (r != OK)
+			panic(__FILE__, "do_getstat: send failed: %d\n", r);
 		return;
 	}
 	assert(dep->de_mode == DEM_ENABLED);
@@ -845,7 +859,13 @@ message *mp;
 
 	put_userdata(mp->DL_PROC, (vir_bytes) mp->DL_ADDR,
 		(vir_bytes) sizeof(dep->de_stat), &dep->de_stat);
-	reply(dep, OK, FALSE);
+
+	mp->m_type= DL_STAT_REPLY;
+	mp->DL_PORT= port;
+	mp->DL_STAT= OK;
+	r= send(mp->m_source, mp);
+	if (r != OK)
+		panic(__FILE__, "do_getstat: send failed: %d\n", r);
 }
 
 /*===========================================================================*
@@ -854,7 +874,7 @@ message *mp;
 static void do_getstat_s(mp)
 message *mp;
 {
-	int port;
+	int port, r;
 	dpeth_t *dep;
 
 	port = mp->DL_PORT;
@@ -866,7 +886,13 @@ message *mp;
 	{
 		put_userdata(mp->DL_PROC, (vir_bytes) mp->DL_ADDR,
 			(vir_bytes) sizeof(dep->de_stat), &dep->de_stat);
-		reply(dep, OK, FALSE);
+
+		mp->m_type= DL_STAT_REPLY;
+		mp->DL_PORT= port;
+		mp->DL_STAT= OK;
+		r= send(mp->m_source, mp);
+		if (r != OK)
+			panic(__FILE__, "do_getstat: send failed: %d\n", r);
 		return;
 	}
 	assert(dep->de_mode == DEM_ENABLED);
@@ -878,7 +904,13 @@ message *mp;
 
 	put_userdata_s(mp->DL_PROC, mp->DL_GRANT,
 		sizeof(dep->de_stat), &dep->de_stat);
-	reply(dep, OK, FALSE);
+
+	mp->m_type= DL_STAT_REPLY;
+	mp->DL_PORT= port;
+	mp->DL_STAT= OK;
+	r= send(mp->m_source, mp);
+	if (r != OK)
+		panic(__FILE__, "do_getstat: send failed: %d\n", r);
 }
 
 /*===========================================================================*
@@ -2513,18 +2545,22 @@ dpeth_t *dep;
 		return;
 	}
 
-	size = dep->de_ramsize + PAGE_SIZE;	/* Add PAGE_SIZE for
+	size = dep->de_ramsize + I386_PAGE_SIZE;	/* Add I386_PAGE_SIZE for
 						 * alignment
 						 */
 	buf= malloc(size);
 	if (buf == NULL)
 		panic(__FILE__, "map_hw_buffer: cannot malloc size", size);
-	o= PAGE_SIZE - ((vir_bytes)buf % PAGE_SIZE);
+	o= I386_PAGE_SIZE - ((vir_bytes)buf % I386_PAGE_SIZE);
 	abuf= buf + o;
 	printf("buf at 0x%x, abuf at 0x%x\n", buf, abuf);
 
+#if 0
 	r= sys_vm_map(SELF, 1 /* map */, (vir_bytes)abuf,
 			dep->de_ramsize, (phys_bytes)dep->de_linmem);
+#else
+	r = ENOSYS;
+#endif
 	if (r != OK)
 		panic(__FILE__, "map_hw_buffer: sys_vm_map failed", r);
 	dep->de_locmem = abuf;
@@ -2714,7 +2750,10 @@ u8_t inb(port_t port)
 
 	r= sys_inb(port, &value);
 	if (r != OK)
+	{
+		printf("inb failed for port 0x%x\n", port);
 		panic("DP8390","sys_inb failed", r);
+	}
 	return value;
 }
 

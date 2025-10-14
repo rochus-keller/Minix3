@@ -36,6 +36,7 @@ typedef struct eth_fd
 	get_userdata_t ef_get_userdata;
 	put_userdata_t ef_put_userdata;
 	put_pkt_t ef_put_pkt;
+	select_res_t ef_select_res;
 	time_t ef_exp_time;
 	size_t ef_write_count;
 	ioreq_t ef_ioctl_req;
@@ -49,6 +50,7 @@ typedef struct eth_fd
 #		define 	EFF_WRITE_IP	0x4
 #		define 	EFF_IOCTL_IP	0x8
 #	define EFF_OPTSET       0x10
+#   define EFF_SEL_READ	0x20
 
 /* Note that the vh_type field is normally considered part of the ethernet
  * header.
@@ -66,6 +68,7 @@ FORWARD void eth_buffree ARGS(( int priority ));
 #ifdef BUF_CONSISTENCY_CHECK
 FORWARD void eth_bufcheck ARGS(( void ));
 #endif
+FORWARD int eth_sel_read ARGS(( eth_fd_t * ));
 FORWARD void packet2user ARGS(( eth_fd_t *fd, acc_t *pack, time_t exp_time ));
 FORWARD void reply_thr_get ARGS(( eth_fd_t *eth_fd,
 	size_t result, int for_ioctl ));
@@ -100,7 +103,8 @@ PUBLIC void eth_init()
 		eth_fd_table[i].ef_flags= EFF_EMPTY;
 	for (i=0; i<eth_conf_nr; i++)
 	{
-		eth_port_table[i].etp_flags= EFF_EMPTY;
+		eth_port_table[i].etp_flags= EPF_EMPTY;
+		eth_port_table[i].etp_getstat= NULL;
 		eth_port_table[i].etp_sendq_head= NULL;
 		eth_port_table[i].etp_sendq_tail= NULL;
 		eth_port_table[i].etp_type_any= NULL;
@@ -157,6 +161,7 @@ select_res_t select_res;
 	eth_fd->ef_get_userdata= get_userdata;
 	eth_fd->ef_put_userdata= put_userdata;
 	eth_fd->ef_put_pkt= put_pkt;
+	eth_fd->ef_select_res= select_res;
 
 	return i;
 }
@@ -337,10 +342,21 @@ ioreq_t req;
 
 			if (!(eth_port->etp_flags & EPF_GOT_ADDR))
 			{
+#if 0
 				printf(
 				"eth_ioctl: suspending NWIOGETHSTAT ioctl\n");
+#endif
 
 				eth_fd->ef_ioctl_req= req;
+				assert(!(eth_fd->ef_flags & EFF_IOCTL_IP));
+				eth_fd->ef_flags |= EFF_IOCTL_IP;
+				return NW_SUSPEND;
+			}
+
+			if (eth_port->etp_getstat)
+			{
+				printf(
+	"eth_ioctl: pending eth_get_stat request, suspending caller\n");
 				assert(!(eth_fd->ef_flags & EFF_IOCTL_IP));
 				eth_fd->ef_flags |= EFF_IOCTL_IP;
 				return NW_SUSPEND;
@@ -356,6 +372,24 @@ ioreq_t req;
 			{
 				result= eth_get_stat(eth_port,
 					&ethstat->nwes_stat);
+				if (result == SUSPEND)
+				{
+#if 0
+					printf(
+				"eth_ioctl: eth_get_stat returned SUSPEND\n");
+#endif
+					eth_fd->ef_ioctl_req= req;
+					assert(!(eth_fd->ef_flags &
+						EFF_IOCTL_IP));
+					eth_fd->ef_flags |= EFF_IOCTL_IP;
+#if 0
+printf("eth_ioctl: setting etp_getstat in port %d to %p\n",
+	eth_port-eth_port_table, acc);
+#endif
+					eth_port->etp_getstat= acc;
+					acc= NULL;
+					return NW_SUSPEND;
+				}
 				if (result != NW_OK)
 				{
 					bf_afree(acc);
@@ -625,8 +659,32 @@ PUBLIC int eth_select(fd, operations)
 int fd;
 unsigned operations;
 {
-	printf("eth_select: not implemented\n");
-	return 0;
+	int i;
+	unsigned resops;
+	eth_fd_t *eth_fd;
+
+	eth_fd= &eth_fd_table[fd];
+	assert (eth_fd->ef_flags & EFF_INUSE);
+
+	resops= 0;
+
+	if (operations & SR_SELECT_READ)
+	{
+		if (eth_sel_read(eth_fd))
+			resops |= SR_SELECT_READ;
+		else if (!(operations & SR_SELECT_POLL))
+			eth_fd->ef_flags |= EFF_SEL_READ;
+	}
+	if (operations & SR_SELECT_WRITE)
+	{
+		/* Should handle special case when the interface is down */
+		resops |= SR_SELECT_WRITE;
+	}
+	if (operations & SR_SELECT_EXCEPTION)
+	{
+		printf("eth_select: not implemented for exceptions\n");
+	}
+	return resops;
 }
 
 PUBLIC void eth_close(fd)
@@ -993,8 +1051,20 @@ eth_port_t *vlan_port;
 PUBLIC void eth_restart_ioctl(eth_port)
 eth_port_t *eth_port;
 {
-	int i;
+	int i, r;
 	eth_fd_t *eth_fd;
+	acc_t *acc;
+
+#if 0
+	printf("in eth_restart_ioctl\n");
+#endif
+
+	/* eth_restart_ioctl is called on too occasions: when a device
+	 * driver registers with inet and when a eth_get_stat call has
+	 * completed. We assume the second option when etp_getstat is
+	 * not equal to zero at the start of the call.
+	 */
+	acc= eth_port->etp_getstat;
 
 	for (i= 0, eth_fd= eth_fd_table; i<ETH_FD_NR; i++, eth_fd++)
 	{
@@ -1007,9 +1077,68 @@ eth_port_t *eth_port;
 		if (eth_fd->ef_ioctl_req != NWIOGETHSTAT)
 			continue;
 
+#if 0
+printf("eth_restart_ioctl: etp_getstat in port %d is %p\n",
+	eth_port-eth_port_table, acc);
+#endif
+
+		if (acc != NULL)
+		{
+#if 0
+			printf("eth_restart_ioctl: completed getstat\n");
+#endif
+			acc->acc_linkC++;
+			r= (*eth_fd->ef_put_userdata)(eth_fd->ef_srfd, 0,
+				acc, TRUE);
+			if (r >= 0)
+				reply_thr_put(eth_fd, NW_OK, TRUE);
+			eth_fd->ef_flags &= ~EFF_IOCTL_IP;
+			continue;
+		}
+
+ { static int count; if (++count > 5) ip_panic(("too many restarts")); }
+
 		eth_fd->ef_flags &= ~EFF_IOCTL_IP;
 		eth_ioctl(i, eth_fd->ef_ioctl_req);
 	}
+
+	if (acc != NULL)
+	{
+#if 0
+printf("eth_restart_ioctl: clearing etp_getstat in port %d\n",
+	eth_port-eth_port_table);
+#endif
+		assert(acc == eth_port->etp_getstat);
+
+		bf_afree(acc);
+		eth_port->etp_getstat= NULL;
+	}
+}
+
+PRIVATE int eth_sel_read (eth_fd)
+eth_fd_t *eth_fd;
+{
+	acc_t *pack, *tmp_acc, *next_acc;
+	int result;
+
+	if (!(eth_fd->ef_flags & EFF_OPTSET))
+		return 1;	/* Read will not block */
+
+	if (eth_fd->ef_rdbuf_head)
+	{
+		if (get_time() <= eth_fd->ef_exp_time)
+			return 1;
+		
+		tmp_acc= eth_fd->ef_rdbuf_head;
+		while (tmp_acc)
+		{
+			next_acc= tmp_acc->acc_ext_link;
+			bf_afree(tmp_acc);
+			tmp_acc= next_acc;
+		}
+		eth_fd->ef_rdbuf_head= NULL;
+	}
+	return 0;
 }
 
 PRIVATE void packet2user (eth_fd, pack, exp_time)
@@ -1040,6 +1169,15 @@ time_t exp_time;
 		else
 			eth_fd->ef_rdbuf_tail->acc_ext_link= pack;
 		eth_fd->ef_rdbuf_tail= pack;
+
+		if (eth_fd->ef_flags & EFF_SEL_READ)
+		{
+			eth_fd->ef_flags &= ~EFF_SEL_READ;
+			if (eth_fd->ef_select_res)
+				eth_fd->ef_select_res(eth_fd->ef_srfd, SR_SELECT_READ);
+			else
+				printf("packet2user: no select_res\n");
+		}
 		return;
 	}
 

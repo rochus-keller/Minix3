@@ -17,10 +17,10 @@
 #include <minix/com.h>
 #include <minix/endpoint.h>
 #include "proc.h"
+#include "debug.h"
 
 /* Prototype declarations for PRIVATE functions. */
 FORWARD _PROTOTYPE( void announce, (void));	
-FORWARD _PROTOTYPE( void shutdown, (timer_t *));	
 
 /*===========================================================================*
  *				main                                         *
@@ -31,7 +31,7 @@ PUBLIC void main()
   struct boot_image *ip;	/* boot image pointer */
   register struct proc *rp;	/* process pointer */
   register struct priv *sp;	/* privilege structure pointer */
-  register int i, s;
+  register int i, j, s;
   int hdrindex;			/* index to array of a.out headers */
   phys_clicks text_base;
   vir_clicks text_clicks, data_clicks, st_clicks;
@@ -44,6 +44,9 @@ PUBLIC void main()
    */
   for (rp = BEG_PROC_ADDR, i = -NR_TASKS; rp < END_PROC_ADDR; ++rp, ++i) {
   	rp->p_rts_flags = SLOT_FREE;		/* initialize free slot */
+#if DEBUG_SCHED_CHECK
+	rp->p_magic = PMAGIC;
+#endif
 	rp->p_nr = i;				/* proc number from ptr */
 	rp->p_endpoint = _ENDPOINT(0, rp->p_nr); /* generation no. 0 */
         (pproc_addr + NR_TASKS)[i] = rp;        /* proc ptr from number */
@@ -68,6 +71,7 @@ PUBLIC void main()
   for (i=0; i < NR_BOOT_PROCS; ++i) {
 	int ci;
 	bitchunk_t fv;
+
 	ip = &image[i];				/* process' attributes */
 	rp = proc_addr(ip->proc_nr);		/* get process pointer */
 	ip->endpoint = rp->p_endpoint;		/* ipc endpoint */
@@ -97,6 +101,12 @@ PUBLIC void main()
 				ip->k_calls[ci]-KERNEL_CALL);
 
 	priv(rp)->s_ipc_to.chunk[0] = ip->ipc_to;	/* restrict targets */
+
+	for (j=0; j<BITMAP_CHUNKS(NR_SYS_PROCS); j++) {
+		rp->p_priv->s_ipc_sendrec.chunk[j] = ~0L;
+	}
+	unset_sys_bit(rp->p_priv->s_ipc_sendrec, USER_PRIV_ID);
+
 	if (iskerneln(proc_nr(rp))) {		/* part of the kernel? */ 
 		if (ip->stksize > 0) {		/* HARDWARE stack size is 0 */
 			rp->p_priv->s_stack_guard = (reg_t *) ktsb;
@@ -109,11 +119,11 @@ PUBLIC void main()
 		hdrindex = 1 + i-NR_TASKS;	/* servers, drivers, INIT */
 	}
 
-	/* The bootstrap loader created an array of the a.out headers at
-	 * absolute address 'aout'. Get one element to e_hdr.
+	/* Architecture-specific way to find out aout header of this
+	 * boot process.
 	 */
-	phys_copy(aout + hdrindex * A_MINHDR, vir2phys(&e_hdr),
-						(phys_bytes) A_MINHDR);
+	arch_get_aout_headers(hdrindex, &e_hdr);
+
 	/* Convert addresses to clicks and build process memory map */
 	text_base = e_hdr.a_syms >> CLICK_SHIFT;
 	text_clicks = (e_hdr.a_text + CLICK_SIZE-1) >> CLICK_SHIFT;
@@ -148,27 +158,50 @@ PUBLIC void main()
 				rp->p_memmap[S].mem_len) << CLICK_SHIFT;
 		rp->p_reg.sp -= sizeof(reg_t);
 	}
+
+	/* scheduling functions depend on proc_ptr pointing somewhere. */
+	if(!proc_ptr) proc_ptr = rp;
+
+	/* If this process has its own page table, VM will set the
+	 * PT up and manage it. VM will signal the kernel when it has
+	 * done this; until then, don't let it run.
+	 */
+	if(priv(rp)->s_flags & PROC_FULLVM)
+		RTS_SET(rp, VMINHIBIT);
 	
 	/* Set ready. The HARDWARE task is never ready. */
-	if (rp->p_nr == HARDWARE) RTS_LOCK_SET(rp, NO_PRIORITY);
-	RTS_LOCK_UNSET(rp, SLOT_FREE); /* remove SLOT_FREE and schedule */
-
-	/* Code and data segments must be allocated in protected mode. */
+	if (rp->p_nr == HARDWARE) RTS_SET(rp, NO_PRIORITY);
+	RTS_UNSET(rp, SLOT_FREE); /* remove SLOT_FREE and schedule */
 	alloc_segments(rp);
   }
 
 #if SPROFILE
   sprofiling = 0;      /* we're not profiling until instructed to */
 #endif /* SPROFILE */
-#if CPROFILE
   cprof_procs_no = 0;  /* init nr of hash table slots used */
-#endif /* CPROFILE */
+
+  vm_running = 0;
+  krandom.random_sources = RANDOM_SOURCES;
+  krandom.random_elements = RANDOM_ELEMENTS;
 
   /* MINIX is now ready. All boot image processes are on the ready queue.
    * Return to the assembly code to start running the current process. 
    */
-  bill_ptr = proc_addr(IDLE);		/* it has to point somewhere */
+  bill_ptr = proc_addr(IDLE);	/* it has to point somewhere */
   announce();				/* print MINIX startup banner */
+/* Warnings for sanity checks that take time. These warnings are printed
+ * so it's a clear warning no full release should be done with them
+ * enabled.
+ */
+#if DEBUG_SCHED_CHECK
+  FIXME("DEBUG_SCHED_CHECK enabled");
+#endif
+#if DEBUG_VMASSERT
+  FIXME("DEBUG_VMASSERT enabled");
+#endif
+#if DEBUG_PROC_CHECK
+  FIXME("PROC check enabled");
+#endif
   restart();
 }
 
@@ -182,8 +215,9 @@ PRIVATE void announce(void)
 #ifdef _SVN_REVISION
 	"(" _SVN_REVISION ")\n"
 #endif
-      "Copyright 2006, Vrije Universiteit, Amsterdam, The Netherlands\n",
+      "Copyright 2009, Vrije Universiteit, Amsterdam, The Netherlands\n",
       OS_RELEASE, OS_VERSION);
+  kprintf("MINIX is open source software, see http://www.minix3.org\n");
 }
 
 /*===========================================================================*
@@ -197,34 +231,19 @@ int how;
   register struct proc *rp; 
   message m;
 
-  /* Send a signal to all system processes that are still alive to inform 
-   * them that the MINIX kernel is shutting down. A proper shutdown sequence
-   * should be implemented by a user-space server. This mechanism is useful
-   * as a backup in case of system panics, so that system processes can still
-   * run their shutdown code, e.g, to synchronize the FS or to let the TTY
-   * switch to the first console. 
-   */
-#if DEAD_CODE
-  kprintf("Sending SIGKSTOP to system processes ...\n"); 
-  for (rp=BEG_PROC_ADDR; rp<END_PROC_ADDR; rp++) {
-      if (!isemptyp(rp) && (priv(rp)->s_flags & SYS_PROC) && !iskernelp(rp))
-          send_sig(proc_nr(rp), SIGKSTOP);
-  }
-#endif
-
   /* Continue after 1 second, to give processes a chance to get scheduled to 
    * do shutdown work.  Set a watchog timer to call shutdown(). The timer 
    * argument passes the shutdown status. 
    */
   kprintf("MINIX will now be shut down ...\n");
   tmr_arg(&shutdown_timer)->ta_int = how;
-  set_timer(&shutdown_timer, get_uptime() + HZ, shutdown);
+  set_timer(&shutdown_timer, get_uptime() + system_hz, minix_shutdown);
 }
 
 /*===========================================================================*
  *				shutdown 				     *
  *===========================================================================*/
-PRIVATE void shutdown(tp)
+PUBLIC void minix_shutdown(tp)
 timer_t *tp;
 {
 /* This function is called from prepare_shutdown or stop_sequence to bring 
@@ -233,6 +252,6 @@ timer_t *tp;
  */
   intr_init(INTS_ORIG);
   clock_stop();
-  arch_shutdown(tmr_arg(tp)->ta_int);
+  arch_shutdown(tp ? tmr_arg(tp)->ta_int : RBT_PANIC);
 }
 

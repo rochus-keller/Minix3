@@ -14,6 +14,9 @@
  *   old_icopy:	   copy to/from in-core inode struct and disk inode (V1.x)
  *   new_icopy:	   copy to/from in-core inode struct and disk inode (V2.x)
  *   dup_inode:	   indicate that someone else is using an inode table entry
+ *
+ * Updates:
+ * 2007-06-01:	jfdsmit@gmail.com added i_zsearch initialization
  */
 
 #include "fs.h"
@@ -45,16 +48,20 @@ PUBLIC int fs_putnode()
           fs_m_in.REQ_INODE_INDEX < NR_INODES &&
           inode[fs_m_in.REQ_INODE_INDEX].i_num == fs_m_in.REQ_INODE_NR) {
       rip = &inode[fs_m_in.REQ_INODE_INDEX];
+      if(!rip) {
+	panic(__FILE__, "null rip", NO_NUM);
+      }
   }
   /* Otherwise find it */
   else { 
-      rip = find_inode(fs_dev, fs_m_in.REQ_INODE_NR);
+      if(!(rip = find_inode(fs_dev, fs_m_in.REQ_INODE_NR))) {
+      	printf("FSput_inode: inode #%d dev: %d not found, req_nr: %d\n", 
+       	     fs_m_in.REQ_INODE_NR, fs_dev, req_nr);
+      }
   }
 
   if (!rip)
   {
-      printf("FSput_inode: inode #%d dev: %d couldn't be put, req_nr: %d\n", 
-            fs_m_in.REQ_INODE_NR, fs_dev, req_nr);
 	panic(__FILE__, "fs_putnode failed", NO_NUM);
   }
 
@@ -204,10 +211,12 @@ int numb;			/* inode number (ANSI: may not be unshort) */
   rip->i_count = 1;
   if (dev != NO_DEV) rw_inode(rip, READING);	/* get inode from disk */
   rip->i_update = 0;		/* all the times are initially up-to-date */
+  rip->i_zsearch = NO_ZONE;	/* no zones searched for yet */
   if ((rip->i_mode & I_TYPE) == I_NAMED_PIPE)
 	rip->i_pipe = I_PIPE;
   else
 	rip->i_pipe = NO_PIPE;
+  rip->i_mountpoint= FALSE;
 
   /* Add to hash */
   addhash_inode(rip);
@@ -264,7 +273,7 @@ register struct inode *rip;	/* pointer to inode to be released */
         else {
 		if (rip->i_pipe == I_PIPE) truncate_inode(rip, 0);
 	}
-        rip->i_mount = NO_MOUNT;
+        rip->i_mountpoint = FALSE;
 	if (rip->i_dirt == DIRTY) rw_inode(rip, WRITING);
 
 	if (rip->i_nlinks == 0) {
@@ -310,7 +319,7 @@ int count;
 		if (rip->i_pipe == I_PIPE)
 			truncate_inode(rip, 0);
 	}
-        rip->i_mount = NO_MOUNT;
+        rip->i_mountpoint = FALSE;
 	if (rip->i_dirt == DIRTY) rw_inode(rip, WRITING);
 
 	if (rip->i_nlinks == 0) {

@@ -1,4 +1,4 @@
-# 
+#
 ! This file, mpx386.s, is included by mpx.s when Minix is compiled for 
 ! 32-bit Intel CPUs. The alternative mpx88.s is compiled for 16-bit CPUs.
 
@@ -43,6 +43,8 @@
 
 ! sections
 
+#include <sys/vm_i386.h>
+
 .sect .text
 begtext:
 .sect .rom
@@ -71,6 +73,12 @@ begbss:
 
 .define	_restart
 .define	save
+.define _reload_cr3
+.define	_write_cr3	! write cr3
+
+.define errexception
+.define exception1
+.define exception
 
 .define	_divide_error
 .define	_single_step_exception
@@ -88,6 +96,11 @@ begbss:
 .define	_general_protection
 .define	_page_fault
 .define	_copr_error
+.define	_params_size
+.define _params_offset
+.define _mon_ds
+.define _schedcheck
+.define _dirtypde
 
 .define	_hwint00	! handlers for hardware interrupts
 .define	_hwint01
@@ -173,6 +186,11 @@ copygdt:
 	mov	ss, ax
 	mov	esp, k_stktop	! set sp to point to the top of kernel stack
 
+! Save boot parameters into these global variables for i386 code
+	mov	(_params_size), edx
+	mov	(_params_offset), ebx
+	mov	(_mon_ds), SS_SELECTOR
+
 ! Call C startup code to set up a proper environment to run main().
 	push	edx
 	push	ebx
@@ -200,7 +218,6 @@ csinit:
 	ltr	ax
 	push	0			! set flags to known good state
 	popf				! esp, clear nested task and int enable
-
 	jmp	_main			! main()
 
 
@@ -358,6 +375,7 @@ _p_s_call:
     o16	push	es
     o16	push	fs
     o16	push	gs
+
 	mov	si, ss		! ss is kernel data segment
 	mov	ds, si		! load rest of kernel segments
 	mov	es, si		! kernel does not use fs, gs
@@ -371,9 +389,10 @@ _p_s_call:
 	push	ebx		! pointer to user message
 	push	eax		! source / destination
 	push	ecx		! call number (ipc primitive to use)
+
 	call	_sys_call	! sys_call(call_nr, src_dst, m_ptr, bit_map)
 				! caller is now explicitly in proc_ptr
-	mov	AXREG(esi), eax	! sys_call MUST PRESERVE si
+	mov	AXREG(esi), eax
 
 ! Fall into code to restart proc/task running.
 
@@ -384,13 +403,21 @@ _restart:
 
 ! Restart the current process or the next process if it is set. 
 
-	cmp	(_next_ptr), 0		! see if another process is scheduled
-	jz	0f
-	mov 	eax, (_next_ptr)
-	mov	(_proc_ptr), eax	! schedule new process 
-	mov	(_next_ptr), 0
-0:	mov	esp, (_proc_ptr)	! will assume P_STACKBASE == 0
+	cli
+	call	_schedcheck		! ask C function who we're running
+	mov	esp, (_proc_ptr)	! will assume P_STACKBASE == 0
 	lldt	P_LDT_SEL(esp)		! enable process' segment descriptors 
+	cmp	P_CR3(esp), 0		! process does not have its own PT
+	jz	0f	
+	mov 	eax, P_CR3(esp)
+	cmp	eax, (loadedcr3)
+	jz	0f
+	mov	cr3, eax
+	mov	(loadedcr3), eax
+	mov	eax, (_proc_ptr)
+	mov	(_ptproc), eax
+	mov	(_dirtypde), 0
+0:
 	lea	eax, P_STACKTOP(esp)	! arrange for next interrupt
 	mov	(_tss+TSS3_S_SP0), eax	! to save state in process table
 restart1:
@@ -464,6 +491,10 @@ _general_protection:
 
 _page_fault:
 	push	PAGE_FAULT_VECTOR
+	push	eax
+	mov	eax, cr2
+sseg	mov	(pagefaultcr2), eax
+	pop	eax
 	jmp	errexception
 
 _copr_error:
@@ -491,15 +522,26 @@ errexception:
  sseg	pop	(ex_number)
  sseg	pop	(trap_errno)
 exception1:				! Common for all exceptions.
+ sseg	mov	(old_eax_ptr), esp	! where will eax be saved?
+ sseg	sub	(old_eax_ptr), PCREG-AXREG	! here
+
 	push	eax			! eax is scratch register
+
 	mov	eax, 0+4(esp)		! old eip
  sseg	mov	(old_eip), eax
+	mov	eax, esp
+	add	eax, 4
+ sseg	mov	(old_eip_ptr), eax
 	movzx	eax, 4+4(esp)		! old cs
  sseg	mov	(old_cs), eax
 	mov	eax, 8+4(esp)		! old eflags
  sseg	mov	(old_eflags), eax
+
 	pop	eax
 	call	save
+	push	(pagefaultcr2)
+	push	(old_eax_ptr)
+	push	(old_eip_ptr)
 	push	(old_eflags)
 	push	(old_cs)
 	push	(old_eip)
@@ -507,7 +549,38 @@ exception1:				! Common for all exceptions.
 	push	(ex_number)
 	call	_exception		! (ex_number, trap_errno, old_eip,
 					!	old_cs, old_eflags)
-	add	esp, 5*4
+	add	esp, 8*4
+	ret
+
+
+!*===========================================================================*
+!*				write_cr3				*
+!*===========================================================================*
+! PUBLIC void write_cr3(unsigned long value);
+_write_cr3:
+	push    ebp
+	mov     ebp, esp
+	mov	eax, 8(ebp)
+	cmp	eax, (loadedcr3)
+	jz	0f
+	mov	cr3, eax
+	mov	(loadedcr3), eax
+	mov	(_dirtypde), 0
+0:
+	pop     ebp
+	ret
+
+!*===========================================================================*
+!*				reload_cr3				*
+!*===========================================================================*
+! PUBLIC void reload_cr3(void);
+_reload_cr3:
+	push    ebp
+	mov     ebp, esp
+	mov	(_dirtypde), 0
+	mov	eax, cr3
+	mov	cr3, eax
+	pop     ebp
 	ret
 
 !*===========================================================================*
@@ -530,6 +603,11 @@ k_stack:
 k_stktop:			! top of kernel stack
 	.comm	ex_number, 4
 	.comm	trap_errno, 4
+	.comm	old_eip_ptr, 4
+	.comm	old_eax_ptr, 4
 	.comm	old_eip, 4
 	.comm	old_cs, 4
 	.comm	old_eflags, 4
+	.comm	pagefaultcr2, 4
+	.comm	loadedcr3, 4
+

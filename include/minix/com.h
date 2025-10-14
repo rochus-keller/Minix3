@@ -36,13 +36,15 @@
 /* User-space processes, that is, device drivers, servers, and INIT. */
 #define PM_PROC_NR	  0	/* process manager */
 #define FS_PROC_NR 	  1	/* file system */
-#define RS_PROC_NR 	  2	/* reincarnation server */
+#define VFS_PROC_NR 	  FS_PROC_NR /* FS has been renamed to VFS. */
+#define RS_PROC_NR 	  2  	/* memory driver (RAM disk, null, etc.) */
 #define MEM_PROC_NR 	  3  	/* memory driver (RAM disk, null, etc.) */
 #define LOG_PROC_NR	  4	/* log device driver */
 #define TTY_PROC_NR	  5	/* terminal (TTY) driver */
 #define DS_PROC_NR	  6    	/* data store server */
 #define MFS_PROC_NR       7     /* minix root filesystem */
-#define INIT_PROC_NR	  8    	/* init -- goes multiuser */
+#define VM_PROC_NR        8     /* memory server */
+#define INIT_PROC_NR	  9    	/* init -- goes multiuser */
 
 /* Number of processes contained in the system image. */
 #define NR_BOOT_PROCS 	(NR_TASKS + INIT_PROC_NR + 1)
@@ -132,9 +134,17 @@
 #define BUSC_PCI_SLOT_NAME_S	(BUSC_RQ_BASE + 16)	/* Get the name of a
 							 * PCI slot (safecopy)
 							 */
-#define BUSC_PCI_ACL		(BUSC_RQ_BASE + 17)	/* Set the ACL for a
+#define BUSC_PCI_SET_ACL	(BUSC_RQ_BASE + 17)	/* Set the ACL for a
 							 * driver (safecopy)
 							 */
+#define BUSC_PCI_DEL_ACL	(BUSC_RQ_BASE + 18)	/* Delete the ACL of a
+							 * driver 
+							 */
+#define IOMMU_MAP		(BUSC_RQ_BASE + 32)	/* Ask IOMMU to map
+							 * a segment of memory
+							 */
+
+
 
 /*===========================================================================*
  *                Messages for BLOCK and CHARACTER device drivers	     *
@@ -151,18 +161,24 @@
 #define TTY_EXIT	(DEV_RQ_BASE + 11) /* process group leader exited */	
 #define DEV_SELECT	(DEV_RQ_BASE + 12) /* request select() attention */
 #define DEV_STATUS   	(DEV_RQ_BASE + 13) /* request driver status */
+#define DEV_REOPEN     	(DEV_RQ_BASE + 14) /* reopen a minor device */
 
 #define DEV_READ_S	(DEV_RQ_BASE + 20) /* (safecopy) read from minor */
 #define DEV_WRITE_S   	(DEV_RQ_BASE + 21) /* (safecopy) write to minor */
 #define DEV_SCATTER_S  	(DEV_RQ_BASE + 22) /* (safecopy) write from a vector */
 #define DEV_GATHER_S   	(DEV_RQ_BASE + 23) /* (safecopy) read into a vector */
 #define DEV_IOCTL_S    	(DEV_RQ_BASE + 24) /* (safecopy) I/O control code */
+#define DEV_MMAP_S     	(DEV_RQ_BASE + 25) /* (safecopy) mmap interface */
 
 #define DEV_REPLY       (DEV_RS_BASE + 0) /* general task reply */
 #define DEV_CLONED      (DEV_RS_BASE + 1) /* return cloned minor */
 #define DEV_REVIVE      (DEV_RS_BASE + 2) /* driver revives process */
 #define DEV_IO_READY    (DEV_RS_BASE + 3) /* selected device ready */
 #define DEV_NO_STATUS   (DEV_RS_BASE + 4) /* empty status reply */
+#define DEV_REOPEN_REPL (DEV_RS_BASE + 5) /* reply to DEV_REOPEN */
+#define DEV_CLOSE_REPL	(DEV_RS_BASE + 6) /* reply to DEV_CLOSE */
+#define DEV_SEL_REPL1	(DEV_RS_BASE + 7) /* first reply to DEV_SELECT */
+#define DEV_SEL_REPL2	(DEV_RS_BASE + 8) /* (opt) second reply to DEV_SELECT */
 
 /* Field names for messages to block and character device drivers. */
 #define DEVICE    	m2_i1	/* major-minor device */
@@ -177,7 +193,6 @@
 /* Field names for DEV_SELECT messages to device drivers. */
 #define DEV_MINOR	m2_i1	/* minor device */
 #define DEV_SEL_OPS	m2_i2	/* which select operations are requested */
-#define DEV_SEL_WATCH	m2_i3	/* request notify if no operations are ready */
 
 /* Field names used in reply messages from tasks. */
 #define REP_ENDPT	m2_i1	/* # of proc on whose behalf I/O was done */
@@ -228,6 +243,7 @@
 #define DL_CONF_REPLY	(DL_RS_BASE + 20)
 #define DL_TASK_REPLY	(DL_RS_BASE + 21)
 #define DL_NAME_REPLY	(DL_RS_BASE + 22)
+#define DL_STAT_REPLY	(DL_RS_BASE + 23)
 
 /* Field names for data link layer messages. */
 #define DL_PORT		m2_i1
@@ -295,8 +311,6 @@
 #  define SYS_GETINFO    (KERNEL_CALL + 26) 	/* sys_getinfo() */
 #  define SYS_ABORT      (KERNEL_CALL + 27)	/* sys_abort() */
 #  define SYS_IOPENABLE  (KERNEL_CALL + 28)	/* sys_enable_iop() */
-#  define SYS_VM_SETBUF  (KERNEL_CALL + 29)	/* sys_vm_setbuf() */
-#  define SYS_VM_MAP  	 (KERNEL_CALL + 30)	/* sys_vm_map() */
 #  define SYS_SAFECOPYFROM (KERNEL_CALL + 31)	/* sys_safecopyfrom() */
 #  define SYS_SAFECOPYTO   (KERNEL_CALL + 32)	/* sys_safecopyto() */
 #  define SYS_VSAFECOPY  (KERNEL_CALL + 33)	/* sys_vsafecopy() */
@@ -307,7 +321,13 @@
 #  define SYS_CPROF      (KERNEL_CALL + 37)     /* sys_cprof() */
 #  define SYS_PROFBUF    (KERNEL_CALL + 38)     /* sys_profbuf() */
 
-#define NR_SYS_CALLS	39	/* number of system calls */ 
+#  define SYS_STIME	(KERNEL_CALL + 39)	/* sys_stime() */
+
+#  define SYS_MAPDMA	(KERNEL_CALL + 42)	/* sys_mapdma() */
+#  define SYS_VMCTL	(KERNEL_CALL + 43)	/* sys_vmctl() */
+#  define SYS_SYSCTL	(KERNEL_CALL + 44)	/* sys_sysctl() */
+
+#define NR_SYS_CALLS	45	/* number of system calls */ 
 
 /* Pseudo call for use in kernel/table.c. */
 #define SYS_ALL_CALLS (NR_SYS_CALLS)
@@ -436,20 +456,29 @@
 #   define GET_LOCKTIMING 13	/* get lock()/unlock() latency timing */
 #   define GET_BIOSBUFFER 14	/* get a buffer for BIOS calls */
 #   define GET_LOADINFO   15	/* get load average information */
+#   define GET_IRQACTIDS  16	/* get the IRQ masks */
+#   define GET_PRIVID	  17	/* get ID of privilege structure */
+#   define GET_HZ	  18	/* get HZ value */
+#   define GET_WHOAMI	  19	/* get own name and endpoint */
+#   define GET_RANDOMNESS_BIN 20 /* get one randomness bin */
 #define I_ENDPT      m7_i4	/* calling process */
 #define I_VAL_PTR      m7_p1	/* virtual address at caller */ 
 #define I_VAL_LEN      m7_i1	/* max length of value */
 #define I_VAL_PTR2     m7_p2	/* second virtual address */ 
 #define I_VAL_LEN2_E   m7_i2	/* second length, or proc nr */
-#   define GET_IRQACTIDS  16	/* get the IRQ masks */
+
+/* GET_WHOAMI fields. */
+#define GIWHO_EP	m3_i1
+#define GIWHO_NAME 	m3_ca1
 
 /* Field names for SYS_TIMES. */
-#define T_ENDPT      m4_l1	/* process to request time info for */
-#define T_USER_TIME    m4_l1	/* user time consumed by process */
-#define T_SYSTEM_TIME  m4_l2	/* system time consumed by process */
-#define T_CHILD_UTIME  m4_l3	/* user time consumed by process' children */
-#define T_CHILD_STIME  m4_l4	/* sys time consumed by process' children */
-#define T_BOOT_TICKS   m4_l5	/* number of clock ticks since boot time */
+#define T_ENDPT		m4_l1	/* process to request time info for */
+#define T_USER_TIME	m4_l1	/* user time consumed by process */
+#define T_SYSTEM_TIME	m4_l2	/* system time consumed by process */
+#define T_BOOTTIME	m4_l3	/* Boottime in seconds (also for SYS_STIME) */
+#define T_BOOT_TICKS	m4_l5	/* number of clock ticks since boot time */
+
+
 
 /* vm_map */
 #define VM_MAP_ENDPT		m4_l1
@@ -495,9 +524,14 @@
 #define PR_MEM_PTR     m1_p1	/* tells where memory map is for sys_newmap
 				 * and sys_fork
 				 */
+#define PR_FORK_FLAGS	m1_i3
+#define PR_FORK_MSGADDR m1_p1
 
 /* Field names for SYS_INT86 */
 #define INT86_REG86    m1_p1	/* pointer to registers */
+
+/* Flags for PR_FORK_FLAGS. */
+#define PFF_VMINHIBIT	0x01	/* Don't schedule until release by VM. */
 
 /* Field names for SYS_SAFECOPY* */
 #define SCP_FROM_TO	m2_i1	/* from/to whom? */
@@ -539,6 +573,42 @@
 #define RDB_SIZE	m2_i1
 #define RDB_ADDR	m2_l1
 #define RDB_BUF		m2_p1
+
+/* Field names for SYS_VMCTL. */
+#define SVMCTL_WHO	m1_i1
+#define SVMCTL_PARAM	m1_i2	/* All SYS_VMCTL requests. */
+#define SVMCTL_VALUE	m1_i3
+#define SVMCTL_PF_WHO		m1_i1	/* GET_PAGEFAULT reply: process ep */
+#define SVMCTL_PF_I386_CR2	m1_i2	/* GET_PAGEFAULT reply: CR2 */
+#define SVMCTL_PF_I386_ERR	m1_i3	/* GET_PAGEFAULT reply: error code */
+#define SVMCTL_MRG_ADDR		m1_p1	/* MEMREQ_GET reply: address */
+#define SVMCTL_MRG_LEN		m1_i1	/* MEMREQ_GET reply: length */
+#define SVMCTL_MRG_WRITE	m1_i2	/* MEMREQ_GET reply: writeflag */
+#define SVMCTL_MRG_EP		m1_i3	/* MEMREQ_GET reply: process */
+#define SVMCTL_MRG_REQUESTOR	m1_p2	/* MEMREQ_GET reply: requestor */
+
+/* Codes and field names for SYS_SYSCTL. */
+#define SYSCTL_CODE		m1_i1	/* SYSCTL_CODE_* below */
+#define SYSCTL_ARG1		m1_p1
+#define SYSCTL_ARG2		m1_i2
+#define SYSCTL_CODE_DIAG	1	/* Print diagnostics. */
+#define SYSCTL_CODE_STACKTRACE	2	/* Print process stack. */
+#define DIAG_BUFSIZE	(80*25)
+
+/* Values for SVMCTL_PARAM. */
+#define VMCTL_I386_SETCR3	10
+#define VMCTL_GET_PAGEFAULT	11
+#define VMCTL_CLEAR_PAGEFAULT	12
+#define VMCTL_I386_GETCR3	13
+#define VMCTL_MEMREQ_GET	14
+#define VMCTL_MEMREQ_REPLY	15
+#define VMCTL_INCSP		16
+#define VMCTL_NOPAGEZERO	18
+#define VMCTL_I386_KERNELLIMIT	19
+#define VMCTL_I386_PAGEDIRS	20
+#define VMCTL_I386_FREEPDE	23
+#define VMCTL_ENABLE_PAGING	24
+#define VMCTL_I386_INVLPG	25
 
 /*===========================================================================*
  *                Messages for the Reincarnation Server 		     *
@@ -599,21 +669,22 @@
 #  define FKEY_FKEYS	      m2_l1	/* F1-F12 keys pressed */
 #  define FKEY_SFKEYS	      m2_l2	/* Shift-F1-F12 keys pressed */
 #define DIAG_BASE	0xa00
-#define DIAGNOSTICS 	(DIAG_BASE+1) 	/* output a string without FS in between */
-#define DIAGNOSTICS_S 	(DIAG_BASE+2) 	/* grant-based version of DIAGNOSTICS */
+#define DIAGNOSTICS_OLD 	(DIAG_BASE+1) 	/* output a string without FS in between */
+#define DIAGNOSTICS_S_OLD 	(DIAG_BASE+2) 	/* grant-based version of DIAGNOSTICS */
 #  define DIAG_PRINT_BUF_G    m1_p1
 #  define DIAG_BUF_COUNT      m1_i1
 #define GET_KMESS	(DIAG_BASE+3)	/* get kmess from TTY */
 #  define GETKM_PTR	      m1_p1
 #define GET_KMESS_S	(DIAG_BASE+4)	/* get kmess from TTY */
 #  define GETKM_GRANT	      m1_i1
+#define ASYN_DIAGNOSTICS_OLD (DIAG_BASE+5) 	/* grant-based, replyless DIAGNOSTICS */
+
+#define DIAG_REPL_OLD 	(DIAG_BASE+0x80+0) 	/* reply to DIAGNOSTICS(_S) */
 
 #define PM_BASE	0x900
 #define PM_GET_WORK	(PM_BASE + 1)	/* Get work from PM */
 #define PM_IDLE		(PM_BASE + 2)	/* PM doesn't have any more work */
 #define PM_BUSY		(PM_BASE + 3)	/* A reply from FS is needed */
-#define PM_STIME	(PM_BASE + 4)	/* Tell FS about the new system time */
-#define		PM_STIME_TIME	m1_i1		/* boottime */
 #define PM_SETSID	(PM_BASE + 5)	/* Tell FS about the session leader */
 #define		PM_SETSID_PROC	m1_i1		/* process */
 #define PM_SETGID	(PM_BASE + 6)	/* Tell FS about the new group IDs */
@@ -676,10 +747,125 @@
 					 * FS to update its uid and gid 
 					 * fields.
 					 */
+#define EXC_NM_RF_FULLVM	4	
 
 /* Parameters for the EXEC_RESTART call */
 #define EXC_RS_PROC	m1_i1		/* process that needs to be restarted */
 #define EXC_RS_RESULT	m1_i2		/* result of the exec */
 
+#define VFS_BASE	0xA00		/* Requests sent by VFS to filesystem
+					 * implementations. See <minix/vfsif.h>
+					 */
+
+/* Requests sent by VM to VFS, done on behalf of a user process. */
+#define VM_VFS_BASE	0xB00		
+#define VM_VFS_OPEN	(VM_VFS_BASE+0) /* open() on behalf of user process. */
+#	define VMVO_NAME_GRANT		m2_i1	/* 0-terminated */
+#	define VMVO_NAME_LENGTH		m2_i2	/* name length including 0 */
+#	define VMVO_FLAGS		m2_i3
+#	define VMVO_MODE		m2_l1
+#	define VMVO_ENDPOINT		m2_l2
+#define VM_VFS_MMAP	(VM_VFS_BASE+1) /* mmap() */
+#define VM_VFS_CLOSE	(VM_VFS_BASE+2) /* close() */
+#	define VMVC_FD			m1_i1
+#	define VMVC_ENDPOINT		m1_i2
+
+/*===========================================================================*
+ *                Messages for VM server				     *
+ *===========================================================================*/
+#define VM_RQ_BASE		0xC00
+
+/* Calls from PM */
+#define VM_EXIT			(VM_RQ_BASE+0)
+#	define VME_ENDPOINT		m1_i1
+#define VM_FORK			(VM_RQ_BASE+1)
+#	define VMF_ENDPOINT		m1_i1
+#	define VMF_SLOTNO		m1_i2
+#	define VMF_CHILD_ENDPOINT	m1_i3	/* result */
+#define VM_BRK			(VM_RQ_BASE+2)
+#	define VMB_ENDPOINT		m1_i1
+#	define VMB_ADDR			m1_p1
+#	define VMB_RETADDR		m1_p2	/* result */
+#define VM_EXEC_NEWMEM		(VM_RQ_BASE+3)
+#	define VMEN_ENDPOINT		m1_i1
+#	define VMEN_ARGSPTR		m1_p1
+#	define VMEN_ARGSSIZE		m1_i2
+#	define VMEN_FLAGS		m1_i3	/* result */
+#	define VMEN_STACK_TOP		m1_p2	/* result */
+#define VM_PUSH_SIG		(VM_RQ_BASE+4)
+#	define VMPS_ENDPOINT		m1_i1
+#	define VMPS_OLD_SP		m1_p1	/* result */
+#define VM_WILLEXIT		(VM_RQ_BASE+5)
+#	define VMWE_ENDPOINT		m1_i1
+
+/* General calls. */
+#define VM_MMAP			(VM_RQ_BASE+10)
+#	define VMM_ADDR			m5_l1
+#	define VMM_LEN			m5_l2
+#	define VMM_PROT			m5_c1
+#	define VMM_FLAGS		m5_c2
+#	define VMM_FD			m5_i1
+#	define VMM_OFFSET		m5_i2
+#	define VMM_RETADDR		m5_l1	/* result */
+#define VM_UMAP			(VM_RQ_BASE+11)
+#	define VMU_SEG			m1_i1
+#	define VMU_OFFSET		m1_p1
+#	define VMU_LENGTH		m1_p2
+#	define VMU_RETADDR		m1_p3
+
+/* to VM: inform VM about a region of memory that is used for
+ * bus-master DMA
+ */
+#define VM_ADDDMA	(VM_RQ_BASE+12)
+#	define VMAD_REQ			m2_i2
+#	define VMAD_EP			m2_i1
+#	define VMAD_START		m2_l1
+#	define VMAD_SIZE		m2_l2
+
+/* to VM: inform VM that a region of memory that is no longer
+ * used for bus-master DMA
+ */
+#define VM_DELDMA       (VM_RQ_BASE+13)
+#	define VMDD_REQ			m2_i2
+#	define VMDD_EP			m2_i1
+#	define VMDD_START		m2_l1
+#	define VMDD_SIZE		m2_l2
+
+/* to VM: ask VM for a region of memory that should not
+ * be used for bus-master DMA any longer
+ */
+#define VM_GETDMA       (VM_RQ_BASE+14)
+#	define VMGD_REQ			m2_i2
+#	define VMGD_PROCP		m2_i1
+#	define VMGD_BASEP		m2_l1
+#	define VMGD_SIZEP		m2_l2
+
+#define VM_MAP_PHYS		(VM_RQ_BASE+15)
+#	define VMMP_EP			m1_i1
+#	define VMMP_PHADDR		m1_p2
+#	define VMMP_LEN			m1_i2
+#	define VMMP_VADDR_REPLY		m1_p3
+
+#define VM_UNMAP_PHYS		(VM_RQ_BASE+16)
+#	define VMUP_EP			m1_i1
+#	define VMUP_VADDR		m1_p1
+
+#define VM_UNMAP		(VM_RQ_BASE+17)
+#	define VMUM_ADDR		m1_p1
+#	define VMUM_LEN			m1_i1
+
+#define VM_ALLOCMEM		(VM_RQ_BASE+18)
+#	define VMAM_BYTES		m1_p1
+#	define VMAM_MEMBASE		m1_i1
+
+/* Calls from VFS. */
+#	define VMV_ENDPOINT		m1_i1	/* for all VM_VFS_REPLY_* */
+#define VM_VFS_REPLY_OPEN	(VM_RQ_BASE+30)
+#	define VMVRO_FD			m1_i2
+#define VM_VFS_REPLY_MMAP	(VM_RQ_BASE+31)
+#define VM_VFS_REPLY_CLOSE	(VM_RQ_BASE+32)
+
+/* Total. */
+#define VM_NCALLS				33
 
 #endif /* _MINIX_COM_H */ 

@@ -19,86 +19,20 @@
 
 #include <minix/vfsif.h>
 
-/*===========================================================================*
- *				get_vnode				     *
- *===========================================================================*/
-PUBLIC struct vnode *get_vnode(int fs_e, int inode_nr)
-{
-/* get_vnode() is called to get the details of the specified inode.
- * Note that inode's usage counter in the FS is supposed to be incremented.
- */
-  struct vnode *vp, *vp2;
-  struct vmnt *vmp;
+/* Is vnode pointer reasonable? */
+#define SANEVP(v) ((((v) >= &vnode[0] && (v) < &vnode[NR_VNODES])))
 
-  /* Request & response structures */
-  struct node_req req;
-  struct node_details res;
+#define BADVP(v, f, l) printf("%s:%d: bad vp 0x%x\n", f, l, v)
 
-  /* XXX remove this when debugging is complete */
-  if (find_vnode(fs_e, inode_nr) != NULL)
-	panic(__FILE__, "get_vnode: vnode already present", NO_NUM);
-  
-  /* Check whether a free vnode is avaliable */
-  if ((vp = get_free_vnode(__FILE__, __LINE__)) == NIL_VNODE) {
-        printf("VFSget_vnode: no vnode available\n");
-        return NIL_VNODE;
-  }
-  
-  /* Fill req struct */
-  req.inode_nr = inode_nr;
-  req.fs_e = fs_e;
-
-  /* Send request to FS */
-  if (req_getnode(&req, &res) != OK) {
-        printf("VFSget_vnode: couldn't find vnode\n"); 
-        return NIL_VNODE;
-  }
-
-  /* Fill in the free vnode's fields and return it */
-  vp->v_fs_e = res.fs_e;
-  vp->v_inode_nr = res.inode_nr;
-  vp->v_mode = res.fmode;
-  vp->v_size = res.fsize;
-  vp->v_sdev = res.dev;
-  
-  /* Find corresponding virtual mount object */
-  if ( (vmp = find_vmnt(vp->v_fs_e)) == NIL_VMNT)
-        printf("VFS: vmnt not found by get_vnode()\n");
-  
-  vp->v_vmnt = vmp; 
-  vp->v_dev = vmp->m_dev;
-  vp->v_fs_count = 1;
-  vp->v_ref_count = 1;
-  
-  return vp; 
+/* vp check that returns 0 for use in check_vrefs() */
+#define CHECKVN(v) if(!SANEVP(v)) {				\
+	BADVP(v, __FILE__, __LINE__);	\
+	return 0;	\
 }
 
-
-/*===========================================================================*
- *				get_vnode				     *
- *===========================================================================*/
-PUBLIC struct vnode *get_vnode_x(int fs_e, int inode_nr)
-{
-/* get_vnode() is called to get the details of the specified inode.
- * Note that inode's usage counter in the FS is supposed to be incremented.
- */
-  struct vnode *vp, *vp2;
-  struct vmnt *vmp;
-
-  /* Request & response structures */
-  struct node_req req;
-  struct node_details res;
-
-  vp= find_vnode(fs_e, inode_nr);
-  if (vp)
-  {
-	vp->v_ref_count++;
-	return vp;
-  }
-
-  return get_vnode(fs_e, inode_nr);
-}
-
+/* vp check that panics */
+#define ASSERTVP(v) if(!SANEVP(v)) { \
+	BADVP(v, __FILE__, __LINE__); panic("vfs", "bad vp", NO_NUM); }
 
 /*===========================================================================*
  *				get_free_vnode				     *
@@ -152,11 +86,7 @@ PUBLIC void dup_vnode(struct vnode *vp)
 /* dup_vnode() is called to increment the vnode and therefore the
  * referred inode's counter.
  */
-  if (vp == NIL_VNODE) {
-      printf("VFSdup_vnode NIL_VNODE\n");
-      return;
-  }
-
+  ASSERTVP(vp);
   vp->v_ref_count++;
 }
 
@@ -169,17 +99,7 @@ PUBLIC void put_vnode(struct vnode *vp)
 /* Decrease vnode's usage counter and decrease inode's usage counter in the 
  * corresponding FS process.
  */
-  if (vp == NIL_VNODE) {
-        /*printf("VFSput_vnode NIL_VNODE\n");*/
-        return;
-  }
-
-  if (vp < &vnode[0] || vp >= &vnode[NR_VNODES])
-  {
-	printf("put_vnode: &vnode[0] = %p, &vnode[NR_VNODES] = %p, vp = %p\n",
-		&vnode[0], &vnode[NR_VNODES], vp);
-	panic(__FILE__, "put_vnode: bad vnode pointer", NO_NUM);
-  }
+  ASSERTVP(vp);
 
   if (vp->v_ref_count > 1)
   {
@@ -245,8 +165,11 @@ int line;
 	vp->v_file= file;
 	vp->v_line= line;
 }
+#endif
 
+#define REFVP(v) { vp = (v); CHECKVN(v); vp->v_ref_check++; }
 
+#if DO_SANITYCHECKS
 /*===========================================================================*
  *				check_vrefs				     *
  *===========================================================================*/
@@ -267,16 +190,8 @@ PUBLIC int check_vrefs()
 	for (rfp=&fproc[0]; rfp < &fproc[NR_PROCS]; rfp++) {
 		if (rfp->fp_pid == PID_FREE)
 			continue;
-		vp= rfp->fp_rd;
-		if (vp < &vnode[0] || vp >= &vnode[NR_VNODES])
-			panic(__FILE__, "check_vrefs: bad vnode", NO_NUM);
-		vp->v_ref_check++;
-                
-                vp= rfp->fp_wd;
-		if (vp < &vnode[0] || vp >= &vnode[NR_VNODES])
-			panic(__FILE__, "check_vrefs: bad vnode", NO_NUM);
-		vp->v_ref_check++;
-
+		if(rfp->fp_rd) REFVP(rfp->fp_rd);
+                if(rfp->fp_wd) REFVP(rfp->fp_wd);
   	}
 
 	/* Count references from filedescriptors */
@@ -284,10 +199,7 @@ PUBLIC int check_vrefs()
 	{
 		if (f->filp_count == 0)
 			continue;
-		vp= f->filp_vno;
-		if (vp < &vnode[0] || vp >= &vnode[NR_VNODES])
-			panic(__FILE__, "check_vrefs: bad vnode", NO_NUM);
-		vp->v_ref_check++;
+		REFVP(f->filp_vno);
 	}
 
 	/* Count references to mount points */
@@ -295,15 +207,9 @@ PUBLIC int check_vrefs()
 	{
 		if (vmp->m_dev == NO_DEV)
 			continue;
-		vp= vmp->m_mounted_on;
-		if (vp < &vnode[0] || vp >= &vnode[NR_VNODES])
-			panic(__FILE__, "check_vrefs: bad vnode", NO_NUM);
-		vp->v_ref_check++;
-
-		vp= vmp->m_root_node;
-		if (vp < &vnode[0] || vp >= &vnode[NR_VNODES])
-			panic(__FILE__, "check_vrefs: bad vnode", NO_NUM);
-		vp->v_ref_check++;
+		REFVP(vmp->m_root_node);
+		if(vmp->m_mounted_on)
+			REFVP(vmp->m_mounted_on);
 	}
 
 	/* Check references */

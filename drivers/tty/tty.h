@@ -1,8 +1,6 @@
 /*	tty.h - Terminals	*/
 
 #include <timers.h>
-#include "../../kernel/const.h"
-#include "../../kernel/type.h"
 
 #undef lock
 #undef unlock
@@ -109,6 +107,7 @@ typedef struct tty {
 extern tty_t tty_table[NR_CONS+NR_RS_LINES+NR_PTYS];
 extern int ccurrent;		/* currently visible console */
 extern int irq_hook_id;		/* hook id for keyboard irq */
+extern u32_t system_hz;		/* system clock frequency */
 
 extern unsigned long kbd_irq_set;
 extern unsigned long rs_irq_set;
@@ -149,7 +148,7 @@ extern struct kmessages kmess;
 /* Function prototypes for TTY driver. */
 /* tty.c */
 _PROTOTYPE( void handle_events, (struct tty *tp)			);
-_PROTOTYPE( void sigchar, (struct tty *tp, int sig)			);
+_PROTOTYPE( void sigchar, (struct tty *tp, int sig, int mayflush)	);
 _PROTOTYPE( void tty_task, (void)					);
 _PROTOTYPE( int in_process, (struct tty *tp, char *buf, int count)	);
 _PROTOTYPE( void out_process, (struct tty *tp, char *bstart, char *bpos,
@@ -197,10 +196,6 @@ _PROTOTYPE( void do_pty, (struct tty *tp, message *m_ptr)		);
 _PROTOTYPE( void pty_init, (struct tty *tp)				);
 _PROTOTYPE( void select_retry_pty, (struct tty *tp)			);
 _PROTOTYPE( int pty_status, (message *m_ptr)				);
-
-/* vidcopy.s */
-_PROTOTYPE( void vid_vid_copy, (unsigned src, unsigned dst, unsigned count));
-_PROTOTYPE( void mem_vid_copy, (u16_t *src, unsigned dst, unsigned count));
 
 #endif /* (CHIP == INTEL) */
 

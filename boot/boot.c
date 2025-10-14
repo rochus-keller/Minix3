@@ -18,6 +18,7 @@ char version[]=		"2.20";
 #include <string.h>
 #include <errno.h>
 #include <ibm/partition.h>
+#include <ibm/bios.h>
 #include <minix/config.h>
 #include <minix/type.h>
 #include <minix/com.h>
@@ -28,6 +29,7 @@ char version[]=		"2.20";
 #if BIOS
 #include <kernel/const.h>
 #include <kernel/type.h>
+#include <sys/video.h>
 #endif
 #if UNIX
 #include <stdio.h>
@@ -45,6 +47,12 @@ char version[]=		"2.20";
 #define arraysize(a)		(sizeof(a) / sizeof((a)[0]))
 #define arraylimit(a)		((a) + arraysize(a))
 #define between(a, c, z)	((unsigned) ((c) - (a)) <= ((z) - (a)))
+
+int serial_line = -1;
+
+u16_t vid_port;		/* Video i/o port. */
+u32_t vid_mem_base;	/* Video memory base address. */
+u32_t vid_mem_size;	/* Video memory size. */
 
 int fsok= -1;		/* File system state.  Initially unknown. */
 
@@ -590,6 +598,19 @@ void initialize(void)
 		bootdev.name[5] += bootdev.secondary;
 	}
 
+	/* Find out about the video hardware. */
+        raw_copy(mon2abs(&vid_port), VDU_CRT_BASE_ADDR, sizeof(vid_port));
+	if(vid_port == C_6845) {
+		vid_mem_base = COLOR_BASE;
+		vid_mem_size = COLOR_SIZE;
+	} else {
+		vid_mem_base = MONO_BASE;
+		vid_mem_size = MONO_SIZE;
+	}
+
+	if(get_video() >= 3)
+		vid_mem_size = EGA_SIZE;
+
 #else /* DOS */
 	/* Take the monitor out of the memory map if we have memory to spare,
 	 * note that only half our PSP is needed at the new place, the first
@@ -859,6 +880,9 @@ void get_parameters(void)
 	b_setvar(E_SPECIAL|E_VAR|E_DEV, "rootdev", "ram");
 	b_setvar(E_SPECIAL|E_VAR|E_DEV, "ramimagedev", "bootdev");
 	b_setvar(E_SPECIAL|E_VAR, "ramsize", "0");
+#define STRINGIT2(x) #x
+#define STRINGIT1(x) STRINGIT2(x)
+	b_setvar(E_SPECIAL|E_VAR, "hz", STRINGIT1(DEFAULT_HZ));
 #if BIOS
 	processor = getprocessor();
 	if(processor == 1586) processor = 686;
@@ -1065,9 +1089,6 @@ dev_t name2dev(char *name)
 
 	if (strcmp(n, "ram") == 0) {
 		dev= DEV_RAM;
-	} else
-	if (strcmp(n, "boot") == 0) {
-		dev= DEV_BOOT;
 	} else
 	if (n[0] == 'f' && n[1] == 'd' && numeric(n+2)) {
 		/* Floppy. */
@@ -1370,13 +1391,14 @@ void boot_device(char *devname)
 void ctty(char *line)
 {
 	if (line == nil) {
-		serial_init(-1);
-	} else
-	if (between('0', line[0], '3') && line[1] == 0) {
-		serial_init(line[0] - '0');
+		serial_line = -1;
+	} else if (between('0', line[0], '3') && line[1] == 0) {
+		serial_line = line[0] - '0';
 	} else {
 		printf("Bad serial line number: %s\n", line);
+		return;
 	}
+	serial_init(serial_line);
 }
 
 #else /* DOS */
@@ -1854,9 +1876,6 @@ void monitor(void)
 
 #if BIOS
 
-unsigned char cdspec[25];
-void bootcdinfo(u32_t, int *, int drive);
-
 void boot(void)
 /* Load Minix and start it, among other things. */
 {
@@ -1959,3 +1978,4 @@ void main(int argc, char **argv)
 /*
  * $PchId: boot.c,v 1.14 2002/02/27 19:46:14 philip Exp $
  */
+

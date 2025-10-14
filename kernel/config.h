@@ -49,17 +49,6 @@
  */
 #define P_NAME_LEN	   8
 
-/* Kernel diagnostics are written to a circular buffer. After each message, 
- * a system server is notified and a copy of the buffer can be retrieved to 
- * display the message. The buffers size can safely be reduced.  
- */
-#define KMESS_BUF_SIZE   256   	
-
-/* Buffer to gather randomness. This is used to generate a random stream by 
- * the MEMORY driver when reading from /dev/random. 
- */
-#define RANDOM_ELEMENTS   32
-
 /* This section contains defines for valuable system resources that are used
  * by device drivers. The number of elements of the vectors is determined by 
  * the maximum needed by any given driver. The number of interrupt hooks may
@@ -73,12 +62,6 @@
 #define K_STACK_BYTES   1024	
 
 #define K_PARAM_SIZE     512
-
-/* This section allows to enable kernel debugging and timing functionality.
- * For normal operation all options should be disabled.
- */
-#define DEBUG_SCHED_CHECK  0	/* sanity check of scheduling queues */
-#define DEBUG_TIME_LOCKS   0	/* measure time spent in locks */
 
 #endif /* CONFIG_H */
 

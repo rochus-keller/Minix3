@@ -4,8 +4,8 @@ LK =	/usr/lib/keymaps
 
 .SUFFIXES:	.src .map
 
-.src.map:
-	$(CC) -DKEYSRC=\"$<\" $(CPROFILE) genmap.c -lsysutil -lsys
+.src.map: 
+	$(CC) -DKEYSRC=\"$<\" genmap.c
 	./a.out > $@
 	@rm -f a.out
 
@@ -18,10 +18,13 @@ all:	\
 	latin-america.map \
 	olivetti.map \
 	polish.map \
+	russian.map \
+	russian-cp866.map \
 	scandinavian.map \
 	spanish.map \
 	uk.map \
 	us-std.map \
+	us-std-esc.map \
 	us-swap.map \
 
 install:	\
@@ -34,10 +37,13 @@ install:	\
 	$(LK)/latin-america.map \
 	$(LK)/olivetti.map \
 	$(LK)/polish.map \
+	$(LK)/russian.map \
+	$(LK)/russian-cp866.map \
 	$(LK)/scandinavian.map \
 	$(LK)/spanish.map \
 	$(LK)/uk.map \
 	$(LK)/us-std.map \
+	$(LK)/us-std-esc.map \
 	$(LK)/us-swap.map \
 
 clean:
@@ -70,6 +76,12 @@ $(LK)/olivetti.map:	olivetti.map
 $(LK)/polish.map:	polish.map
 	install -c $? $@
 
+$(LK)/russian.map:	russian.map
+	install -c $? $@
+
+$(LK)/russian-cp866.map:	russian-cp866.map
+	install -c $? $@
+	
 $(LK)/scandinavian.map:	scandinavian.map
 	install -c $? $@
 
@@ -80,6 +92,9 @@ $(LK)/uk.map:	uk.map
 	install -c $? $@
 
 $(LK)/us-std.map:	us-std.map
+	install -c $? $@
+
+$(LK)/us-std-esc.map:	us-std-esc.map
 	install -c $? $@
 
 $(LK)/us-swap.map:	us-swap.map

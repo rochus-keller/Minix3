@@ -29,6 +29,8 @@
 #include <minix/const.h>
 #include <minix/partition.h>
 #include <minix/u64.h>
+#include <minix/com.h>
+#include <minix/sysinfo.h>
 #include <ibm/partition.h>
 #include <termios.h>
 #include <stdarg.h>
@@ -62,9 +64,6 @@ Num Sort   Type
 int min_region_mb = 500;
 
 #define MIN_REGION_SECTORS (1024*1024*min_region_mb/SECTOR_SIZE)
-
-#define MAX_REGION_MB	4095
-#define MAX_REGION_SECTORS (1024*(1024/SECTOR_SIZE)*MAX_REGION_MB)
 
 #define arraysize(a)	(sizeof(a) / sizeof((a)[0]))
 #define arraylimit(a)	((a) + arraysize(a))
@@ -339,7 +338,7 @@ void newdevice(char *name, int scanning, int disk_only)
 	if (curdev->rdev != DEV_C0D0) curdev= firstdev;
 }
 
-void getdevices()
+void getdevices(void)
 /* Get all block devices from /dev that look interesting. */
 {
 	DIR *d;
@@ -1585,6 +1584,7 @@ void m_read(int ev, int *biosdrive)
 {
 	int i, mode, n, v;
 	struct part_entry *pe;
+	u32_t system_hz;
 
 	if (ev != 'r' || device >= 0) return;
 
@@ -1597,7 +1597,11 @@ void m_read(int ev, int *biosdrive)
 		return;
 	}
 
-	v = 2*HZ;
+	if(getsysinfo_up(PM_PROC_NR, SIU_SYSTEMHZ, sizeof(system_hz), &system_hz) < 0) {
+		fprintf(stderr, "autopart: system hz not found\n");
+		exit(1);
+	}
+	v = 2*system_hz;
 	ioctl(device, DIOCTIMEOUT, &v);
 
 	memset(bootblock, 0, sizeof(bootblock));
@@ -2154,18 +2158,8 @@ scribble_region(region_t *reg, struct part_entry **pe, int *made_new)
 {
 	int ex, changed = 0, i;
 	struct part_entry *newpart;
-	if(reg->is_used_part && reg->used_part.size > MAX_REGION_SECTORS) {
-		reg->used_part.size = MAX_REGION_SECTORS;
-		changed = 1;
-		cylinderalign(reg);
-	}
 	if(!reg->is_used_part) {
 		ex = reg->free_sec_last - reg->free_sec_start + 1;
-		if(ex > MAX_REGION_SECTORS) {
-			reg->free_sec_last -= ex - MAX_REGION_SECTORS;
-			changed = 1;
-			cylinderalign(reg);
-		}
 		if(made_new) *made_new = 1;
 	} else if(made_new) *made_new = 0;
 	if(!reg->is_used_part) {

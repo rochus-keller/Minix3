@@ -171,7 +171,8 @@ _PROTOTYPE( int mknod, (const char *_name, _mnx_Mode_t _mode, Dev_t _addr)	);
 _PROTOTYPE( int mknod4, (const char *_name, _mnx_Mode_t _mode, Dev_t _addr,
 	    long _size)							);
 _PROTOTYPE( char *mktemp, (char *_template)				);
-_PROTOTYPE( int mount, (char *_spec, char *_name, int _flag)		);
+_PROTOTYPE( int mount, (char *_spec, char *_name, int _flag,
+						char *type, char *args)	);
 _PROTOTYPE( long ptrace, (int _req, pid_t _pid, long _addr, long _data)	);
 _PROTOTYPE( char *sbrk, (int _incr)					);
 _PROTOTYPE( int sync, (void)						);
@@ -198,6 +199,15 @@ _PROTOTYPE( int freemem, (phys_bytes size, phys_bytes base)		);
 #define unmapdriver(device) devctl(DEV_UNMAP, 0, device, 0)
 _PROTOTYPE( int devctl, (int ctl_req, int driver, int device, int style, 
 	int force)							);
+_PROTOTYPE( int mapdriver5, (char *label, size_t len, int major,
+	int style, int force)						);
+_PROTOTYPE( uid_t getpeuid, (endpoint_t ep)				);
+_PROTOTYPE(int adddma, (endpoint_t proc_e,
+				phys_bytes start, phys_bytes size)	);
+_PROTOTYPE(int deldma, (endpoint_t proc_e,
+				phys_bytes start, phys_bytes size)	);
+_PROTOTYPE(int getdma, (endpoint_t *procp, phys_bytes *basep, 
+						phys_bytes *sizep)	);
 
 /* For compatibility with other Unix systems */
 _PROTOTYPE( int getpagesize, (void)					);

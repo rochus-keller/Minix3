@@ -51,11 +51,8 @@ PUBLIC int do_pipe()
   int r;
   struct filp *fil_ptr0, *fil_ptr1;
   int fil_des[2];		/* reply goes here */
-
   struct vnode *vp;
   struct vmnt *vmp;
-
-  struct pipe_req req;
   struct node_details res;
 
   /* See if a free vnode is available */
@@ -80,13 +77,9 @@ PUBLIC int do_pipe()
   FD_SET(fil_des[1], &rfp->fp_filp_inuse);
   fil_ptr1->filp_count = 1;
 
-  /* Fill in FS request */
-  req.fs_e = ROOT_FS_E;
-  req.uid = fp->fp_effuid;
-  req.gid = fp->fp_effgid;
-
   /* Send request */
-  r = req_pipe(&req, &res);
+  r = req_newnode(ROOT_FS_E, fp->fp_effuid, fp->fp_effgid, I_NAMED_PIPE,
+	(dev_t)0, &res);
 
   /* Handle error */
   if (r != OK) {
@@ -105,8 +98,10 @@ PUBLIC int do_pipe()
   vp->v_mode = res.fmode;
   vp->v_index = res.inode_index;
   vp->v_pipe = I_PIPE;
-  vp->v_fs_count = 2;           /* Double usage */
-  vp->v_ref_count = 2;          /* Double usage */
+  vp->v_pipe_rd_pos= 0;
+  vp->v_pipe_wr_pos= 0;
+  vp->v_fs_count = 1;
+  vp->v_ref_count = 1;
   vp->v_size = 0;
 
   if ( (vmp = find_vmnt(vp->v_fs_e)) == NIL_VMNT) {
@@ -120,6 +115,7 @@ PUBLIC int do_pipe()
 
   /* Fill in filp objects */
   fil_ptr0->filp_vno = vp;
+  dup_vnode(vp);
   fil_ptr1->filp_vno = vp;
   fil_ptr0->filp_flags = O_RDONLY;
   fil_ptr1->filp_flags = O_WRONLY;
@@ -133,13 +129,12 @@ PUBLIC int do_pipe()
 /*===========================================================================*
  *				pipe_check				     *
  *===========================================================================*/
-PUBLIC int pipe_check(vp, rw_flag, oflags, bytes, position, canwrite, notouch)
+PUBLIC int Xpipe_check(vp, rw_flag, oflags, bytes, position, notouch)
 register struct vnode *vp;	/* the inode of the pipe */
 int rw_flag;			/* READING or WRITING */
 int oflags;			/* flags set by open or fcntl */
 register int bytes;		/* bytes to be read or written (all chunks) */
 u64_t position;			/* current file position */
-int *canwrite;			/* return: number of bytes we can write */
 int notouch;			/* check only */
 {
 /* Pipes are a little different.  If a process reads from an empty pipe for
@@ -163,8 +158,6 @@ int notouch;			/* check only */
 			if (oflags & O_NONBLOCK) {
 				r = EAGAIN;
 			} else {
-				if (!notouch)
-					suspend(XPIPE);	/* block reader */
 				r = SUSPEND;
 			}
 			/* If need be, activate sleeping writers. */
@@ -173,56 +166,65 @@ int notouch;			/* check only */
 		}
 		return(r);
 	}
-  } else {
-	/* Process is writing to a pipe. */
-	if (find_filp(vp, R_BIT) == NIL_FILP) {
-		/* Tell kernel to generate a SIGPIPE signal. */
-		if (!notouch) {
-			sys_kill(fp->fp_endpoint, SIGPIPE);
-		}
-		return(EPIPE);
-	}
 
-	if (pos + bytes > PIPE_SIZE(vp->v_vmnt->m_block_size)) {
-		if ((oflags & O_NONBLOCK)
-		 && bytes <= PIPE_SIZE(vp->v_vmnt->m_block_size)) {
-			return(EAGAIN);
-		}
-		else if ((oflags & O_NONBLOCK)
-		&& bytes > PIPE_SIZE(vp->v_vmnt->m_block_size)) {
-		if ( (*canwrite = (PIPE_SIZE(vp->v_vmnt->m_block_size) 
-			- pos)) > 0)  {
-				/* Do a partial write. Need to wakeup reader */
-				if (!notouch)
-					release(vp, READ, susp_count);
-				return(1);
-			} else {
-				return(EAGAIN);
-			}
-		     }
-		if (bytes > PIPE_SIZE(vp->v_vmnt->m_block_size)) {
-			if ((*canwrite = PIPE_SIZE(vp->v_vmnt->m_block_size) 
-				- pos) > 0) {
-				/* Do a partial write. Need to wakeup reader
-				 * since we'll suspend ourself in read_write()
-				 */
-				if (!notouch)
-					release(vp, READ, susp_count);
-				return(1);
-			}
-		}
-		if (!notouch)
-			suspend(XPIPE);	/* stop writer -- pipe full */
-		return(SUSPEND);
-	}
-
-	/* Writing to an empty pipe.  Search for suspended reader. */
-	if (pos == 0 && !notouch)
-		release(vp, READ, susp_count);
+	return bytes;
   }
 
-  *canwrite = 0;
-  return(1);
+  /* Process is writing to a pipe. */
+  if (find_filp(vp, R_BIT) == NIL_FILP) {
+	/* Tell kernel to generate a SIGPIPE signal. */
+	if (!notouch) {
+		sys_kill(fp->fp_endpoint, SIGPIPE);
+	}
+	return(EPIPE);
+  }
+
+  if (pos + bytes > PIPE_BUF) {
+	if (oflags & O_NONBLOCK)
+	{
+		if (bytes <= PIPE_BUF) {
+			/* Write has to be atomic */
+			return(EAGAIN);
+		}
+
+		/* Compute available space */
+		bytes= PIPE_BUF-pos;
+
+		if (bytes > 0)  {
+			/* Do a partial write. Need to wakeup reader */
+			if (!notouch)
+				release(vp, READ, susp_count);
+			return(bytes);
+		} else {
+			/* Pipe is full */
+			return(EAGAIN);
+		}
+	}
+
+	if (bytes > PIPE_BUF) {
+		/* Compute available space */
+		bytes= PIPE_BUF-pos;
+
+		if (bytes > 0) {
+			/* Do a partial write. Need to wakeup reader
+			 * since we'll suspend ourself in read_write()
+			 */
+			if (!notouch)
+				release(vp, READ, susp_count);
+			return(bytes);
+		}
+	}
+
+	/* Pipe is full, or we need an atomic write */
+	return(SUSPEND);
+  }
+
+  /* Writing to an empty pipe.  Search for suspended reader. */
+  if (pos == 0 && !notouch)
+	release(vp, READ, susp_count);
+
+  /* Requested amount fits */
+  return bytes;
 }
 
 /*===========================================================================*
@@ -238,13 +240,24 @@ int task;			/* who is proc waiting for? (PIPE = pipe) */
  * The SUSPEND pseudo error should be returned after calling suspend().
  */
 
-  if (task == XPIPE || task == XPOPEN) susp_count++;/* #procs susp'ed on pipe*/
+#if DO_SANITYCHECKS
+  if (task == XPIPE)
+	panic(__FILE__, "suspend: called for XPIPE", NO_NUM);
+
+  if(fp->fp_suspended == SUSPENDED)
+	panic(__FILE__, "suspend: called for suspended process", NO_NUM);
+#endif
+
+  if (task == XPOPEN) susp_count++;/* #procs susp'ed on pipe*/
   fp->fp_suspended = SUSPENDED;
-  assert(!GRANT_VALID(fp->fp_grant));
+  assert(fp->fp_grant == GRANT_INVALID || !GRANT_VALID(fp->fp_grant));
   fp->fp_fd = m_in.fd << 8 | call_nr;
   if(task == NONE)
 	panic(__FILE__,"suspend on NONE",NO_NUM);
   fp->fp_task = -task;
+  fp->fp_flags &= ~SUSP_REOPEN;			/* Clear this flag. The caller
+						 * can set it when needed.
+						 */
   if (task == XLOCK) {
 	fp->fp_buffer = (char *) m_in.name1;	/* third arg to fcntl() */
 	fp->fp_nbytes = m_in.request;		/* second arg to fcntl() */
@@ -252,6 +265,35 @@ int task;			/* who is proc waiting for? (PIPE = pipe) */
 	fp->fp_buffer = m_in.buffer;		/* for reads and writes */
 	fp->fp_nbytes = m_in.nbytes;
   }
+}
+
+/*===========================================================================*
+ *				pipe_suspend					     *
+ *===========================================================================*/
+PUBLIC void pipe_suspend(rw_flag, fd_nr, buf, size)
+int rw_flag;
+int fd_nr;
+char *buf;
+size_t size;
+{
+/* Take measures to suspend the processing of the present system call.
+ * Store the parameters to be used upon resuming in the process table.
+ * (Actually they are not used when a process is waiting for an I/O device,
+ * but they are needed for pipes, and it is not worth making the distinction.)
+ * The SUSPEND pseudo error should be returned after calling suspend().
+ */
+#if DO_SANITYCHECKS
+  if(fp->fp_suspended == SUSPENDED)
+	panic(__FILE__, "pipe_suspend: called for suspended process", NO_NUM);
+#endif
+
+  susp_count++;					/* #procs susp'ed on pipe*/
+  fp->fp_suspended = SUSPENDED;
+  assert(!GRANT_VALID(fp->fp_grant));
+  fp->fp_fd = (fd_nr << 8) | ((rw_flag == READING) ? READ : WRITE);
+  fp->fp_task = -XPIPE;
+  fp->fp_buffer = buf;		
+  fp->fp_nbytes = size;
 }
 
 /*===========================================================================*
@@ -296,6 +338,10 @@ int count;			/* max number of processes to release */
   register struct fproc *rp;
   struct filp *f;
 
+#if 0
+  printf("vfs:release: vp 0x%x, call %d, count %d\n", vp, call_nr, count);
+#endif
+
   /* Trying to perform the call also includes SELECTing on it with that
    * operation.
    */
@@ -315,13 +361,15 @@ int count;			/* max number of processes to release */
   }
 
   /* Search the proc table. */
-  for (rp = &fproc[0]; rp < &fproc[NR_PROCS]; rp++) {
+  for (rp = &fproc[0]; rp < &fproc[NR_PROCS] && count > 0; rp++) {
 	if (rp->fp_pid != PID_FREE && rp->fp_suspended == SUSPENDED &&
 			rp->fp_revived == NOT_REVIVING &&
 			(rp->fp_fd & BYTE) == call_nr &&
 			rp->fp_filp[rp->fp_fd>>8]->filp_vno == vp) {
 		revive(rp->fp_endpoint, 0);
 		susp_count--;	/* keep track of who is suspended */
+		if(susp_count < 0)
+			panic("vfs", "susp_count now negative", susp_count);
 		if (--count == 0) return;
 	}
   }
@@ -337,10 +385,10 @@ int returned;			/* if hanging on task, how many bytes read */
 /* Revive a previously blocked process. When a process hangs on tty, this
  * is the way it is eventually released.
  */
-
   register struct fproc *rfp;
   register int task;
-  int proc_nr;
+  int fd_nr, proc_nr;
+  struct filp *fil_ptr;
 
   if(isokendpt(proc_nr_e, &proc_nr) != OK)
 	return;
@@ -358,13 +406,37 @@ int returned;			/* if hanging on task, how many bytes read */
 	/* Revive a process suspended on a pipe or lock. */
 	rfp->fp_revived = REVIVING;
 	reviving++;		/* process was waiting on pipe or lock */
-  } else {
+  }
+  else if (task == XDOPEN)
+  {
+	rfp->fp_suspended = NOT_SUSPENDED;
+	fd_nr= rfp->fp_fd>>8;
+	if (returned < 0)
+	{
+		fil_ptr= rfp->fp_filp[fd_nr];
+		rfp->fp_filp[fd_nr] = NIL_FILP;
+		FD_CLR(fd_nr, &rfp->fp_filp_inuse);
+		if (fil_ptr->filp_count != 1)
+		{
+			panic(__FILE__, "revive: bad count in filp",
+				fil_ptr->filp_count);
+		}
+		fil_ptr->filp_count= 0;
+		put_vnode(fil_ptr->filp_vno);     
+		fil_ptr->filp_vno = NIL_VNODE;
+		reply(proc_nr_e, returned);
+	}
+	else
+		reply(proc_nr_e, fd_nr);
+  }
+  else {
 	rfp->fp_suspended = NOT_SUSPENDED;
 	if (task == XPOPEN) /* process blocked in open or create */
 		reply(proc_nr_e, rfp->fp_fd>>8);
 	else if (task == XSELECT) {
 		reply(proc_nr_e, returned);
-	} else {
+	}
+	else {
 		/* Revive a process suspended on TTY or other device. 
 		 * Pretend it wants only what there is.
 		 */
@@ -386,24 +458,9 @@ int returned;			/* if hanging on task, how many bytes read */
 
 
 /*===========================================================================*
- *				do_unpause				     *
- *===========================================================================*/
-PUBLIC int do_unpause()
-{
-/* A signal has been sent to a user who is paused on the file system.
- * Abort the system call with the EINTR error message.
- */
-  int proc_nr_e;
-
-  if (who_e != PM_PROC_NR) return(EPERM);
-  proc_nr_e = m_in.ENDPT;
-  return unpause(proc_nr_e);
-}
-
-/*===========================================================================*
  *				unpause					     *
  *===========================================================================*/
-PUBLIC int unpause(proc_nr_e)
+PUBLIC void unpause(proc_nr_e)
 int proc_nr_e;
 {
 /* A signal has been sent to a user who is paused on the file system.
@@ -415,17 +472,25 @@ int proc_nr_e;
   struct filp *f;
   dev_t dev;
   message mess;
+  int wasreviving = 0;
 
-  okendpt(proc_nr_e, &proc_nr_p);
+  if(isokendpt(proc_nr_e, &proc_nr_p) != OK) {
+	printf("VFS: ignoring unpause for bogus endpoint %d\n", proc_nr_e);
+	return;
+  }
+
   rfp = &fproc[proc_nr_p];
-  if (rfp->fp_suspended == NOT_SUSPENDED) return(OK);
+  if (rfp->fp_suspended == NOT_SUSPENDED)
+	return;
   task = -rfp->fp_task;
 
   if (rfp->fp_revived == REVIVING)
   {
 	rfp->fp_revived = NOT_REVIVING;
 	reviving--;
+	wasreviving = 1;
   }
+
 
   switch (task) {
 	case XPIPE:		/* process trying to read or write a pipe */
@@ -441,7 +506,21 @@ int proc_nr_e;
 	case XPOPEN:		/* process trying to open a fifo */
 		break;
 
+	case XDOPEN:		/* process trying to open a device */
+		/* Don't cancel OPEN. Just wait until the open completes. */
+		return;	
+
 	default:		/* process trying to do device I/O (e.g. tty)*/
+		if (rfp->fp_flags & SUSP_REOPEN)
+		{
+			/* Process is suspended while waiting for a reopen.
+			 * Just reply EINTR.
+			 */
+			rfp->fp_flags &= ~SUSP_REOPEN;
+			status= EINTR;
+			break;
+		}
+		
 		fild = (rfp->fp_fd >> 8) & BYTE;/* extract file descriptor */
 		if (fild < 0 || fild >= OPEN_MAX)
 			panic(__FILE__,"unpause err 2",NO_NUM);
@@ -457,6 +536,11 @@ int proc_nr_e;
 		fp = rfp;	/* hack - ctty_io uses fp */
 		(*dmap[(dev >> MAJOR) & BYTE].dmap_io)(task, &mess);
 		status = mess.REP_STATUS;
+		if (status == SUSPEND)
+			return;		/* Process will be revived at a
+					 * later time.
+					 */
+
 		if(status == EAGAIN) status = EINTR;
 		if(GRANT_VALID(rfp->fp_grant)) {
 			if(cpf_revoke(rfp->fp_grant)) {
@@ -468,8 +552,12 @@ int proc_nr_e;
   }
 
   rfp->fp_suspended = NOT_SUSPENDED;
+
+  if ((task == XPIPE || task == XPOPEN) && !wasreviving) {
+	susp_count--;
+  }
+
   reply(proc_nr_e, status);	/* signal interrupted call */
-  return(OK);
 }
 
 
@@ -481,15 +569,15 @@ PUBLIC int select_request_pipe(struct filp *f, int *ops, int block)
 	int orig_ops, r = 0, err, canwrite;
 	orig_ops = *ops;
 	if ((*ops & (SEL_RD|SEL_ERR))) {
-		if ((err = pipe_check(f->filp_vno, READING, 0,
-			1, f->filp_pos, &canwrite, 1)) != SUSPEND)
+		if ((err = Xpipe_check(f->filp_vno, READING, 0,
+			1, f->filp_pos, 1)) != SUSPEND)
 			r |= SEL_RD;
 		if (err < 0 && err != SUSPEND)
 			r |= SEL_ERR;
 	}
 	if ((*ops & (SEL_WR|SEL_ERR))) {
-		if ((err = pipe_check(f->filp_vno, WRITING, 0,
-			1, f->filp_pos, &canwrite, 1)) != SUSPEND)
+		if ((err = Xpipe_check(f->filp_vno, WRITING, 0,
+			1, f->filp_pos, 1)) != SUSPEND)
 			r |= SEL_WR;
 		if (err < 0 && err != SUSPEND)
 			r |= SEL_ERR;
@@ -516,6 +604,34 @@ PUBLIC int select_match_pipe(struct filp *f)
 	return 0;
 }
 
+#if DO_SANITYCHECKS
+/*===========================================================================*
+ *				check_pipe			     *
+ *===========================================================================*/
+PUBLIC int check_pipe(void)
+{
+	struct fproc *rfp;
+	int mycount = 0;
+        for (rfp=&fproc[0]; rfp < &fproc[NR_PROCS]; rfp++) {
+                if (rfp->fp_pid == PID_FREE)
+                        continue;
+		if(rfp->fp_suspended != SUSPENDED &&
+			rfp->fp_suspended != NOT_SUSPENDED) {
+			printf("check_pipe: %d invalid suspended value 0x%x\n",
+				rfp->fp_endpoint, rfp->fp_suspended);
+			return 0;
+		}
+		if(rfp->fp_suspended == SUSPENDED && rfp->fp_revived != REVIVING && (-rfp->fp_task == XPIPE || -rfp->fp_task == XPOPEN)) {
+			mycount++;
+		}
+        }
 
+	if(mycount != susp_count) {
+		printf("check_pipe: mycount %d susp_count %d\n",
+			mycount, susp_count);
+		return 0;
+	}
 
-
+	return 1;
+}
+#endif

@@ -9,6 +9,7 @@ Created:	Jan 2000 by Philip Homburg <philip@cs.vu.nl>
 #define PCI_DID		0x02	/* Device ID, 16-bit */
 #define PCI_CR		0x04	/* Command Register, 16-bit */
 #define		PCI_CR_MAST_EN	0x0004	/* Enable Busmaster Access */
+#define		PCI_CR_MEM_EN	0x0002	/* Enable Mem Cycles */
 #define		PCI_CR_IO_EN	0x0001	/* Enable I/O Cycles */
 #define PCI_SR		0x06	/* PCI status, 16-bit */
 #define		 PSR_SSE	0x4000	/* Signaled System Error */
@@ -126,6 +127,14 @@ Created:	Jan 2000 by Philip Homburg <philip@cs.vu.nl>
 #define	PCI_T3_CARDBUS		0x060700	/* Bardbus Bridge */
 
 #define NO_VID		0xffff	/* No PCI card present */
+
+/* Capabilities */
+#define CAP_T_SECURE_DEV	0x0f		/* (AMD) Secure device
+						 * capability
+						 */
+#define CAP_SD_INFO		2		/* Offset from CAP ptr */
+#define 	CAP_SD_SUBTYPE_MASK	0x0f	/* Mask for subtype */
+#define			CAP_T_SD_DEV		0 /* AMD DEV */
 
 /*
  * $PchId: pci.h,v 1.4 2001/12/06 20:21:22 philip Exp $

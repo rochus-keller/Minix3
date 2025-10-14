@@ -11,11 +11,9 @@
 #include <fcntl.h>
 #include <minix/type.h>
 #include <minix/safecopies.h>
+#include <minix/sys_config.h>
 
 #include "log.h"
-#include "../../kernel/const.h"
-#include "../../kernel/config.h"
-#include "../../kernel/type.h"
 
 /*==========================================================================*
  *				do_new_kmess				    *
@@ -24,22 +22,28 @@ PUBLIC int do_new_kmess(m)
 message *m;					/* notification message */
 {
 /* Notification for a new kernel message. */
-  struct kmessages kmess;		/* entire kmess structure */
-  char print_buf[KMESS_BUF_SIZE];	/* copy new message here */
-  static int prev_next = 0;
+  static struct kmessages kmess;		/* entire kmess structure */
+  static char print_buf[_KMESS_BUF_SIZE];	/* copy new message here */
   int bytes;
   int i, r;
+  int *prev_nextp;
+
+  static int kernel_prev_next = 0;
+  static int tty_prev_next = 0;
 
   if (m->m_source == TTY_PROC_NR)
   {
 	cp_grant_id_t gid;
 	message mess;
 
+	prev_nextp= &tty_prev_next;
 	gid= cpf_grant_direct(TTY_PROC_NR, (vir_bytes)&kmess, sizeof(kmess),
 		CPF_WRITE);
 	if (gid == -1)
 	{
+#if 0
 		report("LOG","cpf_grant_direct failed for TTY", errno);
+#endif
 		return EDONTREPLY;
 	}
 
@@ -63,6 +67,7 @@ message *m;					/* notification message */
 		report("LOG","couldn't get copy of kmessages", r);
 		return EDONTREPLY;
 	}
+	prev_nextp= &kernel_prev_next;
   }
 
   /* Print only the new part. Determine how many new bytes there are with 
@@ -72,11 +77,12 @@ message *m;					/* notification message */
    * Check for size being positive, the buffer might as well be emptied!
    */
   if (kmess.km_size > 0) {
-      bytes = ((kmess.km_next + KMESS_BUF_SIZE) - prev_next) % KMESS_BUF_SIZE;
-      r=prev_next;				/* start at previous old */ 
+      bytes = ((kmess.km_next + _KMESS_BUF_SIZE) - (*prev_nextp)) %
+	_KMESS_BUF_SIZE;
+      r= *prev_nextp;				/* start at previous old */ 
       i=0;
       while (bytes > 0) {			
-          print_buf[i] = kmess.km_buf[(r%KMESS_BUF_SIZE)];
+          print_buf[i] = kmess.km_buf[(r%_KMESS_BUF_SIZE)];
           bytes --;
           r ++;
           i ++;
@@ -89,7 +95,7 @@ message *m;					/* notification message */
   /* Almost done, store 'next' so that we can determine what part of the
    * kernel messages buffer to print next time a notification arrives.
    */
-  prev_next = kmess.km_next;
+  *prev_nextp = kmess.km_next;
   return EDONTREPLY;
 }
 
@@ -127,6 +133,8 @@ PUBLIC int do_diagnostics(message *m, int safe)
       diagbuf[i++] = c;
   }
   log_append(diagbuf, i);
+
+  if(m->m_type == ASYN_DIAGNOSTICS_OLD) return EDONTREPLY;
 
   return OK;
 }

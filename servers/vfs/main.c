@@ -1,4 +1,4 @@
-/* This file contains the main program of the File System.  It consists of
+/*
  * a loop that gets messages requesting work, carries out the work, and sends
  * replies.
  *
@@ -26,6 +26,7 @@
 #include <minix/const.h>
 #include <minix/endpoint.h>
 #include <minix/safecopies.h>
+#include <minix/debug.h>
 #include "file.h"
 #include "fproc.h"
 #include "param.h"
@@ -57,23 +58,66 @@ PUBLIC int main()
 
   fs_init();
 
+  SANITYCHECK;
+
+#if DO_SANITYCHECKS
+  FIXME("VFS: DO_SANITYCHECKS is on");
+#endif
+
   /* This is the main loop that gets work, processes it, and sends replies. */
   while (TRUE) {
+	SANITYCHECK;
 	get_work();		/* sets who and call_nr */
-	fp = &fproc[who_p];	/* pointer to proc table struct */
-	super_user = (fp->fp_effuid == SU_UID ? TRUE : FALSE);   /* su? */
 
 	if (who_e == PM_PROC_NR && call_nr != PROC_EVENT)
 		printf("FS: strange, got message %d from PM\n", call_nr);
 
+	if (call_nr == DEV_REVIVE)
+	{
+		endpoint_t endpt;
+
+		endpt = m_in.REP_ENDPT;
+		if(endpt == FS_PROC_NR) {
+			endpt = suspended_ep(m_in.m_source, m_in.REP_IO_GRANT);
+			if(endpt == NONE) {
+				printf("FS: proc with "
+			"grant %d from %d not found (revive)\n",
+					m_in.REP_IO_GRANT, m_in.m_source);
+				continue;
+			}
+		}
+		revive(endpt, m_in.REP_STATUS);
+		continue;
+	}
+	if (call_nr == DEV_REOPEN_REPL)
+	{
+		reopen_reply();
+		continue;
+	}
+	if (call_nr == DEV_CLOSE_REPL)
+	{
+		close_reply();
+		continue;
+	}
+	if (call_nr == DEV_SEL_REPL1)
+	{
+		select_reply1();
+		continue;
+	}
+	if (call_nr == DEV_SEL_REPL2)
+	{
+		select_reply2();
+		continue;
+	}
+
  	/* Check for special control messages first. */
         if ((call_nr & NOTIFY_MESSAGE)) {
-		if (call_nr == PROC_EVENT)
+		if (call_nr == PROC_EVENT && who_e == PM_PROC_NR)
 		{
 			/* PM tries to get FS to do something */
 			service_pm();
 		}
-		else if (call_nr == SYN_ALARM)
+		else if (call_nr == SYN_ALARM && who_e == CLOCK)
 		{
 			/* Alarm timer expired. Used only for select().
 			 * Check it.
@@ -85,30 +129,74 @@ PUBLIC int main()
 			/* Device notifies us of an event. */
 			dev_status(&m_in);
 		}
-#if 0
-		if (!check_vrefs())
-		{
-			printf("after call %d from %d/%d\n",
-				call_nr, who_p, who_e);
-			panic(__FILE__, "check_vrefs failed at line", __LINE__);
-		}
-#endif
+		SANITYCHECK;
 		continue;
 	}
 
-	switch(call_nr)
-	{
-	case DEVCTL:
+	/* We only expect notify()s from tasks. */
+	if(who_p < 0) {
+    		printf("FS: ignoring message from %d (%d)\n",
+			who_e, m_in.m_type);
+		continue;
+	}
+
+	/* Now it's safe to set and check fp. */
+	fp = &fproc[who_p];	/* pointer to proc table struct */
+	super_user = (fp->fp_effuid == SU_UID ? TRUE : FALSE);   /* su? */
+
+#if DO_SANITYCHECKS
+	if(fp->fp_suspended != NOT_SUSPENDED) {
+		printf("VFS: requester %d call %d: not not suspended\n",
+			who_e, call_nr);
+		panic(__FILE__, "requester suspended", NO_NUM);
+	}
+#endif
+
+	/* Calls from VM. */
+	if(who_e == VM_PROC_NR) {
+	    int caught = 1;
+	    switch(call_nr)
+	    {
+		case VM_VFS_OPEN:
+			error = do_vm_open();
+			break;
+		case VM_VFS_CLOSE:
+			error = do_vm_close();
+			break;
+		case VM_VFS_MMAP:
+			error = do_vm_mmap();
+			break;
+		default:
+			caught = 0;
+			break;
+	   }
+	   if(caught) {
+		reply(who_e, error);
+		continue;
+	   }
+	}
+
+		SANITYCHECK;
+
+	  /* Other calls. */
+	  switch(call_nr)
+	  {
+	      case DEVCTL:
 		error= do_devctl();
 		if (error != SUSPEND) reply(who_e, error);
 		break;
 
-	default:
+	      case MAPDRIVER:
+		error= do_mapdriver();
+		if (error != SUSPEND) reply(who_e, error);
+		break;
+
+	      default:
 		/* Call the internal function that does the work. */
 		if (call_nr < 0 || call_nr >= NCALLS) { 
 			error = SUSPEND;
 			/* Not supposed to happen. */
-			printf("FS, warning illegal %d system call by %d\n",
+			printf("VFS: illegal %d system call by %d\n",
 				call_nr, who_e);
 		} else if (fp->fp_pid == PID_FREE) {
 			error = ENOSYS;
@@ -119,22 +207,15 @@ PUBLIC int main()
 #if ENABLE_SYSCALL_STATS
 			calls_stats[call_nr]++;
 #endif
+			SANITYCHECK;
 			error = (*call_vec[call_nr])();
+			SANITYCHECK;
 		}
 
 		/* Copy the results back to the user and send reply. */
 		if (error != SUSPEND) { reply(who_e, error); }
-		
 	}
-#if 0
-	if (!check_vrefs())
-	{
-		printf("after call %d from %d/%d\n", call_nr, who_p, who_e);
-		panic(__FILE__, "check_vrefs failed at line", __LINE__);
-	}
-#endif
-	
-	
+	SANITYCHECK;
   }
   return(OK);				/* shouldn't come here */
 }
@@ -147,15 +228,21 @@ PRIVATE void get_work()
   /* Normally wait for new input.  However, if 'reviving' is
    * nonzero, a suspended process must be awakened.
    */
+  int r, found_one, fd_nr;
+  struct filp *f;
   register struct fproc *rp;
 
-  if (reviving != 0) {
+  while (reviving != 0) {
+	found_one= FALSE;
+
 	/* Revive a suspended process. */
 	for (rp = &fproc[0]; rp < &fproc[NR_PROCS]; rp++) 
 		if (rp->fp_pid != PID_FREE && rp->fp_revived == REVIVING) {
+			found_one= TRUE;
 			who_p = (int)(rp - fproc);
 			who_e = rp->fp_endpoint;
 			call_nr = rp->fp_fd & BYTE;
+
 			m_in.fd = (rp->fp_fd >>8) & BYTE;
 			m_in.buffer = rp->fp_buffer;
 			m_in.nbytes = rp->fp_nbytes;
@@ -166,9 +253,25 @@ PRIVATE void get_work()
 			 * If it is, it'll 'leak' grants.
 			 */
 			assert(!GRANT_VALID(rp->fp_grant));
+
+			if (rp->fp_task == -XPIPE)
+			{
+				fp= rp;
+				fd_nr= (rp->fp_fd >> 8);
+				f= get_filp(fd_nr);
+				assert(f != NULL);
+				r= rw_pipe((call_nr == READ) ? READING :
+					WRITING, who_e, fd_nr, f,
+					rp->fp_buffer, rp->fp_nbytes);
+				if (r != SUSPEND)
+					reply(who_e, r);
+				continue;
+			}
+
 			return;
 		}
-	panic(__FILE__,"get_work couldn't revive anyone", NO_NUM);
+	if (!found_one)
+		panic(__FILE__,"get_work couldn't revive anyone", NO_NUM);
   }
 
   for(;;) {
@@ -187,9 +290,14 @@ PRIVATE void get_work()
 	continue;
     }
     if(who_p >= 0 && fproc[who_p].fp_endpoint != who_e) {
-    	printf("FS: receive endpoint inconsistent (%d, %d, %d).\n",
-		who_e, fproc[who_p].fp_endpoint, who_e);
+	if(fproc[who_p].fp_endpoint == NONE) { 
+		printf("slot unknown even\n");
+	}
+    	printf("FS: receive endpoint inconsistent (source %d, who_p %d, stored ep %d, who_e %d).\n",
+		m_in.m_source, who_p, fproc[who_p].fp_endpoint, who_e);
+#if 0
 	panic(__FILE__, "FS: inconsistent endpoint ", NO_NUM);
+#endif
 	continue;
     }
     call_nr = m_in.m_type;
@@ -207,8 +315,14 @@ int result;			/* result of the call (usually OK or error #) */
 {
 /* Send a reply to a user process.  If the send fails, just ignore it. */
   int s;
+
+#if 0
+  if (call_nr == SYMLINK)
+	printf("vfs:reply: replying %d for call %d\n", result, call_nr);
+#endif
+
   m_out.reply_type = result;
-  s = send(whom, &m_out);
+  s = sendnb(whom, &m_out);
   if (s != OK) printf("VFS: couldn't send reply %d to %d: %d\n",
 	result, whom, s);
 }
@@ -219,10 +333,11 @@ int result;			/* result of the call (usually OK or error #) */
 PRIVATE void fs_init()
 {
 /* Initialize global variables, tables, etc. */
-  register struct inode *rip;
-  register struct fproc *rfp;
-  message mess;
   int s;
+  register struct fproc *rfp;
+  struct vmnt *vmp;
+  struct vnode *root_vp;
+  message mess;
 
   /* Clear endpoint field */
   last_login_fs_e = NONE;
@@ -247,6 +362,8 @@ PRIVATE void fs_init()
 	rfp->fp_effgid = (gid_t) SYS_GID;
 	rfp->fp_umask = ~0;
 	rfp->fp_grant = GRANT_INVALID;
+	rfp->fp_suspended = NOT_SUSPENDED;
+	rfp->fp_revived = NOT_REVIVING;
    
   } while (TRUE);			/* continue until process NONE */
   mess.m_type = OK;			/* tell PM that we succeeded */
@@ -257,13 +374,6 @@ PRIVATE void fs_init()
    * extra block_size requirements are checked at super-block-read-in time.
    */
   if (OPEN_MAX > 127) panic(__FILE__,"OPEN_MAX > 127", NO_NUM);
-  /*
-  if (NR_BUFS < 6) panic(__FILE__,"NR_BUFS < 6", NO_NUM);
-  if (V1_INODE_SIZE != 32) panic(__FILE__,"V1 inode size != 32", NO_NUM);
-  if (V2_INODE_SIZE != 64) panic(__FILE__,"V2 inode size != 64", NO_NUM);
-  if (OPEN_MAX > 8 * sizeof(long))
-  	 panic(__FILE__,"Too few bits in fp_cloexec", NO_NUM);
-  */
   
   /* The following initializations are needed to let dev_opcl succeed .*/
   fp = (struct fproc *) NULL;
@@ -273,16 +383,26 @@ PRIVATE void fs_init()
   init_root();			/* init root device and load super block */
   init_select();		/* init select() structures */
 
+
+  vmp = &vmnt[0];		/* Should be the root filesystem */
+  if (vmp->m_dev == NO_DEV)
+	panic(__FILE__, "vfs:fs_init: no root filesystem", NO_NUM);
+  root_vp= vmp->m_root_node;
+
   /* The root device can now be accessed; set process directories. */
   for (rfp=&fproc[0]; rfp < &fproc[NR_PROCS]; rfp++) {
 	FD_ZERO(&(rfp->fp_filp_inuse));
   	if (rfp->fp_pid != PID_FREE) {
                 
-                rfp->fp_rd = get_vnode_x(ROOT_FS_E, ROOT_INODE);
-                rfp->fp_wd = get_vnode_x(ROOT_FS_E, ROOT_INODE);
+		dup_vnode(root_vp);
+                rfp->fp_rd = root_vp;
+		dup_vnode(root_vp);
+                rfp->fp_wd = root_vp;
 		
   	} else  rfp->fp_endpoint = NONE;
   }
+
+  system_hz = sys_hz();
 }
 
 /*===========================================================================*
@@ -290,13 +410,13 @@ PRIVATE void fs_init()
  *===========================================================================*/
 PRIVATE void init_root()
 {
+  int r = OK;
   struct vmnt *vmp;
   struct vnode *root_node;
   struct dmap *dp;
+  char *label;
   message m;
-  int r = OK;
-  struct readsuper_req sreq;
-  struct readsuper_res sres;
+  struct node_details resX;
   
   /* Open the root device. */
   root_dev = DEV_IMGRD;
@@ -335,50 +455,39 @@ PRIVATE void init_root()
 	panic(__FILE__,"No driver for root device", r);
   }
 
-  /* Open the device the file system lives on. */
-  if ((r = dev_open(root_dev, ROOT_FS_E, (R_BIT|W_BIT))) != OK) 
-	panic(__FILE__,"Cannot open root device", r);
+  label= dp->dmap_label;
+  if (strlen(label) == 0)
+  {
+	panic(__FILE__, "vfs:init_root: no label for major", root_dev >> MAJOR);
+  }
 
-
-  /* Request for reading superblock and root inode */
-  sreq.fs_e = ROOT_FS_E;
-  sreq.readonly = 0;
-  sreq.boottime = boottime;
-  sreq.driver_e = dp->dmap_driver;
-  sreq.dev = root_dev;
-  sreq.slink_storage = user_fullpath;
-  sreq.isroot = 1;
- 
   /* Issue request */
-  if ((r = req_readsuper(&sreq, &sres)) != OK) {
-      dev_close(root_dev);
+  r = req_readsuper(ROOT_FS_E, label, root_dev, 0 /*!readonly*/,
+	1 /*isroot*/, &resX);
+  if (r != OK) {
       panic(__FILE__,"Cannot read superblock from root", r);
   }
   
   /* Fill in root node's fields */
-  root_node->v_fs_e = sres.fs_e;
-  root_node->v_inode_nr = sres.inode_nr;
-  root_node->v_mode = sres.fmode;
-  root_node->v_size = sres.fsize;
+  root_node->v_fs_e = resX.fs_e;
+  root_node->v_inode_nr = resX.inode_nr;
+  root_node->v_mode = resX.fmode;
+  root_node->v_size = resX.fsize;
   root_node->v_sdev = NO_DEV;
-  root_node->v_fs_count = 0;	/* Is this correct? */
+  root_node->v_fs_count = 1;
   root_node->v_ref_count = 1;
 
   /* Fill in max file size and blocksize for the vmnt */
-  vmp->m_fs_e = sres.fs_e;
+  vmp->m_fs_e = resX.fs_e;
   vmp->m_dev = root_dev;
-  vmp->m_block_size = sres.blocksize;
-  vmp->m_max_file_size = sres.maxsize;
-  vmp->m_driver_e = dp->dmap_driver;
   vmp->m_flags = 0;
   
   /* Root node is indeed on the partition */
   root_node->v_vmnt = vmp;
   root_node->v_dev = vmp->m_dev;
 
-  /* Root directory is mounted on itself */
-  vmp->m_mounted_on = root_node;
-  root_node->v_ref_count++;
+  /* Root directory is not mounted on a vnode. */
+  vmp->m_mounted_on = NULL;
   vmp->m_root_node = root_node;
 }
 
@@ -406,16 +515,6 @@ PRIVATE void service_pm()
 		call= m.m_type;
 		switch(call)
 		{
-		case PM_STIME:
-			boottime = m.PM_STIME_TIME;
-                       
-                        /* Send new time for all FS processes */
-                        for (vmp = &vmnt[0]; vmp < &vmnt[NR_MNTS]; ++vmp) { 
-                            if (vmp->m_fs_e)
-                                req_stime(vmp->m_fs_e, boottime);
-                        }
-			/* No need to report status to PM */
-			break;
 		case PM_SETSID:
 			pm_setsid(m.PM_SETSID_PROC);
 

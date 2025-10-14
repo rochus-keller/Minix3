@@ -53,6 +53,8 @@ PUBLIC int get_fd(int start, mode_t bits, int *k, struct filp **fpt)
 		f->filp_select_ops = 0;
 		f->filp_pipe_select_ops = 0;
 		f->filp_flags = 0;
+		f->filp_state = FS_NORMAL;
+		f->filp_select_flags = 0;
 		*fpt = f;
 		return(OK);
 	}
@@ -84,6 +86,13 @@ int fild;			/* file descriptor */
 
   err_code = EBADF;
   if (fild < 0 || fild >= OPEN_MAX ) return(NIL_FILP);
+  if (rfp->fp_filp[fild] == NIL_FILP && FD_ISSET(fild, &rfp->fp_filp_inuse))
+  {
+	printf("get_filp2: setting err_code to EIO for proc %d fd %d\n",
+		rfp->fp_endpoint, fild);
+	err_code = EIO;	/* The filedes is not there, but is not closed either.
+			 */
+  }
   return(rfp->fp_filp[fild]);	/* may also be NIL_FILP */
 }
 
@@ -103,7 +112,6 @@ PUBLIC struct filp *find_filp(register struct vnode *vp, mode_t bits)
 
   for (f = &filp[0]; f < &filp[NR_FILPS]; f++) {
 	if (f->filp_count != 0 && f->filp_vno == vp && (f->filp_mode & bits)){
-		assert(f->filp_count > 0);
 		return(f);
 	}
   }

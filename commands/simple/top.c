@@ -26,6 +26,8 @@
 #include <sys/select.h>
 
 #include <minix/ipc.h>
+#include <minix/com.h>
+#include <minix/sysinfo.h>
 #include <minix/config.h>
 #include <minix/type.h>
 #include <minix/const.h>
@@ -35,11 +37,14 @@
 #include "../../kernel/const.h"
 #include "../../kernel/proc.h"
 
+u32_t system_hz;
+
 #define  TC_BUFFER  1024        /* Size of termcap(3) buffer    */
 #define  TC_STRINGS  200        /* Enough room for cm,cl,so,se  */
 
 char *Tclr_all;
 
+#if 0
 int print_memory(struct pm_mem_info *pmi)
 {
         int h;
@@ -58,6 +63,7 @@ int print_memory(struct pm_mem_info *pmi)
 
 	return 1;
 }
+#endif
 
 int print_load(double *loads, int nloads)
 {
@@ -195,7 +201,7 @@ void print_procs(int maxlines,
 			((pr->p_memmap[T].mem_len + 
 			pr->p_memmap[D].mem_len) << CLICK_SHIFT)/1024);
 		printf("%6s", pr->p_rts_flags ? "" : "RUN");
-		printf(" %3d:%02d ", (ticks/HZ/60), (ticks/HZ)%60);
+		printf(" %3d:%02d ", (ticks/system_hz/60), (ticks/system_hz)%60);
 
 		printf("%6.2f%% %s\n",
 			100.0*tick_procs[p].ticks/dt, name);
@@ -209,10 +215,13 @@ void showtop(int r)
 	int nloads, i, p, lines = 0;
 	static struct proc prev_proc[PROCS], proc[PROCS];
 	struct winsize winsize;
-        static struct pm_mem_info pmi;
+        /*
+	static struct pm_mem_info pmi;
+	*/
 	static int prev_uptime, uptime;
 	static struct mproc mproc[NR_PROCS];
 	struct tms tms;
+	int mem = 0;
 
 	uptime = times(&tms);
 
@@ -222,10 +231,13 @@ void showtop(int r)
 		exit(1);
 	}
 
+#if 0
         if(getsysinfo(PM_PROC_NR, SI_MEM_ALLOC, &pmi) < 0) {
 		fprintf(stderr, "getsysinfo() for SI_MEM_ALLOC failed.\n");
+		mem = 0;
 		exit(1);;
-	}
+	} else mem = 1;
+#endif
 
 	if(getsysinfo(PM_PROC_NR, SI_KPROC_TAB, proc) < 0) {
 		fprintf(stderr, "getsysinfo() for SI_KPROC_TAB failed.\n");
@@ -247,7 +259,9 @@ void showtop(int r)
 
 	lines += print_load(loads, NLOADS);
 	lines += print_proc_summary(proc);
-	lines += print_memory(&pmi);
+#if 0
+	if(mem) { lines += print_memory(&pmi); }
+#endif
 
 	if(winsize.ws_row > 0) r = winsize.ws_row;
 
@@ -295,6 +309,8 @@ void sigwinch(int sig) { }
 int main(int argc, char *argv[])
 {
 	int r, c, s = 0, orig;
+
+	getsysinfo_up(PM_PROC_NR, SIU_SYSTEMHZ, sizeof(system_hz), &system_hz);
 
 	init(&r);
 

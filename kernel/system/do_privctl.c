@@ -28,8 +28,7 @@ message *m_ptr;			/* pointer to request message */
   register struct priv *sp;
   int proc_nr;
   int priv_id;
-  int i;
-  phys_bytes caller_phys, kernel_phys;
+  int i, r;
   struct io_range io_range;
   struct mem_range mem_range;
   struct priv priv;
@@ -54,7 +53,11 @@ message *m_ptr;			/* pointer to request message */
 	 * fail, since there are only a limited number of system processes.
 	 * Then copy the privileges from the caller and restore some defaults.
 	 */
-	if ((i=get_priv(rp, SYS_PROC)) != OK) return(i);
+	if ((i=get_priv(rp, SYS_PROC)) != OK)
+	{
+		kprintf("do_privctl: out of priv structures\n");
+		return(i);
+	}
 	priv_id = priv(rp)->s_id;		/* backup privilege id */
 	*priv(rp) = *priv(caller_ptr);		/* copy from caller */
 	priv(rp)->s_id = priv_id;		/* restore privilege id */
@@ -81,6 +84,11 @@ message *m_ptr;			/* pointer to request message */
 	    }
 	}
 
+	for (i=0; i<BITMAP_CHUNKS(NR_SYS_PROCS); i++) {
+		rp->p_priv->s_ipc_sendrec.chunk[i] = FILLED_MASK;
+	}
+	unset_sys_bit(rp->p_priv->s_ipc_sendrec, USER_PRIV_ID);
+
 	/* No I/O resources, no memory resources, no IRQs, no grant table */
 	priv(rp)->s_nr_io_range= 0;
 	priv(rp)->s_nr_mem_range= 0;
@@ -91,12 +99,9 @@ message *m_ptr;			/* pointer to request message */
 	if (m_ptr->CTL_ARG_PTR)
 	{
 		/* Copy privilege structure from caller */
-		caller_phys = umap_local(caller_ptr, D,
-			(vir_bytes) m_ptr->CTL_ARG_PTR, sizeof(priv));
-		if (caller_phys == 0)
-			return EFAULT;
-		kernel_phys = vir2phys(&priv);
-		phys_copy(caller_phys, kernel_phys, sizeof(priv));
+		if((r=data_copy(who_e, (vir_bytes) m_ptr->CTL_ARG_PTR,
+			SYSTEM, (vir_bytes) &priv, sizeof(priv))) != OK)
+			return r;
 
 		/* Copy the call mask */
 		for (i= 0; i<CALL_MASK_SIZE; i++)
@@ -137,6 +142,10 @@ message *m_ptr;			/* pointer to request message */
 
 		memcpy(priv(rp)->s_k_call_mask, priv.s_k_call_mask,
 			sizeof(priv(rp)->s_k_call_mask));
+		memcpy(&priv(rp)->s_ipc_to, &priv.s_ipc_to,
+			sizeof(priv(rp)->s_ipc_to));
+		memcpy(&priv(rp)->s_ipc_sendrec, &priv.s_ipc_sendrec,
+			sizeof(priv(rp)->s_ipc_sendrec));
 	}
 
 	/* Done. Privileges have been set. Allow process to run again. */
@@ -157,13 +166,18 @@ message *m_ptr;			/* pointer to request message */
 	if (!(priv(rp)->s_flags & SYS_PROC))
 		return EPERM;
 
+#if 0 /* XXX -- do we need a call for this? */
+	if (strcmp(rp->p_name, "fxp") == 0 ||
+		strcmp(rp->p_name, "rtl8139") == 0)
+	{
+		kprintf("setting ipc_stats_target to %d\n", rp->p_endpoint);
+		ipc_stats_target= rp->p_endpoint;
+	}
+#endif
+
 	/* Get the I/O range */
-	caller_phys = umap_local(caller_ptr, D, (vir_bytes) m_ptr->CTL_ARG_PTR,
-		sizeof(io_range));
-	if (caller_phys == 0)
-		return EFAULT;
-	kernel_phys = vir2phys(&io_range);
-	phys_copy(caller_phys, kernel_phys, sizeof(io_range));
+	data_copy(who_e, (vir_bytes) m_ptr->CTL_ARG_PTR,
+		SYSTEM, (vir_bytes) &io_range, sizeof(io_range));
 	priv(rp)->s_flags |= CHECK_IO_PORT;	/* Check I/O accesses */
 	i= priv(rp)->s_nr_io_range;
 	if (i >= NR_IO_RANGE)
@@ -184,12 +198,9 @@ message *m_ptr;			/* pointer to request message */
 		return EPERM;
 
 	/* Get the memory range */
-	caller_phys = umap_local(caller_ptr, D, (vir_bytes) m_ptr->CTL_ARG_PTR,
-		sizeof(mem_range));
-	if (caller_phys == 0)
-		return EFAULT;
-	kernel_phys = vir2phys(&mem_range);
-	phys_copy(caller_phys, kernel_phys, sizeof(mem_range));
+	if((r=data_copy(who_e, (vir_bytes) m_ptr->CTL_ARG_PTR,
+		SYSTEM, (vir_bytes) &mem_range, sizeof(mem_range))) != OK)
+		return r;
 	priv(rp)->s_flags |= CHECK_MEM;	/* Check I/O accesses */
 	i= priv(rp)->s_nr_mem_range;
 	if (i >= NR_MEM_RANGE)

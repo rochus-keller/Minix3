@@ -20,56 +20,26 @@
 #include <termios.h>
 #include <sys/ioctl.h>
 #include <sys/vm.h>
+#include <sys/video.h>
+#include <sys/mman.h>
+#include <minix/tty.h>
 #include <minix/callnr.h>
 #include <minix/com.h>
+#include <minix/sys_config.h>
+#include <minix/vm.h>
 #include "tty.h"
 
-#include "../../kernel/const.h"
-#include "../../kernel/config.h"
-#include "../../kernel/type.h"
-
-/* Definitions used by the console driver. */
-#define MONO_BASE    0xB0000L	/* base of mono video memory */
-#define COLOR_BASE   0xB8000L	/* base of color video memory */
-#define MONO_SIZE     0x1000	/* 4K mono video memory */
-#define COLOR_SIZE    0x4000	/* 16K color video memory */
-#define EGA_SIZE      0x8000	/* EGA & VGA have at least 32K */
-#define BLANK_COLOR   0x0700	/* determines cursor color on blank screen */
-#define SCROLL_UP          0	/* scroll forward */
-#define SCROLL_DOWN        1	/* scroll backward */
-#define BLANK_MEM ((u16_t *) 0)	/* tells mem_vid_copy() to blank the screen */
-#define CONS_RAM_WORDS    80	/* video ram buffer size */
-#define MAX_ESC_PARMS      4	/* number of escape sequence params allowed */
-
-/* Constants relating to the controller chips. */
-#define M_6845         0x3B4	/* port for 6845 mono */
-#define C_6845         0x3D4	/* port for 6845 color */
-#define INDEX              0	/* 6845's index register */
-#define DATA               1	/* 6845's data register */
-#define STATUS             6	/* 6845's status register */
-#define VID_ORG           12	/* 6845's origin register */
-#define CURSOR            14	/* 6845's cursor register */
+/* Set this to 1 if you want console output duplicated on the first
+ * serial line.
+  */
+#define DUP_CONS_TO_SER	0
 
 /* The clock task should provide an interface for this */
 #define TIMER_FREQ  1193182L    /* clock frequency for timer in PC and AT */
 
-/* Beeper. */
-#define BEEP_FREQ     0x0533	/* value to put into timer to set beep freq */
-#define B_TIME		   3	/* length of CTRL-G beep is ticks */
-
-/* definitions used for font management */
-#define GA_SEQUENCER_INDEX	0x3C4
-#define GA_SEQUENCER_DATA	0x3C5
-#define GA_GRAPHICS_INDEX	0x3CE
-#define GA_GRAPHICS_DATA	0x3CF
-#define GA_VIDEO_ADDRESS	0xA0000L
-#define GA_FONT_SIZE		8192
-
 /* Global variables used by the console driver and assembly support. */
-PUBLIC int vid_index;		/* index of video segment in remote mem map */
-PUBLIC u16_t vid_seg;
-PUBLIC vir_bytes vid_off;	/* video ram is found at vid_seg:vid_off */
-PUBLIC unsigned vid_size;	/* 0x2000 for color or 0x0800 for mono */
+PUBLIC phys_bytes vid_size;	/* 0x2000 for color or 0x0800 for mono */
+PUBLIC phys_bytes vid_base;
 PUBLIC unsigned vid_mask;	/* 0x1FFF for color or 0x07FF for mono */
 PUBLIC unsigned blank_color = BLANK_COLOR; /* display code for blank */
 
@@ -83,12 +53,17 @@ PRIVATE unsigned scr_width;	/* # characters on a line */
 PRIVATE unsigned scr_lines;	/* # lines on the screen */
 PRIVATE unsigned scr_size;	/* # characters on the screen */
 
+/* tells mem_vid_copy() to blank the screen */
+#define BLANK_MEM ((vir_bytes) 0) 
+
 PRIVATE int disabled_vc = -1;	/* Virtual console that was active when 
 				 * disable_console was called.
 				 */
 PRIVATE int disabled_sm;	/* Scroll mode to be restored when re-enabling
 				 * console
 				 */
+
+char *console_memory = NULL;
 
 /* Per console data. */
 typedef struct console {
@@ -108,11 +83,24 @@ typedef struct console {
   int *c_esc_parmp;		/* pointer to current escape parameter */
   int c_esc_parmv[MAX_ESC_PARMS];	/* list of escape parameters */
   u16_t c_ramqueue[CONS_RAM_WORDS];	/* buffer for video RAM */
+  int c_line;			/* line no */
 } console_t;
+
+#define UPDATE_CURSOR(ccons, cursor) {				\
+	ccons->c_cur = cursor;					\
+	if(curcons && ccons == curcons)				\
+		set_6845(CURSOR, ccons->c_cur);			\
+}
+
+#define UPDATE_ORIGIN(ccons, origin) {				\
+	ccons->c_org = origin;					\
+  	if (curcons && ccons == curcons) 			\
+		set_6845(VID_ORG, ccons->c_org);		\
+}
 
 PRIVATE int nr_cons= 1;		/* actual number of consoles */
 PRIVATE console_t cons_table[NR_CONS];
-PRIVATE console_t *curcons;	/* currently visible */
+PRIVATE console_t *curcons = NULL;	/* currently visible */
 
 /* Color if using a color controller. */
 #define color	(vid_port == C_6845)
@@ -137,14 +125,18 @@ FORWARD _PROTOTYPE( void flush, (console_t *cons)			);
 FORWARD _PROTOTYPE( void parse_escape, (console_t *cons, int c)		);
 FORWARD _PROTOTYPE( void scroll_screen, (console_t *cons, int dir)	);
 FORWARD _PROTOTYPE( void set_6845, (int reg, unsigned val)		);
-FORWARD _PROTOTYPE( void get_6845, (int reg, unsigned *val)		);
 FORWARD _PROTOTYPE( void stop_beep, (timer_t *tmrp)			);
 FORWARD _PROTOTYPE( void cons_org0, (void)				);
 FORWARD _PROTOTYPE( void disable_console, (void)			);
 FORWARD _PROTOTYPE( void reenable_console, (void)			);
 FORWARD _PROTOTYPE( int ga_program, (struct sequence *seq)		);
 FORWARD _PROTOTYPE( int cons_ioctl, (tty_t *tp, int)			);
-FORWARD _PROTOTYPE( void ser_putc, (char c)				);
+FORWARD _PROTOTYPE( void mem_vid_copy, (vir_bytes src, int dst, int count)	);
+FORWARD _PROTOTYPE( void vid_vid_copy, (int src, int dst, int count)	);
+
+#if 0
+FORWARD _PROTOTYPE( void get_6845, (int reg, unsigned *val)		);
+#endif
 
 /*===========================================================================*
  *				cons_write				     *
@@ -169,7 +161,7 @@ int try;
   /* Check quickly for nothing to do, so this can be called often without
    * unmodular tests elsewhere.
    */
-  if ((count = tp->tty_outleft) == 0 || tp->tty_inhibited) return;
+  if ((count = tp->tty_outleft) == 0 || tp->tty_inhibited) return 0;
 
   /* Copy the user bytes to buf[] for decent addressing. Loop over the
    * copies, since the user buffer may be much larger than buf[].
@@ -204,6 +196,9 @@ int try;
 		{
 			out_char(cons, *tbuf++);
 		} else {
+#if DUP_CONS_TO_SER
+			if (cons == &cons_table[0]) ser_putc(*tbuf);
+#endif
 			cons->c_ramqueue[cons->c_rwords++] =
 					cons->c_attr | (*tbuf++ & BYTE);
 			cons->c_column++;
@@ -220,6 +215,8 @@ int try;
 							tp->tty_outcum);
 	tp->tty_outcum = 0;
   }
+
+  return 0;
 }
 
 /*===========================================================================*
@@ -248,6 +245,15 @@ int c;				/* character to be output */
 	parse_escape(cons, c);
 	return;
   }
+
+#if DUP_CONS_TO_SER
+  if (cons == &cons_table[0] && c != '\0')
+  {
+	if (c == '\n')
+		ser_putc('\r');
+	ser_putc(c);
+  }
+#endif
 
   switch(c) {
 	case 000:		/* null is typically used for padding */
@@ -348,9 +354,9 @@ int dir;			/* SCROLL_UP or SCROLL_DOWN */
 	} else
 	if (!wrap && cons->c_org + scr_size + scr_width >= cons->c_limit) {
 		vid_vid_copy(cons->c_org + scr_width, cons->c_start, chars);
-		cons->c_org = cons->c_start;
+		UPDATE_ORIGIN(cons, cons->c_start);
 	} else {
-		cons->c_org = (cons->c_org + scr_width) & vid_mask;
+		UPDATE_ORIGIN(cons, (cons->c_org + scr_width) & vid_mask);
 	}
 	new_line = (cons->c_org + chars) & vid_mask;
   } else {
@@ -361,9 +367,9 @@ int dir;			/* SCROLL_UP or SCROLL_DOWN */
 	if (!wrap && cons->c_org < cons->c_start + scr_width) {
 		new_org = cons->c_limit - scr_size;
 		vid_vid_copy(cons->c_org, new_org + scr_width, chars);
-		cons->c_org = new_org;
+		UPDATE_ORIGIN(cons, new_org);
 	} else {
-		cons->c_org = (cons->c_org - scr_width) & vid_mask;
+		UPDATE_ORIGIN(cons, (cons->c_org - scr_width) & vid_mask);
 	}
 	new_line = cons->c_org;
   }
@@ -371,8 +377,6 @@ int dir;			/* SCROLL_UP or SCROLL_DOWN */
   blank_color = cons->c_blank;
   mem_vid_copy(BLANK_MEM, new_line, scr_width);
 
-  /* Set the new video origin. */
-  if (cons == curcons) set_6845(VID_ORG, cons->c_org);
   flush(cons);
 }
 
@@ -390,7 +394,7 @@ register console_t *cons;	/* pointer to console struct */
 
   /* Have the characters in 'ramqueue' transferred to the screen. */
   if (cons->c_rwords > 0) {
-	mem_vid_copy(cons->c_ramqueue, cons->c_cur, cons->c_rwords);
+	mem_vid_copy((vir_bytes) cons->c_ramqueue, cons->c_cur, cons->c_rwords);
 	cons->c_rwords = 0;
 
 	/* TTY likes to know the current column and if echoing messed up. */
@@ -404,10 +408,8 @@ register console_t *cons;	/* pointer to console struct */
   if (cons->c_row < 0) cons->c_row = 0;
   if (cons->c_row >= scr_lines) cons->c_row = scr_lines - 1;
   cur = cons->c_org + cons->c_row * scr_width + cons->c_column;
-  if (cur != cons->c_cur) {
-	if (cons == curcons) set_6845(CURSOR, cur);
-	cons->c_cur = cur;
-  }
+  if (cur != cons->c_cur)
+	UPDATE_CURSOR(cons, cur);
 }
 
 /*===========================================================================*
@@ -730,6 +732,7 @@ unsigned val;			/* 16-bit value to set it to */
   sys_voutb(char_out, 4);			/* do actual output */
 }
 
+#if 0
 /*===========================================================================*
  *				get_6845				     *
  *===========================================================================*/
@@ -748,6 +751,7 @@ unsigned *val;			/* 16-bit value to set it to */
   v2 = v;
   *val = (v1 << 8) | v2;
 }
+#endif
 
 /*===========================================================================*
  *				beep					     *
@@ -793,8 +797,7 @@ PRIVATE void beep()
  *===========================================================================*/
 PUBLIC void do_video(message *m)
 {
-	int i, n, r, ops, watch, safe = 0;
-	unsigned char c;
+	int r, safe = 0;
 
 	/* Execute the requested device driver function. */
 	r= EINVAL;	/* just in case */
@@ -810,25 +813,28 @@ PUBLIC void do_video(message *m)
 		break;
 	    case DEV_IOCTL_S:
 		safe=1;
-		if (m->TTY_REQUEST == MIOCMAP || m->TTY_REQUEST == MIOCUNMAP)
-		{
+		switch(m->TTY_REQUEST) {
+		  case TIOCMAPMEM:
+		  case TIOCUNMAPMEM: {
 			int r, do_map;
-			struct mapreq mapreq;
+			struct mapreqvm mapreqvm;
+			void *result;
 
-			do_map= (m->REQUEST == MIOCMAP);	/* else unmap */
+			do_map= (m->REQUEST == TIOCMAPMEM);	/* else unmap */
 
 			/* Get request structure */
-			if(safe) {
-	   		   r = sys_safecopyfrom(m->IO_ENDPT,
-				(vir_bytes)m->ADDRESS, 0, (vir_bytes) &mapreq,
-				sizeof(mapreq), D);
-			} else {
-			  r= sys_vircopy(m->IO_ENDPT, D,
-				(vir_bytes)m->ADDRESS,
-				SELF, D, (vir_bytes)&mapreq, sizeof(mapreq));
+			if(!safe) {
+				printf("tty: safecopy only\n");
+				return;
 			}
+
+	   		r = sys_safecopyfrom(m->IO_ENDPT,
+			  (vir_bytes)m->ADDRESS, 0, (vir_bytes) &mapreqvm,
+			  sizeof(mapreqvm), D);
+
 			if (r != OK)
 			{
+				printf("tty: sys_safecopyfrom failed\n");
 				tty_reply(TASK_REPLY, m->m_source, m->IO_ENDPT,
 					r);
 				return;
@@ -839,11 +845,22 @@ PUBLIC void do_video(message *m)
 			 * IO_ENDPT is always FS.
 			 */
 
-			r= sys_vm_map(safe ? m->POSITION : m->IO_ENDPT,
-			  do_map, (phys_bytes)mapreq.base, mapreq.size,
-			  mapreq.offset);
+			if(do_map) {
+				mapreqvm.vaddr_ret = vm_map_phys(m->POSITION,
+				(void *) mapreqvm.phys_offset, mapreqvm.size);
+	   			if((r = sys_safecopyto(m->IO_ENDPT,
+				  (vir_bytes)m->ADDRESS, 0,
+				  (vir_bytes) &mapreqvm,
+				  sizeof(mapreqvm), D)) != OK) {
+				  printf("tty: sys_safecopyto failed\n");
+				}
+			} else {
+				r = vm_unmap_phys(m->POSITION, 
+					mapreqvm.vaddr, mapreqvm.size);
+			}
 			tty_reply(TASK_REPLY, m->m_source, m->IO_ENDPT, r);
 			return;
+		   }
 		}
 		r= ENOTTY;
 		break;
@@ -923,19 +940,19 @@ tty_t *tp;
 {
 /* Initialize the screen driver. */
   console_t *cons;
-  phys_bytes vid_base;
   u16_t bios_columns, bios_crtbase, bios_fontlines;
   u8_t bios_rows;
   int line;
   int s;
   static int vdu_initialized = 0;
-  unsigned page_size;
+  static unsigned page_size;
 
   /* Associate console and TTY. */
   line = tp - &tty_table[0];
   if (line >= nr_cons) return;
   cons = &cons_table[line];
   cons->c_tty = tp;
+  cons->c_line = line;
   tp->tty_priv = cons;
 
   /* Fill in TTY function hooks. */
@@ -971,7 +988,13 @@ tty_t *tp;
   	if (machine.vdu_ega) vid_size = EGA_SIZE;
   	wrap = ! machine.vdu_ega;
 
-  	s = sys_segctl(&vid_index, &vid_seg, &vid_off, vid_base, vid_size);
+	console_memory = vm_map_phys(SELF, (void *) vid_base, vid_size);
+
+	if(console_memory == MAP_FAILED) 
+  		panic("TTY","Console couldn't map video memory", NO_NUM);
+
+	printf("TTY: vm_map_phys of 0x%lx OK, result 0x%lx", 
+		vid_base, console_memory);
 
   	vid_size >>= 1;		/* word count */
   	vid_mask = vid_size - 1;
@@ -981,6 +1004,7 @@ tty_t *tp;
 
   	/* There can be as many consoles as video memory allows. */
   	nr_cons = vid_size / scr_size;
+
   	if (nr_cons > NR_CONS) nr_cons = NR_CONS;
   	if (nr_cons > 1) wrap = 0;
   	page_size = vid_size / nr_cons;
@@ -996,7 +1020,6 @@ tty_t *tp;
   	blank_color = BLANK_COLOR;
 	mem_vid_copy(BLANK_MEM, cons->c_start, scr_size);
   } else {
-	int i, n;
 	/* Set the cursor of the console vty at the bottom. c_cur
 	 * is updated automatically later.
 	 */
@@ -1028,9 +1051,9 @@ int c;
 	cons_putk(c);
   if (c != 0) {
       kmess.km_buf[kmess.km_next] = c;	/* put normal char in buffer */
-      if (kmess.km_size < KMESS_BUF_SIZE)
+      if (kmess.km_size < _KMESS_BUF_SIZE)
           kmess.km_size += 1;		
-      kmess.km_next = (kmess.km_next + 1) % KMESS_BUF_SIZE;
+      kmess.km_next = (kmess.km_next + 1) % _KMESS_BUF_SIZE;
   } else {
       notify(LOG_PROC_NR);
   }
@@ -1043,9 +1066,8 @@ PUBLIC void do_new_kmess(m)
 message *m;
 {
 /* Notification for a new kernel message. */
-  struct kmessages kmess;			/* kmessages structure */
+  static struct kmessages kmess;		/* kmessages structure */
   static int prev_next = 0;			/* previous next seen */
-  int size, next;
   int bytes;
   int r;
 
@@ -1064,15 +1086,15 @@ message *m;
 
   /* Print only the new part. Determine how many new bytes there are with 
    * help of the current and previous 'next' index. Note that the kernel
-   * buffer is circular. This works fine if less then KMESS_BUF_SIZE bytes
-   * is new data; else we miss % KMESS_BUF_SIZE here.  
+   * buffer is circular. This works fine if less then _KMESS_BUF_SIZE bytes
+   * is new data; else we miss % _KMESS_BUF_SIZE here.  
    * Check for size being positive, the buffer might as well be emptied!
    */
   if (kmess.km_size > 0) {
-      bytes = ((kmess.km_next + KMESS_BUF_SIZE) - prev_next) % KMESS_BUF_SIZE;
+      bytes = ((kmess.km_next + _KMESS_BUF_SIZE) - prev_next) % _KMESS_BUF_SIZE;
       r=prev_next;				/* start at previous old */ 
       while (bytes > 0) {			
-          cons_putk( kmess.km_buf[(r%KMESS_BUF_SIZE)] );
+          cons_putk( kmess.km_buf[(r%_KMESS_BUF_SIZE)] );
           bytes --;
           r ++;
       }
@@ -1104,6 +1126,8 @@ int safe;
 	int r;
 	if(safe) {
 	   r = sys_safecopyfrom(proc_nr, src, offset, (vir_bytes) &c, 1, D);
+	   if(r != OK)
+	  	   printf("<tty: proc %d, grant %ld>", proc_nr, src);
 	} else {
 	   r = sys_vircopy(proc_nr, D, src+offset, SELF, D, (vir_bytes) &c, 1);
 	}
@@ -1115,8 +1139,12 @@ int safe;
 	cons_putk(c);
   }
   cons_putk(0);			/* always terminate, even with EFAULT */
-  m_ptr->m_type = result;
-  send(m_ptr->m_source, m_ptr);
+
+  if(m_ptr->m_type != ASYN_DIAGNOSTICS_OLD) {
+	  m_ptr->m_type = DIAG_REPL_OLD;
+	  m_ptr->REP_STATUS = result;
+	  send(m_ptr->m_source, m_ptr);
+  }
 }
 
 /*===========================================================================*
@@ -1170,6 +1198,9 @@ int c;				/* character to print */
   if (c != 0) {
 	if (c == '\n') cons_putk('\r');
 	out_char(&cons_table[0], (int) c);
+#if 0
+	ser_putc(c);
+#endif
   } else {
 	flush(&cons_table[0]);
   }
@@ -1193,10 +1224,12 @@ PUBLIC void toggle_scroll()
 PUBLIC void cons_stop()
 {
 /* Prepare for halt or reboot. */
+  select_console(0);
+#if 0
   cons_org0();
   softscroll = 1;
-  select_console(0);
   cons_table[0].c_attr = cons_table[0].c_blank = BLANK_COLOR;
+#endif
 }
 
 /*===========================================================================*
@@ -1216,7 +1249,7 @@ PRIVATE void cons_org0()
 		if (n > cons->c_org - cons->c_start)
 			n = cons->c_org - cons->c_start;
 		vid_vid_copy(cons->c_org, cons->c_org - n, scr_size);
-		cons->c_org -= n;
+		UPDATE_ORIGIN(cons, cons->c_org - n);
 	}
 	flush(cons);
   }
@@ -1262,10 +1295,12 @@ PUBLIC void select_console(int cons_line)
 /* Set the current console to console number 'cons_line'. */
 
   if (cons_line < 0 || cons_line >= nr_cons) return;
+
   ccurrent = cons_line;
   curcons = &cons_table[cons_line];
-  set_6845(VID_ORG, curcons->c_org);
-  set_6845(CURSOR, curcons->c_cur);
+
+  UPDATE_CURSOR(curcons, curcons->c_cur);
+  UPDATE_ORIGIN(curcons, curcons->c_org);
 }
 
 /*===========================================================================*
@@ -1337,26 +1372,64 @@ int try;
   tp->tty_winsize.ws_col= scr_width;
   tp->tty_winsize.ws_xpixel= scr_width * 8;
   tp->tty_winsize.ws_ypixel= scr_lines * font_lines;
+
+  return 0;
 }
 
-#define COM1_BASE	0x3F8
-#define COM1_THR	(COM1_BASE + 0)
-#define		LSR_THRE	0x20
-#define COM1_LSR	(COM1_BASE + 5)
+#define LIMITINDEX(mask, start, size, ct) { 	\
+	int countlimit = size - start;		\
+	start &= mask;				\
+	if(ct > countlimit) ct = countlimit;	\
+}
 
-PRIVATE void ser_putc(char c)
+/*===========================================================================*
+ *				mem_vid_copy				     *
+ *===========================================================================*/
+PRIVATE void mem_vid_copy(vir_bytes src, int dst_index, int count)
 {
-	unsigned long b;
-	int i;
-	int lsr, thr;
-
-	lsr= COM1_LSR;
-	thr= COM1_THR;
-	for (i= 0; i<100; i++)
-	{
-		sys_inb(lsr, &b);
-		if (b & LSR_THRE)
-			break;
+	u16_t *src_mem = (u16_t *) src;
+	while(count > 0) {
+		int i, subcount = count;
+		u16_t *dst_mem;
+		LIMITINDEX(vid_mask, dst_index, vid_size, subcount);
+		dst_mem = (u16_t *) console_memory + dst_index;
+		if(!src)
+			for(i = 0; i < subcount; i++)
+				*dst_mem++ = blank_color;
+		else
+			for(i = 0; i < subcount; i++)
+				*dst_mem++ = *src_mem++;
+		count -= subcount;
+		dst_index += subcount;
 	}
-	sys_outb(thr, c);
+}
+
+/*===========================================================================*
+ *				vid_vid_copy				     *
+ *===========================================================================*/
+PRIVATE void vid_vid_copy(int src_index, int dst_index, int count)
+{
+	int backwards = 0;
+	if(src_index < dst_index)
+		backwards = 1;
+	while(count > 0) {
+		int i, subcount = count;
+		u16_t *dst_mem, *src_mem;
+		LIMITINDEX(vid_mask, src_index, vid_size, subcount);
+		LIMITINDEX(vid_mask, dst_index, vid_size, subcount);
+		src_mem = (u16_t *) console_memory + src_index;
+		dst_mem = (u16_t *) console_memory + dst_index;
+		if(backwards) {
+			src_mem += subcount - 1;
+			dst_mem += subcount - 1;
+			for(i = 0; i < subcount; i++)
+				*dst_mem-- = *src_mem--;
+		} else {
+			for(i = 0; i < subcount; i++)
+				*dst_mem++ = *src_mem++;
+		}
+		count -= subcount;
+		dst_index += subcount;
+		src_index += subcount;
+	}
 }

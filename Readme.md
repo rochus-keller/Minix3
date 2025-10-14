@@ -1,10 +1,10 @@
-## Minix 3.1.3
+## Minix 3.1.4
 
-This is the original version of Minix 3.1.3 as downloaded from
-[Github](https://github.com/Stichting-MINIX-Research-Foundation/minix/archive/refs/tags/v3.1.3.tar.gz)
+This is the original version of Minix 3.1.4 as downloaded from
+[Github](https://github.com/Stichting-MINIX-Research-Foundation/minix/archive/refs/tags/v3.1.4.tar.gz)
 on 2025-10-11. 
 
-All files in the v3.1.3.tar.gz archive have a modification date of 2007-04-13. 
+All files in the v3.1.4.tar.gz archive have a modification date of 2009-06-08. 
 
 Note that this Readme.md is not part of the original code, but was added by Rochus for
 documentation purpose.

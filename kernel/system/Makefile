@@ -31,6 +31,7 @@ OBJECTS	= \
 	$(SYSTEM)(do_nice.o) \
 	$(SYSTEM)(do_times.o) \
 	$(SYSTEM)(do_setalarm.o) \
+	$(SYSTEM)(do_stime.o) \
 	$(SYSTEM)(do_irqctl.o) \
 	$(SYSTEM)(do_devio.o) \
 	$(SYSTEM)(do_vdevio.o) \
@@ -42,6 +43,7 @@ OBJECTS	= \
 	$(SYSTEM)(do_privctl.o) \
 	$(SYSTEM)(do_segctl.o) \
 	$(SYSTEM)(do_safecopy.o) \
+	$(SYSTEM)(do_sysctl.o) \
 	$(SYSTEM)(do_getksig.o) \
 	$(SYSTEM)(do_endksig.o) \
 	$(SYSTEM)(do_kill.o) \
@@ -49,11 +51,11 @@ OBJECTS	= \
 	$(SYSTEM)(do_sigreturn.o) \
 	$(SYSTEM)(do_abort.o) \
 	$(SYSTEM)(do_getinfo.o) \
-	$(SYSTEM)(do_vm.o) \
-	$(SYSTEM)(do_vm_setbuf.o) \
 	$(SYSTEM)(do_sprofile.o) \
 	$(SYSTEM)(do_cprofile.o) \
-	$(SYSTEM)(do_profbuf.o)
+	$(SYSTEM)(do_profbuf.o) \
+	$(SYSTEM)(do_mapdma.o) \
+	$(SYSTEM)(do_vmctl.o)
 
 build $(SYSTEM):	$(OBJECTS)
 	aal cr $@ *.o
@@ -94,6 +96,9 @@ $(SYSTEM)(do_times.o):	do_times.c
 
 $(SYSTEM)(do_setalarm.o):	do_setalarm.c
 	$(CC) do_setalarm.c
+
+$(SYSTEM)(do_stime.o):	do_stime.c
+	$(CC) do_stime.c
 
 $(SYSTEM)(do_irqctl.o):	do_irqctl.c
 	$(CC) do_irqctl.c
@@ -146,15 +151,15 @@ $(SYSTEM)(do_privctl.o):	do_privctl.c
 $(SYSTEM)(do_safecopy.o):	do_safecopy.c
 	$(CC) do_safecopy.c
 
+$(SYSTEM)(do_sysctl.o):	do_sysctl.c
+	$(CC) do_sysctl.c
+
 $(SYSTEM)(do_segctl.o):	do_segctl.c
 	$(CC) do_segctl.c
 
 $(SYSTEM)(do_vm.o):	do_vm.o
 do_vm.o:	do_vm.c
 	$(CC) do_vm.c
-
-$(SYSTEM)(do_vm_setbuf.o):	do_vm_setbuf.c
-	$(CC) do_vm_setbuf.c
 
 $(SYSTEM)(do_sprofile.o):       do_sprofile.c
 	$(CC) do_sprofile.c
@@ -164,3 +169,9 @@ $(SYSTEM)(do_cprofile.o):       do_cprofile.c
 
 $(SYSTEM)(do_profbuf.o):        do_profbuf.c
 	$(CC) do_profbuf.c
+
+$(SYSTEM)(do_mapdma.o):        do_mapdma.c
+	$(CC) do_mapdma.c
+
+$(SYSTEM)(do_vmctl.o):        do_vmctl.c
+	$(CC) do_vmctl.c

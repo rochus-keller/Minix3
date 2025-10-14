@@ -5,7 +5,6 @@
 #define V2_NR_TZONES      10	/* total # zone numbers in a V2 inode */
 
 #define NR_INODES        256	/* # slots in "in core" inode table */
-#define NR_SUPERS          1	/* # slots in super block table */
 
 #define INODE_HASH_LOG2   7     /* 2 based logarithm of the inode hash size */
 #define INODE_HASH_SIZE   ((unsigned long)1<<INODE_HASH_LOG2)
@@ -38,14 +37,7 @@
 #define NO_READ            1	/* prevents get_block from doing disk read */
 #define PREFETCH           2	/* tells get_block not to read or mark dev */
 
-#define XPIPE   (-NR_TASKS-1)	/* used in fp_task when susp'd on pipe */
-#define XLOCK   (-NR_TASKS-2)	/* used in fp_task when susp'd on lock */
-#define XPOPEN  (-NR_TASKS-3)	/* used in fp_task when susp'd on pipe open */
-#define XSELECT (-NR_TASKS-4)	/* used in fp_task when susp'd on select */
-
 #define NO_BIT   ((bit_t) 0)	/* returned by alloc_bit() to signal failure */
-
-#define DUP_MASK        0100	/* mask to distinguish dup2 from dup */
 
 #define LOOK_UP            0 /* tells search_dir to lookup string */
 #define ENTER              1 /* tells search_dir to make dir entry */
@@ -65,7 +57,6 @@
 #define LAST_DIR         PATH_PENULTIMATE
 #define LAST_DIR_NOTDOT  PATH_PENULTIMATE | PATH_STRIPDOT
 #define LAST_DIR_EATSYM  PATH_NONSYMBOLIC
-#define SYMLOOP		16
 
 #define CLEAN              0	/* disk and memory copies identical */
 #define DIRTY              1	/* disk and memory copies differ */

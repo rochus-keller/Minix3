@@ -159,7 +159,6 @@ PUBLIC int do_fcntl()
   long cloexec_mask;		/* bit map for the FD_CLOEXEC flag */
   long clo_value;		/* FD_CLOEXEC flag in proper position */
   struct filp *dummy;
-  struct ftrunc_req req;
 
   /* Is the file descriptor valid? */
   if ((f = get_filp(m_in.fd)) == NIL_FILP) {
@@ -195,7 +194,7 @@ PUBLIC int do_fcntl()
 
      case F_SETFL:
 	/* Set file status flags (O_NONBLOCK and O_APPEND). */
-	fl = O_NONBLOCK | O_APPEND;
+	fl = O_NONBLOCK | O_APPEND | O_REOPEN;
 	f->filp_flags = (f->filp_flags & ~fl) | (m_in.addr & fl);
 	return(OK);
 
@@ -219,6 +218,9 @@ PUBLIC int do_fcntl()
 	if((f->filp_vno->v_mode & I_TYPE) != I_REGULAR) {
 		return EINVAL;
 	}
+
+	if (!(f->filp_mode & W_BIT))
+		return EBADF;
 
 	/* Copy flock data from userspace. */
 	if((r = sys_datacopy(who_e, (vir_bytes) m_in.name1, 
@@ -258,14 +260,9 @@ PUBLIC int do_fcntl()
                 end = 0;
 	}
   
-        /* Fill in FS request */
-        req.fs_e = f->filp_vno->v_fs_e; 
-        req.inode_nr = f->filp_vno->v_inode_nr;
-        req.start = start;
-        req.end = end;
-
         /* Issue request */
-        return req_ftrunc(&req);
+        return req_ftrunc(f->filp_vno->v_fs_e, f->filp_vno->v_inode_nr, 
+		start, end);
      }
 
      default:
@@ -301,6 +298,31 @@ PUBLIC int do_fsync()
   return(OK);
 }
 
+void unmount_all(void)
+{
+	int i;
+	int found = 0, worked = 0, remain = 0;
+  /* Unmount all filesystems.  File systems are mounted on other file systems,
+   * so you have to pull off the loose bits repeatedly to get it all undone.
+   */
+  for (i= 0; i < NR_MNTS; i++) {
+  	struct vmnt *vmp;
+	/* Unmount at least one. */
+	worked = remain = 0;
+	for (vmp = &vmnt[0]; vmp < &vmnt[NR_MNTS]; vmp++) {
+		if (vmp->m_dev != NO_DEV) {
+			found++;
+  			SANITYCHECK;
+			if(unmount(vmp->m_dev) == OK)
+				worked++;
+			else
+				remain++;
+  			SANITYCHECK;
+		}
+	}
+  }
+}
+
 /*===========================================================================*
  *				pm_reboot				     *
  *===========================================================================*/
@@ -308,36 +330,30 @@ PUBLIC void pm_reboot()
 {
   /* Perform the FS side of the reboot call. */
   int i;
-  struct vnode vdummy;
-  struct vmnt *vmp;
+
+  do_sync();
+
+  SANITYCHECK;
 
   /* Do exit processing for all leftover processes and servers,
    * but don't actually exit them (if they were really gone, PM
    * will tell us about it).
    */
   for (i = 0; i < NR_PROCS; i++)
-	if((m_in.endpt1 = fproc[i].fp_endpoint) != NONE)
+	if((m_in.endpt1 = fproc[i].fp_endpoint) != NONE) {
+		/* No FP_EXITING, just free the resources, otherwise
+		 * consistency check for fp_endpoint (set to NONE) will
+		 * fail if process wants to do something in the (short)
+		 * future.
+		 */
 		free_proc(&fproc[i], 0);
-
-  /* The root file system is mounted onto itself, which keeps it from being
-   * unmounted.  Pull an inode out of thin air and put the root on it.
-   */
-	
-  put_vnode(vmnt[0].m_mounted_on);
-  vmnt[0].m_mounted_on = &vdummy;
-  vmnt[0].m_root_node = &vdummy;
-  vdummy.v_fs_count = 0;	/* Is this right? */
-  vdummy.v_ref_count = 1;
-
-  /* Unmount all filesystems.  File systems are mounted on other file systems,
-   * so you have to pull off the loose bits repeatedly to get it all undone.
-   */
-  for (i= 0; i < NR_SUPERS; i++) {
-	/* Unmount at least one. */
-	for (vmp = &vmnt[0]; vmp < &vmnt[NR_MNTS]; vmp++) {
-		if (vmp->m_dev != NO_DEV) (void) unmount(vmp->m_dev);
 	}
-  }
+  SANITYCHECK;
+
+  unmount_all();
+
+  SANITYCHECK;
+
 }
 
 /*===========================================================================*
@@ -375,6 +391,8 @@ int cpid;	/* Child process id */
 
   /* Increase the counters in the 'filp' table. */
   cp = &fproc[childno];
+  fp = &fproc[parentno];
+
   for (i = 0; i < OPEN_MAX; i++)
 	if (cp->fp_filp[i] != NIL_FILP) cp->fp_filp[i]->filp_count++;
 
@@ -385,8 +403,14 @@ int cpid;	/* Child process id */
   /* A forking process never has an outstanding grant,
    * as it isn't blocking on i/o.
    */
-  assert(!GRANT_VALID(fp->fp_grant));
-  assert(!GRANT_VALID(cp->fp_grant));
+  if(GRANT_VALID(fp->fp_grant)) {
+	printf("vfs: fork: fp (endpoint %d) has grant %d\n", fp->fp_endpoint, fp->fp_grant);
+	panic(__FILE__, "fp contains valid grant", NO_NUM);
+  }
+  if(GRANT_VALID(cp->fp_grant)) {
+	printf("vfs: fork: cp (endpoint %d) has grant %d\n", cp->fp_endpoint, cp->fp_grant);
+	panic(__FILE__, "cp contains valid grant", NO_NUM);
+  }
 
   /* A child is not a process leader. */
   cp->fp_sesldr = 0;
@@ -395,8 +419,8 @@ int cpid;	/* Child process id */
   cp->fp_execced = 0;
 
   /* Record the fact that both root and working dir have another user. */
-  dup_vnode(cp->fp_rd);
-  dup_vnode(cp->fp_wd);
+  if(cp->fp_rd) dup_vnode(cp->fp_rd);
+  if(cp->fp_wd) dup_vnode(cp->fp_wd);
 }
 
 /*===========================================================================*
@@ -410,25 +434,27 @@ PRIVATE void free_proc(struct fproc *exiter, int flags)
   register struct vnode *vp;
   dev_t dev;
 
+ SANITYCHECK;
+
   fp = exiter;		/* get_filp() needs 'fp' */
 
-  if (fp->fp_suspended == SUSPENDED) {
-	task = -fp->fp_task;
-	if (task == XPIPE || task == XPOPEN) susp_count--;
-	unpause(fp->fp_endpoint);
-	fp->fp_suspended = NOT_SUSPENDED;
+  if(fp->fp_endpoint == NONE) {
+	panic(__FILE__, "free_proc: already free", NO_NUM);
   }
+
+  if (fp->fp_suspended == SUSPENDED) {
+ 	SANITYCHECK;
+	task = -fp->fp_task;
+	unpause(fp->fp_endpoint);
+ 	SANITYCHECK;
+  }
+
+ SANITYCHECK;
 
   /* Loop on file descriptors, closing any that are open. */
   for (i = 0; i < OPEN_MAX; i++) {
 	(void) close_fd(fp, i);
   }
-
-  /* Release root and working directories. */
-  put_vnode(fp->fp_rd);
-  put_vnode(fp->fp_wd);
-  fp->fp_rd = NIL_VNODE;
-  fp->fp_wd = NIL_VNODE;
   
   /* Check if any process is SUSPENDed on this driver.
    * If a driver exits, unmap its entries in the dmap table.
@@ -437,11 +463,17 @@ PRIVATE void free_proc(struct fproc *exiter, int flags)
    */
   unsuspend_by_endpt(fp->fp_endpoint);
 
+  /* Release root and working directories. */
+  if(fp->fp_rd) { put_vnode(fp->fp_rd); fp->fp_rd = NIL_VNODE; }
+  if(fp->fp_wd) { put_vnode(fp->fp_wd); fp->fp_wd = NIL_VNODE; }
+
   /* The rest of these actions is only done when processes actually
    * exit.
    */
-  if(!(flags & FP_EXITING))
+  if(!(flags & FP_EXITING)) {
+ 	SANITYCHECK;
 	return;
+  }
 
   /* Invalidate endpoint number for error and sanity checks. */
   fp->fp_endpoint = NONE;
@@ -463,7 +495,10 @@ PRIVATE void free_proc(struct fproc *exiter, int flags)
 		vp = rfilp->filp_vno;
 		if ((vp->v_mode & I_TYPE) != I_CHAR_SPECIAL) continue;
 		if ((dev_t) vp->v_sdev != dev) continue;
-		dev_close(dev);
+
+		(void) dev_close(dev, rfilp-filp);
+		/* Ignore any errors, even SUSPEND. */
+
 		rfilp->filp_mode = FILP_CLOSED;
           }
       }
@@ -471,6 +506,8 @@ PRIVATE void free_proc(struct fproc *exiter, int flags)
 
   /* Exit done. Mark slot as free. */
   fp->fp_pid = PID_FREE;
+
+  SANITYCHECK;
 }
 
 /*===========================================================================*
@@ -556,7 +593,13 @@ PUBLIC int do_svrctl()
 		 * to be up.
 		*/
 		if(fproc[proc_nr_n].fp_execced) {
+			/* Reply before calling dev_up */
+#if 0
+			printf("do_svrctl: replying before dev_up\n");
+#endif
+			reply(who_e, r);
 			dev_up(major);
+			r= SUSPEND;
 		} else {
 			dmap[major].dmap_flags |= DMAP_BABY;
 		}

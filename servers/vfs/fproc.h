@@ -6,16 +6,15 @@
  * possible or even necessary to tell when a slot is free here.
  */
 EXTERN struct fproc {
+  unsigned fp_flags;
+
   mode_t fp_umask;		/* mask set by umask system call */
  
-/*  struct inode *fp_workdir;*/	/* pointer to working directory's inode */
-/*  struct inode *fp_rootdir;*/	/* pointer to current root dir (see chroot) */
-
+  struct vnode *fp_wd;		/* working directory; NULL during reboot */
+  struct vnode *fp_rd;		/* root directory; NULL during reboot */
+  
   struct filp *fp_filp[OPEN_MAX];/* the file descriptor table */
 
-  struct vnode *fp_wd;
-  struct vnode *fp_rd;
-  
   fd_set fp_filp_inuse;		/* which fd's are in use? */
   uid_t fp_realuid;		/* real user id */
   uid_t fp_effuid;		/* effective user id */
@@ -26,8 +25,8 @@ EXTERN struct fproc {
   char *fp_buffer;		/* place to save buffer if rd/wr can't finish*/
   int  fp_nbytes;		/* place to save bytes if rd/wr can't finish */
   int  fp_cum_io_partial;	/* partial byte count if rd/wr can't finish */
-  char fp_suspended;		/* set to indicate process hanging */
-  char fp_revived;		/* set to indicate process being revived */
+  int fp_suspended;		/* set to indicate process hanging */
+  int fp_revived;		/* set to indicate process being revived */
   int fp_task;			/* which task is proc suspended on */
   
   endpoint_t fp_ioproc;		/* proc no. in suspended-on i/o message */
@@ -41,11 +40,19 @@ EXTERN struct fproc {
   endpoint_t fp_endpoint;	/* kernel endpoint number of this process */
 } fproc[NR_PROCS];
 
+/* fp_flags */
+#define NO_FLAGS	0
+#define SUSP_REOPEN	1	/* Process is suspended until the reopens are
+				 * completed (after the restart of a driver).
+				 */
+
 /* Field values. */
-#define NOT_SUSPENDED      0	/* process is not suspended on pipe or task */
-#define SUSPENDED          1	/* process is suspended on pipe or task */
-#define NOT_REVIVING       0	/* process is not being revived */
-#define REVIVING           1	/* process is being revived from suspension */
+/* fp_suspended is one of these. */
+#define NOT_SUSPENDED      0xC0FFEE	/* process is not suspended on pipe or task */
+#define SUSPENDED          0xDEAD	/* process is suspended on pipe or task */
+
+#define NOT_REVIVING       0xC0FFEEE	/* process is not being revived */
+#define REVIVING           0xDEEAD	/* process is being revived from suspension */
 #define PID_FREE	   0	/* process slot free */
 
 /* Check is process number is acceptable - includes system processes. */

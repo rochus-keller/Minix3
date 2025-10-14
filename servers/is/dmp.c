@@ -9,16 +9,11 @@
 
 #include "inc.h"
 
-/* Define hooks for the debugging dumps. This table maps function keys
- * onto a specific dump and provides a description for it.
- */
-#define NHOOKS 18
-
 struct hook_entry {
 	int key;
 	void (*function)(void);
 	char *name;
-} hooks[NHOOKS] = {
+} hooks[] = {
 	{ F1, 	proctab_dmp, "Kernel process table" },
 	{ F2,   memmap_dmp, "Process memory maps" },
 	{ F3,	image_dmp, "System image" },
@@ -26,7 +21,6 @@ struct hook_entry {
 	{ F5,	monparams_dmp, "Boot monitor parameters" },
 	{ F6,	irqtab_dmp, "IRQ hooks and policies" },
 	{ F7,	kmessages_dmp, "Kernel messages" },
-	{ F9,	sched_dmp, "Scheduling queues" },
 	{ F10,	kenv_dmp, "Kernel parameters" },
 	{ F11,	timing_dmp, "Timing details (if enabled)" },
 	{ SF1,	mproc_dmp, "Process manager process table" },
@@ -35,9 +29,14 @@ struct hook_entry {
 	{ SF4,	dtab_dmp, "Device/Driver mapping" },
 	{ SF5,	mapping_dmp, "Print key mappings" },
 	{ SF6,	rproc_dmp, "Reincarnation server process table" },
-	{ SF7,  holes_dmp, "Memory free list" },
 	{ SF8,  data_store_dmp, "Data store contents" },
+	{ SF9,  procstack_dmp, "Processes with stack traces" },
 };
+
+/* Define hooks for the debugging dumps. This table maps function keys
+ * onto a specific dump and provides a description for it.
+ */
+#define NHOOKS (sizeof(hooks)/sizeof(hooks[0]))
 
 /*===========================================================================*
  *				handle_fkey				     *

@@ -20,6 +20,7 @@
 #include <minix/ipc.h>
 #include <minix/rs.h>
 #include <minix/syslib.h>
+#include <minix/sysinfo.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <configfile.h>
@@ -43,6 +44,7 @@ PRIVATE char *known_requests[] = {
 
 #define RUN_CMD		"run"
 #define RUN_SCRIPT	"/etc/rs.single"	/* Default script for 'run' */
+#define PATH_CONFIG	"/etc/drivers.conf"	/* Default config file */
 
 /* Define names for arguments provided to this utility. The first few 
  * arguments are required and have a known index. Thereafter, some optional
@@ -59,7 +61,6 @@ PRIVATE char *known_requests[] = {
 
 #define ARG_ARGS	"-args"		/* list of arguments to be passed */
 #define ARG_DEV		"-dev"		/* major device number for drivers */
-#define ARG_PRIV	"-priv"		/* required privileges */
 #define ARG_PERIOD	"-period"	/* heartbeat period in ticks */
 #define ARG_SCRIPT	"-script"	/* name of the script to restart a
 					 * driver 
@@ -82,12 +83,12 @@ PRIVATE int req_type;
 PRIVATE int do_run= 0;		/* 'run' command instead of 'up' */
 PRIVATE char *req_label;
 PRIVATE char *req_path;
-PRIVATE char *req_args;
+PRIVATE char *req_args = "";
 PRIVATE int req_major;
 PRIVATE long req_period;
 PRIVATE char *req_script;
-PRIVATE char *req_label;
-PRIVATE char *req_config;
+PRIVATE char *req_ipc;
+PRIVATE char *req_config = PATH_CONFIG;
 PRIVATE int req_printep;
 PRIVATE int class_recurs;	/* Nesting level of class statements */
 
@@ -101,23 +102,24 @@ PRIVATE struct rs_start rs_start;
  */
 PRIVATE void print_usage(char *app_name, char *problem) 
 {
-  printf("Warning, %s\n", problem);
-  printf("Usage:\n");
-  printf("    %s [-c] (up|run) <binary> [%s <args>] [%s <special>] [%s <ticks>]\n", 
+  fprintf(stderr, "Warning, %s\n", problem);
+  fprintf(stderr, "Usage:\n");
+  fprintf(stderr,
+  "    %s [-c] (up|run) <binary> [%s <args>] [%s <special>] [%s <ticks>]\n", 
 	app_name, ARG_ARGS, ARG_DEV, ARG_PERIOD);
-  printf("    %s down label\n", app_name);
-  printf("    %s refresh label\n", app_name);
-  printf("    %s restart label\n", app_name);
-  printf("    %s rescue <dir>\n", app_name);
-  printf("    %s shutdown\n", app_name);
-  printf("\n");
+  fprintf(stderr, "    %s down label\n", app_name);
+  fprintf(stderr, "    %s refresh label\n", app_name);
+  fprintf(stderr, "    %s restart label\n", app_name);
+  fprintf(stderr, "    %s rescue <dir>\n", app_name);
+  fprintf(stderr, "    %s shutdown\n", app_name);
+  fprintf(stderr, "\n");
 }
 
 /* A request to the RS server failed. Report and exit. 
  */
 PRIVATE void failure(int num) 
 {
-  printf("Request to RS failed: %s (error %d)\n", strerror(num), num);
+  fprintf(stderr, "Request to RS failed: %s (error %d)\n", strerror(num), num);
   exit(num);
 }
 
@@ -132,9 +134,10 @@ PRIVATE int parse_arguments(int argc, char **argv)
   int req_nr;
   int c, i;
   int c_flag;
+  int i_flag=0;
 
   c_flag= 0;
-  while (c= getopt(argc, argv, "c?"), c != -1)
+  while (c= getopt(argc, argv, "ci?"), c != -1)
   {
 	switch(c)
 	{
@@ -143,6 +146,9 @@ PRIVATE int parse_arguments(int argc, char **argv)
 		exit(EINVAL);
 	case 'c':
 		c_flag= 1;
+		break;
+	case 'i':
+		i_flag= 1;
 		break;
 	default:
 		fprintf(stderr, "%s: getopt failed: %c\n",
@@ -178,9 +184,13 @@ PRIVATE int parse_arguments(int argc, char **argv)
 
   if (req_nr == RS_UP) {
 
+	req_nr= RS_START;
+
       rs_start.rss_flags= 0;
       if (c_flag)
 	rs_start.rss_flags |= RF_COPY;
+      if (i_flag)
+	rs_start.rss_flags |= RF_IPC_VALID;
 
       if (do_run)
       {
@@ -225,8 +235,16 @@ PRIVATE int parse_arguments(int argc, char **argv)
               req_args = argv[i+1];
           }
           else if (strcmp(argv[i], ARG_PERIOD)==0) {
+		u32_t system_hz;
+		if(getsysinfo_up(PM_PROC_NR,
+			SIU_SYSTEMHZ, sizeof(system_hz), &system_hz) < 0) {
+			system_hz = DEFAULT_HZ;
+			fprintf(stderr, "WARNING: reverting to default HZ %d\n",
+				system_hz);
+		} 
+
 	      req_period = strtol(argv[i+1], &hz, 10);
-	      if (strcmp(hz,"HZ")==0) req_period *= HZ;
+	      if (strcmp(hz,"HZ")==0) req_period *= system_hz;
 	      if (req_period < 1) {
                   print_usage(argv[ARG_NAME],
 			"period is at least be one tick");
@@ -305,6 +323,7 @@ PRIVATE void fatal(char *fmt, ...)
 #define KW_DEVICE	"device"
 #define KW_CLASS	"class"
 #define KW_SYSTEM	"system"
+#define KW_IPC		"ipc"
 
 FORWARD void do_driver(config_t *cpe, config_t *config);
 
@@ -669,8 +688,61 @@ struct
 	{ "VSAFECOPY",		SYS_VSAFECOPY },
 	{ "SETGRANT",		SYS_SETGRANT },
 	{ "READBIOS",		SYS_READBIOS },
+	{ "MAPDMA",		SYS_MAPDMA },
+	{ "VMCTL",		SYS_VMCTL },
+	{ "PROFBUF",		SYS_PROFBUF },
+	{ "SYSCTL",		SYS_SYSCTL },
 	{ NULL,		0 }
 };
+
+PRIVATE void do_ipc(config_t *cpe)
+{
+	char *list;
+	size_t listsize, wordlen;
+
+	list= NULL;
+	listsize= 1;
+	list= malloc(listsize);
+	if (list == NULL)
+		fatal("do_ipc: unable to malloc %d bytes", listsize);
+	list[0]= '\0';
+
+	/* Process a list of process names that are allowed to be
+	 * contacted
+	 */
+	for (; cpe; cpe= cpe->next)
+	{
+		if (cpe->flags & CFG_SUBLIST)
+		{
+			fatal("do_ipc: unexpected sublist at %s:%d",
+				cpe->file, cpe->line);
+		}
+		if (cpe->flags & CFG_STRING)
+		{
+			fatal("do_ipc: unexpected string at %s:%d",
+				cpe->file, cpe->line);
+		}
+
+		wordlen= strlen(cpe->word);
+
+		listsize += 1 + wordlen;
+		list= realloc(list, listsize);
+		if (list == NULL)
+		{
+			fatal("do_ipc: unable to realloc %d bytes",
+				listsize);
+		}
+		strcat(list, " ");
+		strcat(list, cpe->word);
+	}
+#if 0
+	printf("do_ipc: got list '%s'\n", list);
+#endif
+
+	if (req_ipc)
+		fatal("do_ipc: req_ipc is set");
+	req_ipc= list;
+}
 
 PRIVATE void do_system(config_t *cpe)
 {
@@ -798,8 +870,12 @@ PRIVATE void do_driver(config_t *cpe, config_t *config)
 			do_system(cpe->next);
 			continue;
 		}
+		if (strcmp(cpe->word, KW_IPC) == 0)
+		{
+			do_ipc(cpe->next);
+			continue;
+		}
 
-		printf("found word '%s'\n", cpe->word);
 	}
 }
 
@@ -848,7 +924,8 @@ PRIVATE void do_config(char *label, char *filename)
 	}
 	if (cp == NULL)
 	{
-		printf("driver '%s' not found\n", label);
+		fprintf(stderr, "service: driver '%s' not found in config\n",
+			label);
 		return;
 	}
 
@@ -936,6 +1013,17 @@ PUBLIC int main(int argc, char **argv)
       if (req_config) {
 	assert(progname);
 	do_config(progname, req_config);
+      }
+
+      if (req_ipc)
+      {
+	      rs_start.rss_ipc= req_ipc+1;	/* Skip initial space */
+	      rs_start.rss_ipclen= strlen(rs_start.rss_ipc);
+      }
+      else
+      {
+	      rs_start.rss_ipc= NULL;
+	      rs_start.rss_ipclen= 0;
       }
 
       m.RS_CMD_ADDR = (char *) &rs_start;

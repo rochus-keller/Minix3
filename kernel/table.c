@@ -35,7 +35,7 @@
 
 /* Define stack sizes for the kernel tasks included in the system image. */
 #define NO_STACK	0
-#define SMALL_STACK	(256 * sizeof(char *))
+#define SMALL_STACK	(1024 * sizeof(char *))
 #define IDL_S	SMALL_STACK	/* 3 intr, 3 temps, 4 db for Intel */
 #define	HRD_S	NO_STACK	/* dummy task, uses kernel stack */
 #define	TSK_S	SMALL_STACK	/* system and clock task */
@@ -48,14 +48,15 @@ PUBLIC char *t_stack[TOT_STACK_SPACE / sizeof(char *)];
 #define IDL_F 	(SYS_PROC | PREEMPTIBLE | BILLABLE)	/* idle task */
 #define TSK_F 	(SYS_PROC)				/* kernel tasks */
 #define SRV_F 	(SYS_PROC | PREEMPTIBLE)		/* system services */
-#define USR_F	(BILLABLE | PREEMPTIBLE)		/* user processes */
+#define USR_F	(BILLABLE | PREEMPTIBLE | PROC_FULLVM)	/* user processes */
+#define SVM_F	(SRV_F | PROC_FULLVM)			/* servers with VM */
 
 /* Define system call traps for the various process types. These call masks
  * determine what system call traps a process is allowed to make.
  */
 #define TSK_T	(1 << RECEIVE)			/* clock and system */
 #define SRV_T	(~0)				/* system services */
-#define USR_T   ((1 << SENDREC) | (1 << ECHO))	/* user processes */
+#define USR_T   ((1 << SENDREC))		/* user processes */
 
 /* Send masks determine to whom processes can send messages or notifications. 
  * The values here are used for the processes in the boot image. We rely on 
@@ -68,7 +69,8 @@ PUBLIC char *t_stack[TOT_STACK_SPACE / sizeof(char *)];
 #define NUL_M   0
 #define SRV_M	(~0)
 #define SYS_M	(~0)
-#define USR_M (s(PM_PROC_NR) | s(FS_PROC_NR) | s(RS_PROC_NR) | s(SYSTEM))
+#define USR_M (s(PM_PROC_NR) | s(FS_PROC_NR) | s(RS_PROC_NR) | s(SYSTEM) | \
+	s(VM_PROC_NR))
 #define DRV_M (USR_M | s(SYSTEM) | s(CLOCK) | s(DS_PROC_NR) | s(LOG_PROC_NR) | s(TTY_PROC_NR))
 
 /* Define kernel calls that processes are allowed to make. This is not looking
@@ -81,19 +83,21 @@ PUBLIC char *t_stack[TOT_STACK_SPACE / sizeof(char *)];
  */
 #define FS_C SYS_KILL, SYS_VIRCOPY, SYS_SAFECOPYFROM, SYS_SAFECOPYTO, \
     SYS_VIRVCOPY, SYS_UMAP, SYS_GETINFO, SYS_EXIT, SYS_TIMES, SYS_SETALARM, \
-    SYS_PRIVCTL, SYS_TRACE , SYS_SETGRANT, SYS_PROFBUF
+    SYS_PRIVCTL, SYS_TRACE , SYS_SETGRANT, SYS_PROFBUF, SYS_SYSCTL
 #define DRV_C	FS_C, SYS_SEGCTL, SYS_IRQCTL, SYS_INT86, SYS_DEVIO, \
-	SYS_SDEVIO, SYS_VDEVIO, SYS_SETGRANT, SYS_PROFBUF
+	SYS_SDEVIO, SYS_VDEVIO, SYS_SETGRANT, SYS_PROFBUF, SYS_SYSCTL
 
 PRIVATE int
   fs_c[] = { FS_C },
   pm_c[] = { SYS_ALL_CALLS },
   rs_c[] = { SYS_ALL_CALLS },
   ds_c[] = { SYS_ALL_CALLS },
+  vm_c[] = { SYS_ALL_CALLS },
   drv_c[] = { DRV_C },
-  tty_c[] = { DRV_C, SYS_PHYSCOPY, SYS_ABORT, SYS_VM_MAP, SYS_IOPENABLE,
+  tty_c[] = { DRV_C, SYS_PHYSCOPY, SYS_ABORT, SYS_IOPENABLE,
 		SYS_READBIOS },
-  mem_c[] = { DRV_C, SYS_PHYSCOPY, SYS_PHYSVCOPY, SYS_VM_MAP, SYS_IOPENABLE };
+  mem_c[] = { DRV_C, SYS_PHYSCOPY, SYS_PHYSVCOPY, SYS_IOPENABLE },
+  usr_c[] = { SYS_SYSCTL };
 
 /* The system image table lists all programs that are part of the boot image. 
  * The order of the entries here MUST agree with the order of the programs
@@ -114,15 +118,16 @@ PUBLIC struct boot_image image[] = {
 {CLOCK,clock_task,TSK_F,  8, TASK_Q, TSK_S, TSK_T,     0, no_c,"clock" },
 {SYSTEM, sys_task,TSK_F,  8, TASK_Q, TSK_S, TSK_T,     0, no_c,"system"},
 {HARDWARE,      0,TSK_F,  8, TASK_Q, HRD_S,     0,     0, no_c,"kernel"},
-{PM_PROC_NR,    0,SRV_F, 32,      3, 0,     SRV_T, SRV_M, c(pm_c),"pm"    },
-{FS_PROC_NR,    0,SRV_F, 32,      4, 0,     SRV_T, SRV_M, c(fs_c),"vfs"   },
-{RS_PROC_NR,    0,SRV_F,  4,      3, 0,     SRV_T, SYS_M, c(rs_c),"rs"    },
-{DS_PROC_NR,    0,SRV_F,  4,      3, 0,     SRV_T, SYS_M, c(ds_c),"ds"    },
-{TTY_PROC_NR,   0,SRV_F,  4,      1, 0,     SRV_T, SYS_M,c(tty_c),"tty"   },
-{MEM_PROC_NR,   0,SRV_F,  4,      2, 0,     SRV_T, SYS_M,c(mem_c),"memory"},
+{PM_PROC_NR,    0,SRV_F, 32,      4, 0,     SRV_T, SRV_M, c(pm_c),"pm"    },
+{FS_PROC_NR,    0,SRV_F, 32,      5, 0,     SRV_T, SRV_M, c(fs_c),"vfs"   },
+{RS_PROC_NR,    0,SVM_F,  4,      4, 0,     SRV_T, SYS_M, c(rs_c),"rs"    },
+{DS_PROC_NR,    0,SRV_F,  4,      4, 0,     SRV_T, SYS_M, c(ds_c),"ds"    },
+{TTY_PROC_NR,   0,SVM_F,  4,      1, 0,     SRV_T, SYS_M,c(tty_c),"tty"   },
+{MEM_PROC_NR,   0,SVM_F,  4,      3, 0,     SRV_T, SYS_M,c(mem_c),"memory"},
 {LOG_PROC_NR,   0,SRV_F,  4,      2, 0,     SRV_T, SYS_M,c(drv_c),"log"   },
-{MFS_PROC_NR,   0,SRV_F, 32,      4, 0,     SRV_T, SRV_M, c(fs_c),"mfs"   },
-{INIT_PROC_NR,  0,USR_F,  8, USER_Q, 0,     USR_T, USR_M, no_c,"init"  },
+{MFS_PROC_NR,   0,SVM_F, 32,      5, 0,     SRV_T, SRV_M, c(fs_c),"mfs"   },
+{VM_PROC_NR,    0,SRV_F, 32,      2, 0,     SRV_T, SRV_M, c(vm_c),"vm"    },
+{INIT_PROC_NR,  0,USR_F,  8, USER_Q, 0,     USR_T, USR_M, c(usr_c),"init"  },
 };
 
 /* Verify the size of the system image table at compile time. Also verify that 
@@ -136,3 +141,4 @@ extern int dummy[(NR_BOOT_PROCS==sizeof(image)/
 	sizeof(struct boot_image))?1:-1];
 extern int dummy[(BITCHUNK_BITS > NR_BOOT_PROCS - 1) ? 1 : -1];
 
+PUBLIC endpoint_t ipc_stats_target= NONE;

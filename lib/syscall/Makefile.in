@@ -6,6 +6,7 @@ libc_FILES=" \
 	_exit.s \
 	_pm_findproc.s \
 	access.s \
+	adddma.s \
 	alarm.s \
 	brk.s \
 	cfgetispeed.s \
@@ -20,6 +21,7 @@ libc_FILES=" \
 	closedir.s \
 	cprofile.s \
 	creat.s \
+	deldma.s \
 	devctl.s \
 	dup.s \
 	dup2.s \
@@ -38,6 +40,7 @@ libc_FILES=" \
 	fstatfs.s \
 	getcwd.s \
 	getdents.s \
+	getdma.s \
 	getegid.s \
 	geteuid.s \
 	getgid.s \
@@ -60,9 +63,11 @@ libc_FILES=" \
 	lseek.s \
 	lseek64.s \
 	lstat.s \
+	mapdriver5.s \
 	mkdir.s \
 	mkfifo.s \
 	mknod.s \
+	mmap.s \
 	mount.s \
 	open.s \
 	opendir.s \
@@ -115,6 +120,7 @@ libc_FILES=" \
 	uname.s \
 	unlink.s \
 	utime.s \
+	vm_dmacalls.s \
 	wait.s \
 	waitpid.s \
 	write.s"

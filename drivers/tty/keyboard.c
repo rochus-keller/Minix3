@@ -14,16 +14,18 @@
 #include <termios.h>
 #include <signal.h>
 #include <unistd.h>
-#include <archtypes.h>
 #include <minix/callnr.h>
 #include <minix/com.h>
 #include <minix/keymap.h>
 #include "tty.h"
+
+u16_t keymap[NR_SCAN_CODES * MAP_COLS] = {
 #include "keymaps/us-std.src"
-#include "../../kernel/const.h"
-#include "../../kernel/config.h"
-#include "../../kernel/type.h"
-#include "../../kernel/proc.h"
+};
+
+u16_t keymap_escaped[NR_SCAN_CODES * MAP_COLS] = {
+#include "keymaps/us-std-esc.src"
+};
 
 int irq_hook_id = -1;
 int aux_irq_hook_id = -1;
@@ -65,8 +67,6 @@ int aux_irq_hook_id = -1;
 				 * keyboard.
 				 */
 
-#define MICROS_TO_TICKS(m)  (((m)*HZ/1000000)+1)
-
 #define CONSOLE		   0	/* line number for console */
 #define KB_IN_BYTES	  32	/* size of keyboard input buffer */
 PRIVATE char ibuf[KB_IN_BYTES];	/* input buffer */
@@ -87,12 +87,14 @@ PRIVATE int shift;		/* either shift key */
 PRIVATE int num_down;		/* num lock key depressed */
 PRIVATE int caps_down;		/* caps lock key depressed */
 PRIVATE int scroll_down;	/* scroll lock key depressed */
+PRIVATE int alt_down;	        /* alt key depressed */
 PRIVATE int locks[NR_CONS];	/* per console lock keys state */
 
 /* Lock key active bits.  Chosen to be equal to the keyboard LED bits. */
 #define SCROLL_LOCK	0x01
 #define NUM_LOCK	0x02
 #define CAPS_LOCK	0x04
+#define ALT_LOCK	0x08
 
 PRIVATE char numpad_map[] =
 		{'H', 'Y', 'A', 'B', 'D', 'C', 'V', 'U', 'G', 'S', 'T', '@'};
@@ -132,6 +134,7 @@ PRIVATE struct kbd_outack
 
 PRIVATE int kbd_watchdog_set= 0;
 PRIVATE int kbd_alive= 1;
+PRIVATE int sticky_alt_mode = 0;
 PRIVATE timer_t tmr_kbd_wd;
 
 FORWARD _PROTOTYPE( void handle_req, (struct kbd *kbdp, message *m)	);
@@ -149,8 +152,14 @@ FORWARD _PROTOTYPE( void set_leds, (void) 				);
 FORWARD _PROTOTYPE( void show_key_mappings, (void) 			);
 FORWARD _PROTOTYPE( int kb_read, (struct tty *tp, int try) 		);
 FORWARD _PROTOTYPE( unsigned map_key, (int scode) 			);
-FORWARD _PROTOTYPE( void micro_delay, (unsigned long usecs)		);
 FORWARD _PROTOTYPE( void kbd_watchdog, (timer_t *tmrp)			);
+
+int micro_delay(u32_t usecs)
+{
+	/* TTY can't use the library micro_delay() as that calls PM. */
+	tickdelay(micros_to_ticks(usecs));
+	return OK;
+}
 
 /*===========================================================================*
  *				do_kbd					     *
@@ -369,8 +378,8 @@ message *m;
 			if (r != OK)
 				break;
 
-			ticks= bell.kb_duration.tv_usec * HZ / 1000000;
-			ticks += bell.kb_duration.tv_sec * HZ;
+			ticks= bell.kb_duration.tv_usec * system_hz / 1000000;
+			ticks += bell.kb_duration.tv_sec * system_hz;
 			if (!ticks)
 				ticks++;
 			beep_x(bell.kb_pitch, ticks);
@@ -446,13 +455,6 @@ message *m;
 
 
 /*===========================================================================*
- *				map_key0				     *
- *===========================================================================*/
-/* Map a scan code to an ASCII code ignoring modifiers. */
-#define map_key0(scode)	 \
-	((unsigned) keymap[(scode) * MAP_COLS])
-
-/*===========================================================================*
  *				map_key					     *
  *===========================================================================*/
 PRIVATE unsigned map_key(scode)
@@ -463,9 +465,10 @@ int scode;
   int caps, column, lk;
   u16_t *keyrow;
 
-  if (scode == SLASH_SCAN && esc) return '/';	/* don't map numeric slash */
-
-  keyrow = &keymap[scode * MAP_COLS];
+  if(esc)
+	  keyrow = &keymap_escaped[scode * MAP_COLS];
+  else
+	  keyrow = &keymap[scode * MAP_COLS];
 
   caps = shift;
   lk = locks[ccurrent];
@@ -477,9 +480,14 @@ int scode;
 	if (ctrl || alt_r) column = 3;	/* Ctrl + Alt == AltGr */
 	if (caps) column = 4;
   } else {
-	column = 0;
-	if (caps) column = 1;
-	if (ctrl) column = 5;
+	if (sticky_alt_mode && (lk & ALT_LOCK)) {
+		column = 2;
+		if (caps) column = 4;
+        } else {
+		column = 0;
+		if (caps) column = 1;
+		if (ctrl) column = 5;
+        }
   }
   return keyrow[column] & ~HASCAPS;
 }
@@ -494,7 +502,6 @@ message *m_ptr;
   int o, isaux;
   unsigned char scode;
   struct kbd *kbdp;
-  static timer_t timer;		/* timer must be static! */
 
   /* Fetch the character from the keyboard hardware and acknowledge it. */
   if (!scan_keyboard(&scode, &isaux))
@@ -602,9 +609,9 @@ int try;
 	    switch(ch) {
   		case CF1: show_key_mappings(); break; 
   		case CF3: toggle_scroll(); break; /* hardware <-> software */	
-  		case CF7: sigchar(&tty_table[CONSOLE], SIGQUIT); break;
-  		case CF8: sigchar(&tty_table[CONSOLE], SIGINT); break;
-  		case CF9: sigchar(&tty_table[CONSOLE], SIGKILL); break;
+  		case CF7: sigchar(&tty_table[CONSOLE], SIGQUIT, 1); break;
+  		case CF8: sigchar(&tty_table[CONSOLE], SIGINT, 1); break;
+  		case CF9: sigchar(&tty_table[CONSOLE], SIGKILL, 1); break;
   	    }
 	}
   }
@@ -631,7 +638,7 @@ PRIVATE void kbd_send()
 	}
 	if (sb & (KB_OUT_FULL|KB_IN_FULL))
 	{
-		printf("not sending 1: sb = 0x%x\n", sb);
+		printf("not sending 1: sb = 0x%lx\n", sb);
 		return;
 	}
 	micro_delay(KBC_IN_DELAY);
@@ -640,7 +647,7 @@ PRIVATE void kbd_send()
 	}
 	if (sb & (KB_OUT_FULL|KB_IN_FULL))
 	{
-		printf("not sending 2: sb = 0x%x\n", sb);
+		printf("not sending 2: sb = 0x%lx\n", sb);
 		return;
 	}
 
@@ -663,7 +670,7 @@ PRIVATE void kbd_send()
 		 */
 		if ((r= getuptime(&now)) != OK)
 			panic("TTY","Keyboard couldn't get clock's uptime.", r);
-		tmrs_settimer(&tty_timers, &tmr_kbd_wd, now+HZ, kbd_watchdog,
+		tmrs_settimer(&tty_timers, &tmr_kbd_wd, now+system_hz, kbd_watchdog,
 			NULL);
 		if (tty_timers->tmr_exp_time != tty_next_timeout) {
 			tty_next_timeout = tty_timers->tmr_exp_time;
@@ -686,6 +693,7 @@ int scode;			/* scan code of key just struck or released */
  */
   int ch, make, escape;
   static int CAD_count = 0;
+  static int rebooting = 0;
 
   /* Check for CTRL-ALT-DEL, and if found, halt the computer. This would
    * be better done in keyboard() in case TTY is hung, except control and
@@ -698,8 +706,11 @@ int scode;			/* scan code of key just struck or released */
 		sys_abort(RBT_HALT);
 	}
 	sys_kill(INIT_PROC_NR, SIGABRT);
-	return -1;
+	rebooting = 1;
   }
+  
+   if(rebooting)
+  	return -1;
 
   /* High-order bit set on key release. */
   make = (scode & KEY_RELEASE) == 0;		/* true if pressed */
@@ -721,6 +732,10 @@ int scode;			/* scan code of key just struck or released */
   	case ALT:		/* Left or right alt key */
 		*(escape ? &alt_r : &alt_l) = make;
 		alt = alt_l | alt_r;
+		if (sticky_alt_mode && (alt_r && (alt_down < make))) {
+			locks[ccurrent] ^= ALT_LOCK;
+		}
+		alt_down = make;
 		break;
   	case CALOCK:		/* Caps lock - toggle on 0 -> 1 transition */
 		if (caps_down < make) {
@@ -747,7 +762,27 @@ int scode;			/* scan code of key just struck or released */
 		esc = 1;		/* Next key is escaped */
 		return(-1);
   	default:		/* A normal key */
-		if (make) return(ch);
+		if(!make)
+			return -1;
+		if(ch)
+			return ch;
+		{
+			static char seen[2][NR_SCAN_CODES];
+			int notseen = 0, ei;
+			ei = escape ? 1 : 0;
+			if(scode >= 0 && scode < NR_SCAN_CODES) {
+				notseen = !seen[ei][scode];
+				seen[ei][scode] = 1;
+			} else {
+				printf("tty: scode %d makes no sense\n", scode);
+			}
+			if(notseen) {
+		  		printf("tty: ignoring unrecognized %s "
+					"scancode 0x%x\n",
+  				escape ? "escaped" : "straight", scode);
+			}
+		}
+  		return -1;
   }
 
   /* Key release, or a shift type key. */
@@ -835,14 +870,7 @@ PRIVATE int kbc_read()
 			if(sys_inb(KEYBD, &byte) != OK)
 				printf("kbc_read: 2 sys_inb failed\n");
 			if (st & KB_AUX_BYTE)
-			{
-#if DEBUG
-				printf(
-		"keyboard`kbc_read: ignoring byte (0x%x) from aux device.\n",
-					byte);
-#endif
-				continue;
-			}
+				printf("kbc_read: aux byte 0x%x\n", byte);
 #if DEBUG
 			printf("keyboard`kbc_read: returning byte 0x%x\n",
 				byte);
@@ -854,8 +882,8 @@ PRIVATE int kbc_read()
 	while (micro_elapsed(&ms) < 1000000);
 #endif
 	panic("TTY", "kbc_read failed to complete", NO_NUM);
+	return EINVAL;
 }
-
 
 
 /*===========================================================================*
@@ -866,7 +894,7 @@ PRIVATE int kb_wait()
 /* Wait until the controller is ready; return zero if this times out. */
 
   int retries;
-  unsigned long status, temp;
+  unsigned long status;
   int s, isaux;
   unsigned char byte;
 
@@ -930,6 +958,12 @@ PUBLIC void kb_init_once(void)
 {
   int i;
   u8_t ccb;
+  char env[100];
+
+  if(env_get_param("sticky_alt", env, sizeof(env)-1) == OK
+   && atoi(env) == 1) {
+        sticky_alt_mode = 1; 
+  }
 
   set_leds();			/* turn off numlock led */
   scan_keyboard(NULL, NULL);	/* discard leftover keystroke */
@@ -1010,7 +1044,7 @@ message *m_ptr;			/* pointer to the request message */
  * notifications if it is pressed. At most one binding per key can exist.
  */
   int i; 
-  int result;
+  int result = EINVAL;
 
   switch (m_ptr->FKEY_REQUEST) {	/* see what we must do */
   case FKEY_MAP:			/* request for new mapping */
@@ -1094,8 +1128,6 @@ message *m_ptr;			/* pointer to the request message */
           }
       }
       break;
-  default:
-          result =  EINVAL;		/* key cannot be observed */
   }
 
   /* Almost done, return result to caller. */
@@ -1118,7 +1150,6 @@ int scode;			/* scan code for a function key */
   message m;
   int key;
   int proc_nr;
-  int i,s;
 
   /* Ignore key releases. If this is a key press, get full key code. */
   if (scode & KEY_RELEASE) return(FALSE);	/* key release */
@@ -1156,31 +1187,17 @@ int scode;			/* scan code for a function key */
  *===========================================================================*/
 PRIVATE void show_key_mappings()
 {
-    int i,s;
-    struct proc proc;
-
+    int i;
     printf("\n");
     printf("System information.   Known function key mappings to request debug dumps:\n");
     printf("-------------------------------------------------------------------------\n");
     for (i=0; i<12; i++) {
 
       printf(" %sF%d: ", i+1<10? " ":"", i+1);
-      if (fkey_obs[i].proc_nr != NONE) {
-          if ((s=sys_getproc(&proc, fkey_obs[i].proc_nr))!=OK)
-              printf("sys_getproc: %d\n", s);
-          printf("%-14.14s", proc.p_name);
-      } else {
-          printf("%-14.14s", "<none>");
-      }
+      printf("%-14.14s", "<none>");
 
       printf("    %sShift-F%d: ", i+1<10? " ":"", i+1);
-      if (sfkey_obs[i].proc_nr != NONE) {
-          if ((s=sys_getproc(&proc, sfkey_obs[i].proc_nr))!=OK)
-              printf("sys_getproc: %d\n", s);
-          printf("%-14.14s", proc.p_name);
-      } else {
-          printf("%-14.14s", "<none>");
-      }
+      printf("%-14.14s", "<none>");
       printf("\n");
     }
     printf("\n");
@@ -1195,22 +1212,6 @@ PRIVATE int scan_keyboard(bp, isauxp)
 unsigned char *bp;
 int *isauxp;
 {
-#if 0	/* Is this old XT code? It doesn't match the PS/2 hardware */
-/* Fetch the character from the keyboard hardware and acknowledge it. */
-  pvb_pair_t byte_in[2], byte_out[2];
-  
-  byte_in[0].port = KEYBD;	/* get the scan code for the key struck */
-  byte_in[1].port = PORT_B;	/* strobe the keyboard to ack the char */
-  if(sys_vinb(byte_in, 2) != OK)	/* request actual input */
-	printf("scan_keyboard: sys_vinb failed\n");
-
-  pv_set(byte_out[0], PORT_B, byte_in[1].value | KBIT); /* strobe bit high */
-  pv_set(byte_out[1], PORT_B, byte_in[1].value);	/* then strobe low */
-  if(sys_voutb(byte_out, 2) != OK)	/* request actual output */
-	printf("scan_keyboard: sys_voutb failed\n");
-
-  return(byte_in[0].value);		/* return scan code */
-#else
   unsigned long b, sb;
 
   if(sys_inb(KB_STATUS, &sb) != OK)
@@ -1247,12 +1248,6 @@ int *isauxp;
 	kbd_send();
   }
   return 1;
-#endif
-}
-
-static void micro_delay(unsigned long usecs)
-{
-	tickdelay(MICROS_TO_TICKS(usecs));
 }
 
 /*===========================================================================*
@@ -1275,7 +1270,7 @@ timer_t *tmrp;
 
 	if ((r= getuptime(&now)) != OK)
 		panic("TTY","Keyboard couldn't get clock's uptime.", r);
-	tmrs_settimer(&tty_timers, &tmr_kbd_wd, now+HZ, kbd_watchdog,
+	tmrs_settimer(&tty_timers, &tmr_kbd_wd, now+system_hz, kbd_watchdog,
 		NULL);
 	if (tty_timers->tmr_exp_time != tty_next_timeout) {
 		tty_next_timeout = tty_timers->tmr_exp_time;

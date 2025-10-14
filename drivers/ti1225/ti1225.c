@@ -7,14 +7,13 @@ Created:	Dec 2005 by Philip Homburg
 #include "../drivers.h"
 #include <ibm/pci.h>
 #include <sys/vm.h>
+#include <sys/vm_i386.h>
 
 #include "ti1225.h"
 #include "i82365.h"
 
 /* The use of interrupts is not yet ready for prime time */
 #define USE_INTS	0
-
-#define MICROS_TO_TICKS(m)  (((m)*HZ/1000000)+1)
 
 #define NR_PORTS 2
 
@@ -31,7 +30,7 @@ PRIVATE struct port
 	char *base_ptr;
 	volatile struct csr *csr_ptr;
 
-	char buffer[2*PAGE_SIZE];
+	char buffer[2*I386_PAGE_SIZE];
 } ports[NR_PORTS];
 
 #define PF_PRESENT	1
@@ -59,7 +58,6 @@ FORWARD _PROTOTYPE( void do_int, (struct port *pp)			);
 FORWARD _PROTOTYPE( u8_t read_exca, (struct port *pp, int socket, int reg) );
 FORWARD _PROTOTYPE( void do_outb, (port_t port, u8_t value)		);
 FORWARD _PROTOTYPE( u8_t do_inb, (port_t port)				);
-FORWARD _PROTOTYPE( void micro_delay, (unsigned long usecs)		);
 
 int main(int argc, char *argv[])
 {
@@ -67,6 +65,9 @@ int main(int argc, char *argv[])
 	message m;
 
 	(progname=strrchr(argv[0],'/')) ? progname++ : (progname=argv[0]);
+
+	if((r=micro_delay_calibrate()) != OK)
+		panic("ti1225", "micro_delay_calibrate failed", r);
 
 	debug= 0;
 	while (c= getopt(argc, argv, "d?"), c != -1)
@@ -257,8 +258,8 @@ u32_t base;
 	vir_bytes buf_base;
 
 	buf_base= (vir_bytes)pp->buffer;
-	if (buf_base % PAGE_SIZE)
-		buf_base += PAGE_SIZE-(buf_base % PAGE_SIZE);
+	if (buf_base % I386_PAGE_SIZE)
+		buf_base += I386_PAGE_SIZE-(buf_base % I386_PAGE_SIZE);
 	pp->base_ptr= (char *)buf_base;
 	if (debug)
 	{
@@ -269,8 +270,12 @@ u32_t base;
 	/* Clear low order bits in base */
 	base &= ~(u32_t)0xF;
 
+#if 0
 	r= sys_vm_map(SELF, 1 /* map */, (vir_bytes)pp->base_ptr,
-		PAGE_SIZE, (phys_bytes)base);
+		I386_PAGE_SIZE, (phys_bytes)base);
+#else
+	r = ENOSYS;
+#endif
 	if (r != OK)
 		panic("ti1225", "map_regs: sys_vm_map failed", r);
 }
@@ -289,7 +294,7 @@ struct port *pp;
 	v8= pci_attr_r8(devind, TI_CARD_CTRL);
 	if (v8 & TI_CCR_IFG)
 	{
-		printf("ti1225: got functional interrupt\n", v8);
+		printf("ti1225: got functional interrupt\n");
 		pci_attr_w8(devind, TI_CARD_CTRL, v8);
 	}
 
@@ -422,7 +427,7 @@ struct port *pp;
 		csr_present= pp->csr_ptr->csr_present;
 		if (csr_present & CP_PWRCYCLE)
 			break;
-	} while (getuptime(&t1)==OK && (t1-t0) < MICROS_TO_TICKS(100000));
+	} while (getuptime(&t1)==OK && (t1-t0) < micros_to_ticks(100000));
 
 	if (!(csr_present & CP_PWRCYCLE))
 	{
@@ -492,8 +497,4 @@ PRIVATE void do_outb(port_t port, u8_t value)
 		panic("ti1225","sys_outb failed", r);
 }
 
-PRIVATE void micro_delay(unsigned long usecs)
-{
-	tickdelay(MICROS_TO_TICKS(usecs));
-}
 

@@ -16,7 +16,7 @@ typedef unsigned int phys_clicks;	/* physical addr/length in clicks */
 typedef int endpoint_t;			/* process identifier */
 
 #if (_MINIX_CHIP == _CHIP_INTEL)
-typedef unsigned int vir_bytes;	/* virtual addresses and lengths in bytes */
+typedef long unsigned int vir_bytes;	/* virtual addresses/lengths in bytes */
 #endif
 
 #if (_MINIX_CHIP == _CHIP_M68000)
@@ -46,19 +46,6 @@ struct vir_addr {
   int proc_nr_e;
   int segment;
   vir_bytes offset;
-};
-
-/* Memory allocation by PM. */
-struct hole {
-  struct hole *h_next;          /* pointer to next entry on the list */
-  phys_clicks h_base;           /* where does the hole begin? */
-  phys_clicks h_len;            /* how big is the hole? */
-};
-
-/* Memory info from PM. */
-struct pm_mem_info {
-	struct hole pmi_holes[_NR_HOLES];/* memory (un)allocations */
-	u32_t pmi_hi_watermark;		 /* highest ever-used click + 1 */
 };
 
 #define phys_cp_req vir_cp_req 
@@ -98,21 +85,18 @@ struct kinfo {
   phys_bytes data_base;		/* base of kernel data */
   phys_bytes data_size;
   vir_bytes proc_addr;		/* virtual address of process table */
-  phys_bytes kmem_base;		/* kernel memory layout (/dev/kmem) */
-  phys_bytes kmem_size;
+  phys_bytes _kmem_base;	/* kernel memory layout (/dev/kmem) */
+  phys_bytes _kmem_size;
   phys_bytes bootdev_base;	/* boot device from boot image (/dev/boot) */
   phys_bytes bootdev_size;
   phys_bytes ramdev_base;	/* boot device from boot image (/dev/boot) */
   phys_bytes ramdev_size;
-  phys_bytes params_base;	/* parameters passed by boot monitor */
-  phys_bytes params_size;
+  phys_bytes _params_base;	/* parameters passed by boot monitor */
+  phys_bytes _params_size;
   int nr_procs;			/* number of user processes */
   int nr_tasks;			/* number of kernel tasks */
   char release[6];		/* kernel release number */
   char version[6];		/* kernel version number */
-#if DEBUG_LOCK_CHECK
-  int relocking;		/* interrupt locking depth (should be 0) */
-#endif
 };
 
 /* Load data accounted every this no. of seconds. */
@@ -176,4 +160,37 @@ struct memory {
 	phys_bytes	size;
 };
 
+#define STATICINIT(v, n) \
+	if(!(v)) {	\
+		phys_bytes myph; \
+		if(!((v) = alloc_contig(sizeof(*(v)) * (n), 0, &myph))) { \
+			panic(__FILE__, "allocating " #v " failed", n);	\
+		}	\
+	}
+
+/* The kernel outputs diagnostic messages in a circular buffer. */
+struct kmessages {
+  int km_next;                          /* next index to write */
+  int km_size;                          /* current size in buffer */
+  char km_buf[_KMESS_BUF_SIZE];          /* buffer for messages */
+};
+
+#include <ibm/interrupt.h>
+
+/* randomness struct: random sources after interrupts: */
+#define RANDOM_SOURCES			NR_IRQ_VECTORS
+#define RANDOM_ELEMENTS			64
+
+typedef unsigned short rand_t;
+
+struct k_randomness {
+  int random_elements, random_sources;
+  struct k_randomness_bin {
+        int r_next;                             /* next index to write */
+        int r_size;                             /* number of random elements */
+        rand_t r_buf[RANDOM_ELEMENTS]; /* buffer for random info */
+  } bin[RANDOM_SOURCES];
+};
+
 #endif /* _TYPE_H */
+

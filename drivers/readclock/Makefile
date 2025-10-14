@@ -6,7 +6,7 @@ MAKE = exec make
 CC =	exec cc
 CFLAGS=-D_MINIX=1 -D_POSIX_SOURCE=1 -D_SYSTEM=1
 LDFLAGS = -i
-LIBS = -lsysutil -lsys
+LIBS =  -lsys
 
 OBJ = readclock.o 
 
@@ -14,7 +14,7 @@ OBJ = readclock.o
 all build:	$(DRIVER)
 $(DRIVER):	$(OBJ)
 	$(CC) -o $@ $(LDFLAGS) $(OBJ) $(LIBS)
-	install -S 8k $(DRIVER)
+	install $(DRIVER)
 
 # install with other drivers
 install:	/sbin/$(DRIVER)

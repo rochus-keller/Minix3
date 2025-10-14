@@ -34,6 +34,7 @@
 #include "proc.h"
 #include <signal.h>
 #include <minix/com.h>
+#include <minix/portio.h>
 
 /* Function prototype for PRIVATE functions.
  */ 
@@ -75,7 +76,7 @@ PUBLIC void clock_task()
 	result = receive(ANY, &m);
 
 	if(result != OK)
-		panic("receive() failed", result);
+		minix_panic("receive() failed", result);
 
 	/* Handle the request. Only clock ticks are expected. */
 	switch (m.m_type) {
@@ -98,6 +99,7 @@ message *m_ptr;				/* pointer to request message */
 /* Despite its name, this routine is not called on every clock tick. It
  * is called on those clock ticks when a lot of work needs to be done.
  */
+  vmassert(!vm_running || (read_cr3() == ptproc->p_seg.p_cr3));
   
   /* A process used up a full quantum. The interrupt handler stored this
    * process in 'prev_ptr'.  First make sure that the process is not on the 
@@ -107,20 +109,29 @@ message *m_ptr;				/* pointer to request message */
    */ 
   if (prev_ptr->p_ticks_left <= 0 && priv(prev_ptr)->s_flags & PREEMPTIBLE) {
       if(prev_ptr->p_rts_flags == 0) {	/* if it was runnable .. */
-	lock_dequeue(prev_ptr);		/* take it off the queues */
-      	lock_enqueue(prev_ptr);		/* and reinsert it again */ 
+      lock;
+      {
+	dequeue(prev_ptr);		/* take it off the queues */
+      	enqueue(prev_ptr);		/* and reinsert it again */ 
+      }
+      unlock;
       } else {
 	kprintf("CLOCK: %d not runnable; flags: %x\n",
 		prev_ptr->p_endpoint, prev_ptr->p_rts_flags);
       }
   }
 
+  vmassert(!vm_running || (read_cr3() == ptproc->p_seg.p_cr3));
   /* Check if a clock timer expired and run its watchdog function. */
   if (next_timeout <= realtime) {
+  vmassert(!vm_running || (read_cr3() == ptproc->p_seg.p_cr3));
   	tmrs_exptimers(&clock_timers, realtime, NULL);  	
+  vmassert(!vm_running || (read_cr3() == ptproc->p_seg.p_cr3));
 	next_timeout = (clock_timers == NULL) ?
 		 TMR_NEVER : clock_timers->tmr_exp_time;	
+  vmassert(!vm_running || (read_cr3() == ptproc->p_seg.p_cr3));
   }
+  vmassert(!vm_running || (read_cr3() == ptproc->p_seg.p_cr3));
 
   return;
 }
@@ -181,6 +192,10 @@ irq_hook_t *hook;
  */
   register unsigned ticks;
 
+  if(minix_panicing) return;
+
+  vmassert(!vm_running || (read_cr3() == ptproc->p_seg.p_cr3));
+
   /* Get number of ticks and update realtime. */
   ticks = lost_ticks + 1;
   lost_ticks = 0;
@@ -201,8 +216,10 @@ irq_hook_t *hook;
       bill_ptr->p_ticks_left -= ticks;
   }
 
+#if 0
   /* Update load average. */
   load_update();
+#endif
   
   /* Check if do_clocktick() must be called. Done for alarms and scheduling.
    * Some processes, such as the kernel tasks, cannot be preempted. 
@@ -211,6 +228,11 @@ irq_hook_t *hook;
       prev_ptr = proc_ptr;			/* store running process */
       lock_notify(HARDWARE, CLOCK);		/* send notification */
   } 
+
+  if (do_serial_debug)
+	do_ser_debug();
+  vmassert(!vm_running || (read_cr3() == ptproc->p_seg.p_cr3));
+
   return(1);					/* reenable interrupts */
 }
 
@@ -268,7 +290,7 @@ PRIVATE void load_update(void)
 	 * be made of the load average over variable periods, in the
 	 * user library (see getloadavg(3)).
 	 */
-	slot = (realtime / HZ / _LOAD_UNIT_SECS) % _LOAD_HISTORY;
+	slot = (realtime / system_hz / _LOAD_UNIT_SECS) % _LOAD_HISTORY;
 	if(slot != kloadinfo.proc_last_slot) {
 		kloadinfo.proc_load_history[slot] = 0;
 		kloadinfo.proc_last_slot = slot;
@@ -284,6 +306,4 @@ PRIVATE void load_update(void)
 	/* Up-to-dateness. */
 	kloadinfo.last_clock = realtime;
 }
-
-
 

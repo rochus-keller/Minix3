@@ -3,16 +3,24 @@
 set -e
 
 XBIN=usr/xbin
+BRANCHNAME=src.beng-working.r4327
 SRC=src
+
+# size of /tmp during build
+TMPKB=32000
 
 PACKAGEDIR=/usr/bigports/Packages
 PACKAGESOURCEDIR=/usr/bigports/Sources
+# List of packages included on installation media
+PACKAGELIST=packages.install
+# List of package source included on installation media
+PACKAGESOURCELIST=package_sources.install
 secs=`expr 32 '*' 64`
 export SHELL=/bin/sh
 
 make_hdimage()
 {
-	dd if=$TMPDISK of=usrimage bs=$BS count=$USRBLOCKS
+	dd if=$TMPDISK1 of=usrimage bs=$BS count=$USRBLOCKS
 
 	rootsize=`stat -size rootimage`
 	usrsize=`stat -size usrimage`
@@ -51,7 +59,6 @@ bios_wini=yes
 bios_remap_first=1
 ramimagedev=c0d7p0s0
 bootbig(1, Regular MINIX 3) { image=/boot/image_big; boot }
-bootsmall(2, Small MINIX 3 (<16MB)) {image=/boot/image_small; boot }
 main() { trap 10000 boot ; menu; }
 save'	| $RELEASEDIR/usr/bin/edparams $TMPDISK3
 
@@ -95,11 +102,13 @@ SVNREV=""
 REVTAG=""
 PACKAGES=1
 
-while getopts "pchu?r:" c
+FILENAMEOUT=""
+
+while getopts "s:pchu?r:f:" c
 do
 	case "$c" in
 	\?)
-		echo "Usage: $0 [-p] [-c] [-h] [-r <tag>] [-u]" >&2
+		echo "Usage: $0 [-p] [-c] [-h] [-r <tag>] [-u] [-f <filename>] [-s <username>]" >&2
 		exit 1
 	;;
 	h)
@@ -123,111 +132,70 @@ do
 		HDEMU=1
 		USB=1
 		;;
+	f)
+		FILENAMEOUT="$OPTARG"
+		;;
+	s)	USERNAME="--username=$OPTARG"
+		;;
 	esac
 done
 
-USRMB=400
+if [ ! "$USRMB" ]
+then	USRMB=550
+fi
 
-USRBLOCKS="`expr $USRMB \* 1024 \* 1024 / $BS`"
-USRSECTS="`expr $USRMB \* 1024 \* 2`"
+echo $USRMB MB
+
+USRKB=$(($USRMB*1024))
+USRBLOCKS=$(($USRMB * 1024 * 1024 / $BS))
+USRSECTS=$(($USRMB * 1024 * 2))
 ROOTKB=4096
-ROOTSECTS="`expr $ROOTKB \* 2`"
-ROOTBLOCKS="`expr $ROOTKB \* 1024 / $BS`"
+ROOTSECTS=$(($ROOTKB * 2))
+ROOTBLOCKS=$(($ROOTKB * 1024 / $BS))
 
 if [ "$COPY" -ne 1 ]
 then
 	echo "Note: this script wants to do svn operations."
 fi
 
-TD1=.td1
-TD2=.td2
-TD3=.td3
+TMPDISK1=/dev/ram0
+TMPDISK2=/dev/ram1
+TMPDISK3=/dev/ram2
 
-
-if [ -f $TD1 ]
-then    TMPDISK="`cat $TD1`"
-	echo " * Warning: I'm going to overwrite $TMPDISK!"
-else
-        echo "Temporary (sub)partition to use to make the /usr FS image? "
-        echo "I need $USRMB MB. It will be mkfsed!"
-        echo -n "Device: /dev/"
-        read dev || exit 1
-        TMPDISK=/dev/$dev
-fi
-
-if [ -b $TMPDISK ]
-then :
-else	echo "$TMPDISK is not a block device.."
+if [ ! -b $TMPDISK1 -o ! -b $TMPDISK2 -o ! $TMPDISK3 ]
+then	echo "$TMPDISK1, $TMPDISK2 or $TMPDISK3 is not a block device.."
 	exit 1
 fi
 
-echo $TMPDISK >$TD1
+ramdisk $USRKB $TMPDISK1
+ramdisk $TMPKB $TMPDISK2
+ramdisk $ROOTKB $TMPDISK3
 
-if [ -f $TD2 ]
-then    TMPDISK2="`cat $TD2`"
-	echo " * Warning: I'm going to overwrite $TMPDISK2!"
-else
-        echo "Temporary (sub)partition to use for /tmp? "
-        echo "It will be mkfsed!"
-        echo -n "Device: /dev/"
-        read dev || exit 1
-        TMPDISK2=/dev/$dev
-fi
-
-if [ -b $TMPDISK2 ]
-then :
-else	echo "$TMPDISK2 is not a block device.."
-	exit 1
-fi
-
-echo $TMPDISK2 >$TD2
-
-if [ -f $TD3 ]
-then    TMPDISK3="`cat $TD3`"
-	echo " * Warning: I'm going to overwrite $TMPDISK3!"
-else
-        echo "It has to be at least $ROOTKB KB."
-        echo ""
-        echo "Temporary (sub)partition to use to make the root FS image? "
-        echo "It will be mkfsed!"
-        echo -n "Device: /dev/"
-        read dev || exit 1
-        TMPDISK3=/dev/$dev
-fi
-
-if [ -b $TMPDISK3 ]
-then :
-else	echo "$TMPDISK3 is not a block device.."
-	exit 1
-fi
-
-echo $TMPDISK3 >$TD3
-
-umount $TMPDISK || true
+umount $TMPDISK1 || true
 umount $TMPDISK2 || true
 umount $TMPDISK3 || true
 
-if [ $TMPDISK = $TMPDISK2  -o $TMPDISK = $TMPDISK3 -o $TMPDISK2 = $TMPDISK3 ]
+if [ $TMPDISK1 = $TMPDISK2  -o $TMPDISK1 = $TMPDISK3 -o $TMPDISK2 = $TMPDISK3 ]
 then
 	echo "Temporary devices can't be equal."
 	exit
 fi
 
 echo " * Cleanup old files"
-rm -rf $RELEASEDIR $IMG $IMAGE $ROOTIMAGE $IMGBZ $CDFILES image*
+rm -rf $RELEASEDIR $IMG $IMAGE $ROOTIMAGE $CDFILES image*
 mkdir -p $CDFILES || exit
 mkdir -p $RELEASEDIR
-mkfs -B $BS -b $ROOTBLOCKS $TMPDISK3 || exit
-mkfs $TMPDISK2 || exit
+mkfs -i 2000 -B $BS -b $ROOTBLOCKS $TMPDISK3 || exit
+mkfs -B 1024 -b $TMPKB  $TMPDISK2 || exit
 echo " * mounting $TMPDISK3 as $RELEASEDIR"
 mount $TMPDISK3 $RELEASEDIR || exit
 mkdir -m 755 $RELEASEDIR/usr
 mkdir -m 1777 $RELEASEDIR/tmp
 mount $TMPDISK2 $RELEASEDIR/tmp
 
-mkfs -B $BS -b $USRBLOCKS $TMPDISK || exit
-echo " * Mounting $TMPDISK as $RELEASEDIR/usr"
-mount $TMPDISK $RELEASEDIR/usr || exit
+mkfs -B $BS -i 30000 -b $USRBLOCKS $TMPDISK1 || exit
+echo " * Mounting $TMPDISK1 as $RELEASEDIR/usr"
+mount $TMPDISK1 $RELEASEDIR/usr || exit
 mkdir -p $RELEASEDIR/tmp
 mkdir -p $RELEASEDIR/usr/tmp
 mkdir -p $RELEASEDIR/$XBIN
@@ -242,34 +210,37 @@ cp -rp /usr/lib $RELEASEDIR/usr
 cp -rp /bin/bigsh /bin/sh /bin/echo $RELEASEDIR/bin
 cp -rp /usr/bin/make /usr/bin/install /usr/bin/yacc /usr/bin/flex $RELEASEDIR/usr/bin
 
-if [ -d $PACKAGEDIR -a -d $PACKAGESOURCEDIR -a $PACKAGES -ne 0 ]
+if [ -d $PACKAGEDIR -a -d $PACKAGESOURCEDIR -a -f $PACKAGELIST -a -f $PACKAGESOURCELIST -a $PACKAGES -ne 0 ]
 then	echo " * Indexing packages"
 	bintotal=0
-	( cd $PACKAGEDIR
-	  for p in *.tar.bz2
-	  do	echo $p >&2
-		p="`echo $p | sed 's/.tar.bz2//'`"
-		descr="../$p/.descr"
+	( for p in `cat $PACKAGELIST`
+	  do	
+		descr="$PACKAGEDIR/../$p/.descr"
 		if [ -f "$descr" ]
 		then	echo "$p|`cat $descr`"
 		fi
-	  done >List
+	  done | tee $RELEASEPACKAGE/List
 	)
-	for d in $PACKAGEDIR $PACKAGESOURCEDIR
-	do	echo Counting size of $d
-		f=$d/SizeMB
-		if [ ! -f $f ]
-		then
-			b="`bzip2 -dc $d/*.bz2 | wc -c`"
-			echo "`expr 1 + $b / 1024 / 1024`" >$f
-		fi
-		echo "`cat $f` MB."
-	done
 	echo " * Transfering $PACKAGEDIR to $RELEASEPACKAGE"
-	cp $PACKAGEDIR/* $RELEASEPACKAGE/
+        for p in `cat $PACKAGELIST`
+        do
+               if [ -f $PACKAGEDIR/$p.tar.bz2 ]
+               then
+		  cp $PACKAGEDIR/$p.tar.bz2 $RELEASEPACKAGE/
+               else
+                  echo "Can't copy $PACKAGEDIR/$p.tar.bz2. Missing."
+               fi
+        done
 	echo " * Transfering $PACKAGESOURCEDIR to $RELEASEPACKAGESOURCES"
-	cp $PACKAGESOURCEDIR/* $RELEASEPACKAGESOURCES/ || true
-
+        for p in `cat $PACKAGESOURCELIST`
+        do
+               if [ -f $PACKAGESOURCEDIR/$p.tar.bz2 ]
+               then
+	          cp $PACKAGESOURCEDIR/$p.tar.bz2 $RELEASEPACKAGESOURCES/
+               else
+                  echo "Can't copy $PACKAGESOURCEDIR/$p.tar.bz2. Missing."
+               fi
+        done
 fi
 
 # Make sure compilers and libraries are bin-owned
@@ -279,10 +250,10 @@ chmod -R u+w $RELEASEDIR/usr/lib
 if [ "$COPY" -ne 1 ]
 then
 	echo " * Doing new svn export"
-	REPO=https://gforge.cs.vu.nl/svn/minix/trunk/$SRC
-	REVISION="`svn info $SVNREV $REPO | grep '^Revision: ' | awk '{ print $2 }'`"
+	REPO=https://gforge.cs.vu.nl/svn/minix/branches/$BRANCHNAME
+	REVISION="`svn info $USERNAME $SVNREV $REPO | grep '^Revision: ' | awk '{ print $2 }'`"
 	echo "Doing export of revision $REVISION from $REPO."
-	( cd $RELEASEDIR/usr && svn export -r$REVISION $REPO )
+	( cd $RELEASEDIR/usr && svn $USERNAME export -r$REVISION $REPO && mv $BRANCHNAME $SRC )
 	REVTAG=r$REVISION
 	echo "
 
@@ -296,6 +267,7 @@ else
 	srcdir=/usr/$SRC
 	( cd $srcdir && tar cf - . ) | ( cd $RELEASEDIR/usr && mkdir $SRC && cd $SRC && tar xf - )
 	REVTAG=copy
+	REVISION=unknown
 fi
 
 if [ "$USB" -ne 0 ]; then
@@ -303,8 +275,6 @@ if [ "$USB" -ne 0 ]; then
 else
 	IMG=${IMG_BASE}_${REVTAG}.iso
 fi
-IMGBZ=${IMG}.bz2
-echo "Making $IMGBZ"
 
 echo " * Fixups for owners and modes of dirs and files"
 chown -R bin $RELEASEDIR/usr/$SRC 
@@ -321,7 +291,10 @@ if [ "$USB" -eq 0 ]
 then	date >$RELEASEDIR/CD
 fi
 echo " * Chroot build"
+cp chrootmake.sh $RELEASEDIR/usr/$SRC/tools/chrootmake.sh
 chroot $RELEASEDIR "PATH=/$XBIN sh -x /usr/$SRC/tools/chrootmake.sh" || exit 1
+# Copy built images for cd booting
+cp $RELEASEDIR/boot/image_big image
 echo " * Chroot build done"
 echo " * Removing bootstrap files"
 rm -rf $RELEASEDIR/$XBIN
@@ -337,34 +310,26 @@ then
 	hdemu_root_changes
 fi
 
-echo $version_pretty >$RELEASEDIR/etc/version
+echo $version_pretty, SVN revision $REVISION, generated `date` >$RELEASEDIR/etc/version
 echo " * Counting files"
 extrakb=`du -s $RELEASEDIR/usr/install | awk '{ print $1 }'`
-expr `df $TMPDISK | tail -1 | awk '{ print $4 }'` - $extrakb >$RELEASEDIR/.usrkb
+expr `df $TMPDISK1 | tail -1 | awk '{ print $4 }'` - $extrakb >$RELEASEDIR/.usrkb
 find $RELEASEDIR/usr | fgrep -v /install/ | wc -l >$RELEASEDIR/.usrfiles
 find $RELEASEDIR -xdev | wc -l >$RELEASEDIR/.rootfiles
 echo " * Zeroing remainder of temporary areas"
-df $TMPDISK
+df $TMPDISK1
 df $TMPDISK3
 cp /dev/zero $RELEASEDIR/usr/.x 2>/dev/null || true
 rm $RELEASEDIR/usr/.x
 cp /dev/zero $RELEASEDIR/.x 2>/dev/null || true
 rm $RELEASEDIR/.x
 
-umount $TMPDISK || exit
+umount $TMPDISK1 || exit
 umount $TMPDISK2 || exit
 umount $TMPDISK3 || exit
+
 (cd ../boot && make)
-(cd .. && make depend)
-make clean
-SVNVAR=EXTRA_OPTS=-D_SVN_REVISION='\\\"'$REVISION'\\\"'
-make "$SVNVAR" image || exit 1
-mv image image_big
-make clean
-make "$SVNVAR" image_small || exit 1
 dd if=$TMPDISK3 of=$ROOTIMAGE bs=$BS count=$ROOTBLOCKS
-# Prepare image and image_small for cdfdboot
-mv image_big image
 sh mkboot cdfdboot $TMPDISK3
 cp $IMAGE $CDFILES/bootflop.img
 cp release/cd/* $CDFILES || true
@@ -394,7 +359,7 @@ else
 		# number of sectors
 		isosects=`expr $isosects + $isopad`
 		( cat $IMG $ROOTIMAGE ;
-			dd if=$TMPDISK bs=$BS count=$USRBLOCKS ) >m
+			dd if=$TMPDISK1 bs=$BS count=$USRBLOCKS ) >m
 		mv m $IMG
 		# Make CD partition table
 		installboot -m $IMG /usr/mdec/masterboot
@@ -402,4 +367,8 @@ else
 		# unreadable.
 		partition -m $IMG 0 81:$isosects 81:$ROOTSECTS 81:$USRSECTS
 	fi
+fi
+
+if [ "$FILENAMEOUT" ]
+then	echo "$IMG" >$FILENAMEOUT
 fi

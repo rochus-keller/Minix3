@@ -15,6 +15,9 @@
 #define MAX_NR_PCI_ID	      4		/* maximum number of PCI device IDs */
 #define MAX_NR_PCI_CLASS      4		/* maximum number of PCI class IDs */
 #define MAX_NR_SYSTEM	      2		/* should match RSS_NR_SYSTEM */
+#define MAX_IPC_LIST	    256		/* Max size of list for IPC target
+					 * process names
+					 */
 
 /* Definition of the system process table. This table only has entries for
  * the servers and drivers, and thus is not directly indexed by slot number.
@@ -57,10 +60,18 @@ extern struct rproc {
   struct { u32_t class; u32_t mask; } r_pci_class[MAX_NR_PCI_CLASS];
 
   u32_t r_call_mask[MAX_NR_SYSTEM];
+  char r_ipc_list[MAX_IPC_LIST];
 } rproc[NR_SYS_PROCS];
 
 /* Mapping for fast access to the system process table. */ 
 extern struct rproc *rproc_ptr[NR_PROCS];
+
+/* Pipe for detection of exec failures. The pipe is close-on-exec, and
+ * no data will be written to the pipe if the exec succeeds. After an 
+ * exec failure, the slot number is written to the pipe. After each exit,
+ * a non-blocking read retrieves the slot number from the pipe.
+ */
+int exec_pipe[2];
 
 /* Flag values. */
 #define RS_IN_USE       0x001	/* set when process slot is in use */
@@ -70,6 +81,8 @@ extern struct rproc *rproc_ptr[NR_PROCS];
 #define RS_KILLED 	0x020	/* driver is killed */
 #define RS_CRASHED 	0x040	/* driver crashed */
 #define RS_LATEREPLY	0x080	/* no reply sent to RS_DOWN caller yet */
+#define RS_SIGNALED 	0x100	/* driver crashed */
+#define RS_EXECFAILED 	0x200	/* exec failed */
 
 /* Constants determining RS period and binary exponential backoff. */
 #define RS_DELTA_T       60			/* check every T ticks */

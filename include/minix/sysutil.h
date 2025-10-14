@@ -1,5 +1,7 @@
-#ifndef _EXTRALIB_H
-#define _EXTRALIB_H
+#ifndef _MINIX_SYSUTIL_H
+#define _MINIX_SYSUTIL_H 1
+
+#include <minix/ipc.h>
 
 /* Extra system library definitions to support device drivers and servers.
  *
@@ -45,7 +47,38 @@ _PROTOTYPE( void kputc, (int c));
 _PROTOTYPE( void report, (char *who, char *mess, int num));
 _PROTOTYPE( void panic, (char *who, char *mess, int num));
 _PROTOTYPE( int getuptime, (clock_t *ticks));
+_PROTOTYPE( int getuptime2, (clock_t *ticks, time_t *boottime));
 _PROTOTYPE( int tickdelay, (clock_t ticks));
+_PROTOTYPE( int micro_delay_calibrate, (void));
+_PROTOTYPE( u32_t sys_hz, (void));
+_PROTOTYPE( void util_stacktrace, (void));
+_PROTOTYPE( void util_nstrcat, (char *str, unsigned long n) );
+_PROTOTYPE( void util_stacktrace_strcat, (char *));
+_PROTOTYPE( int micro_delay, (u32_t micros));
+_PROTOTYPE( u32_t micros_to_ticks, (u32_t micros));
+_PROTOTYPE( int asynsend, (endpoint_t ep, message *msg));
+_PROTOTYPE( void ser_putc, (char c));
+_PROTOTYPE( void get_randomness, (struct k_randomness *, int));
 
-#endif /* _EXTRALIB_H */
+
+#define ASSERT(c) if(!(c)) { panic(__FILE__, "assert " #c " failed at line", __LINE__); }
+
+/* timing library */
+#define TIMING_CATEGORIES       20
+
+#define TIMING_POINTS           20      /* timing resolution */
+#define TIMING_CATEGORIES       20
+#define TIMING_NAME             10
+
+struct util_timingdata {
+        char names[TIMING_NAME];
+        unsigned long lock_timings[TIMING_POINTS]; 
+        unsigned long lock_timings_range[2];
+        unsigned long binsize, resets, misses, measurements;
+	unsigned long starttimes[2];	/* nonzero if running */
+};
+
+typedef struct util_timingdata util_timingdata_t;
+
+#endif /* _MINIX_SYSUTIL_H */
 

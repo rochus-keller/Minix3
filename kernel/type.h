@@ -2,6 +2,7 @@
 #define TYPE_H
 
 #include <minix/com.h>
+#include <ibm/interrupt.h>
 
 typedef _PROTOTYPE( void task_t, (void) );
 
@@ -25,21 +26,6 @@ struct boot_image {
   int nr_k_calls;
   char proc_name[P_NAME_LEN];		/* name in process table */
   endpoint_t endpoint;			/* endpoint number when started */
-};
-
-/* The kernel outputs diagnostic messages in a circular buffer. */
-struct kmessages {
-  int km_next;				/* next index to write */
-  int km_size;				/* current size in buffer */
-  char km_buf[KMESS_BUF_SIZE];		/* buffer for messages */
-};
-
-struct randomness {
-  struct {
-	int r_next;				/* next index to write */
-	int r_size;				/* number of random elements */
-	unsigned short r_buf[RANDOM_ELEMENTS]; /* buffer for random info */
-  } bin[RANDOM_SOURCES];
 };
 
 typedef unsigned long irq_policy_t;	

@@ -140,11 +140,10 @@ echo "MINIX 3 currently supports the following Ethernet cards. Please choose: "
     echo "0. No Ethernet card (no networking)"
     echo "1. Intel Pro/100"
     echo "2. 3Com 501 or 3Com 509 based card"
-    echo "3. Realtek 8139 based card"
+    echo "3. Realtek 8139 based card (also emulated by KVM)"
     echo "4. Realtek 8029 based card (also emulated by Qemu)"
-    echo "   Note: If you want to use this in Qemu, set 'qemu_pci=1' in the boot monitor."
     echo "5. NE2000, 3com 503 or WD based card (also emulated by Bochs)"
-    echo "6. AMD LANCE (also emulated by VMWare)"
+    echo "6. AMD LANCE (also emulated by VMWare and VirtualBox)"
     echo "7. Different Ethernet card (no networking)"
     echo ""
     echo "You can always change your mind after the setup."
@@ -171,7 +170,7 @@ do
            echo "Note: After installing, edit $LOCALRC to the right configuration."
            echo " chose option 4, the defaults for emulation by Bochs have been set."
 		;;
-        6) driver="lance"; driverargs="lance_arg='LANCE0=on'"; step2="ok"; ;;    
+        6) driver="lance"; step2="ok"; ;;    
         7) step2="ok"; ;;    
         *) warn "choose a number"
     esac
@@ -217,7 +216,6 @@ do
 	echo ""
 
     echo "Now you need to create a MINIX 3 partition on your hard disk."
-    echo "It has to have $TOTALMB MB at the very least."
     echo "You can also select one that's already there."
     echo " "
     echo "If you have an existing installation, reinstalling will let you"
@@ -246,7 +244,6 @@ do
 		echo -n "
 MINIX needs one primary partition of $TOTALMB MB for a full install,
 plus what you want for /home.
-The maximum file system currently supported is 4 GB.
 
 If there is no free space on your disk then you have to choose an option:
    (1) Delete one or more partitions
@@ -454,17 +451,16 @@ then
 echo " --- Step 7: Select a block size ---------------------------------------"
 	echo ""
 	
-	echo "The maximum (and default) file system block size is $blockdefault KB."
-	echo "For a small disk or small RAM you may want 1 or 2 KB blocks."
+	echo "The default file system block size is $blockdefault KB."
 	echo ""
 	
 	while [ -z "$blocksize" ]
 	do	
 		echo -n "Block size in kilobytes? [$blockdefault] "; read blocksize
 		test -z "$blocksize" && blocksize=$blockdefault
-		if [ "$blocksize" -ne 1 -a "$blocksize" -ne 2 -a "$blocksize" -ne $blockdefault ]
+		if [ "$blocksize" -ne 1 -a "$blocksize" -ne 2 -a "$blocksize" -ne 4 -a "$blocksize" -ne 8 ]
 		then	
-			warn "1, 2 or 4 please"
+			warn "1, 2, 4 or 8 please"
 			blocksize=""
 		fi
 	done
@@ -502,35 +498,14 @@ fi
 echo "Creating /dev/$usr for /usr .."
 mkfs -B $blocksizebytes /dev/$usr || exit
 
-echo ""
-echo " --- Step 8: Wait for bad block detection ------------------------------"
-echo ""
-echo "Scanning disk for bad blocks.  Hit CTRL+C to stop the scan if you are"
-echo "sure that there can not be any bad blocks.  Otherwise just wait."
-
-trap ': nothing;echo' 2
-
-echo ""
-echo "Scanning /dev/$root for bad blocks:"
-readall -b /dev/$root | sh
-
 if [ "$nohome" = 0 ]
 then
-	echo ""
-	echo "Scanning /dev/$home for bad blocks:"
-	readall -b /dev/$home | sh
 	fshome="home=/dev/$home"
 else	fshome=""
 fi
 
 echo ""
-echo "Scanning /dev/$usr for bad blocks:"
-readall -b /dev/$usr | sh
-
-trap 2
-
-echo ""
-echo " --- Step 9: Wait for files to be copied -------------------------------"
+echo " --- Step 8: Wait for files to be copied -------------------------------"
 echo ""
 echo "This is the final step of the MINIX 3 setup.  All files will now be"
 echo "copied to your hard disk.  This may take a while."
@@ -585,7 +560,7 @@ mount /dev/$usr /mnt >/dev/null || exit
 # Make bootable.
 installboot -d /dev/$root /usr/mdec/bootblock /boot/boot >/dev/null || exit
 
-edparams /dev/$root "rootdev=$root; ramimagedev=$root; minix(1,Start MINIX 3) { image=/boot/image_big; boot; }; smallminix(2,Start Small MINIX 3 (uses less memory)) { image=/boot/image_small; boot; }; newminix(3,Start Custom MINIX 3) { unset image; boot }; main() { echo By default, MINIX 3 will automatically load in 3 seconds.; echo Press ESC to enter the monitor for special configuration.; trap 3000 boot; menu; }; save" || exit
+edparams /dev/$root "rootdev=$root; ramimagedev=$root; minix(1,Start MINIX 3) { image=/boot/image_big; boot; }; newminix(2,Start Custom MINIX 3) { unset image; boot }; main() { echo By default, MINIX 3 will automatically load in 3 seconds.; echo Press ESC to enter the monitor for special configuration.; trap 3000 boot; menu; }; save" || exit
 pfile="/mnt/src/tools/fdbootparams"
 echo "rootdev=$root; ramimagedev=$root; save" >$pfile
 # Save name of CD drive

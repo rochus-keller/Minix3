@@ -15,7 +15,7 @@
 
 .define	_monitor	! exit Minix and return to the monitor
 .define	_int86		! let the monitor make an 8086 interrupt call
-.define	_cp_mess	! copies messages from source to destination
+!.define	_cp_mess	! copies messages from source to destination
 .define	_exit		! dummy for library routines
 .define	__exit		! dummy for library routines
 .define	___exit		! dummy for library routines
@@ -27,6 +27,7 @@
 .define	_intr_unmask	! enable an irq at the 8259 controller
 .define	_intr_mask	! disable an irq
 .define	_phys_copy	! copy data from anywhere to anywhere in memory
+.define	_phys_copy_fault! phys_copy pagefault
 .define	_phys_memset	! write pattern anywhere in memory
 .define	_mem_rdw	! copy one word from [segment:offset]
 .define	_reset		! reset the system
@@ -34,8 +35,12 @@
 .define	_level0		! call a function at level 0
 .define	_read_cpu_flags	! read the cpu flags
 .define	_read_cr0	! read cr0
+.define	_getcr3val
 .define	_write_cr0	! write a value in cr0
-.define	_write_cr3	! write a value in cr3 (root of the page table)
+.define	_read_cr4
+.define	_thecr3
+.define	_write_cr4
+.define	_catch_pagefaults
 
 ! The routines only guarantee to preserve the registers the C compiler
 ! expects to be preserved (ebx, esi, edi, ebp, esp, segment registers, and
@@ -151,55 +156,6 @@ csinit:	mov	eax, DS_SELECTOR
 
 
 !*===========================================================================*
-!*				cp_mess					     *
-!*===========================================================================*
-! PUBLIC void cp_mess(int src, phys_clicks src_clicks, vir_bytes src_offset,
-!		      phys_clicks dst_clicks, vir_bytes dst_offset);
-! This routine makes a fast copy of a message from anywhere in the address
-! space to anywhere else.  It also copies the source address provided as a
-! parameter to the call into the first word of the destination message.
-!
-! Note that the message size, "Msize" is in DWORDS (not bytes) and must be set
-! correctly.  Changing the definition of message in the type file and not
-! changing it here will lead to total disaster.
-
-CM_ARGS	=	4 + 4 + 4 + 4 + 4	! 4 + 4 + 4 + 4 + 4
-!		es  ds edi esi eip	proc scl sof dcl dof
-
-	.align	16
-_cp_mess:
-	cld
-	push	esi
-	push	edi
-	push	ds
-	push	es
-
-	mov	eax, FLAT_DS_SELECTOR
-	mov	ds, ax
-	mov	es, ax
-
-	mov	esi, CM_ARGS+4(esp)		! src clicks
-	shl	esi, CLICK_SHIFT
-	add	esi, CM_ARGS+4+4(esp)		! src offset
-	mov	edi, CM_ARGS+4+4+4(esp)		! dst clicks
-	shl	edi, CLICK_SHIFT
-	add	edi, CM_ARGS+4+4+4+4(esp)	! dst offset
-
-	mov	eax, CM_ARGS(esp)	! process number of sender
-	stos				! copy number of sender to dest message
-	add	esi, 4			! do not copy first word
-	mov	ecx, Msize - 1		! remember, first word does not count
-	rep
-	movs				! copy the message
-
-	pop	es
-	pop	ds
-	pop	edi
-	pop	esi
-	ret				! that is all folks!
-
-
-!*===========================================================================*
 !*				exit					     *
 !*===========================================================================*
 ! PUBLIC void exit();
@@ -229,6 +185,7 @@ _phys_insw:
 	cld
 	push	edi
 	push	es
+
 	mov	ecx, FLAT_DS_SELECTOR
 	mov	es, cx
 	mov	edx, 8(ebp)		! port to read from
@@ -254,6 +211,7 @@ _phys_insb:
 	cld
 	push	edi
 	push	es
+
 	mov	ecx, FLAT_DS_SELECTOR
 	mov	es, cx
 	mov	edx, 8(ebp)		! port to read from
@@ -280,6 +238,7 @@ _phys_outsw:
 	cld
 	push	esi
 	push	ds
+
 	mov	ecx, FLAT_DS_SELECTOR
 	mov	ds, cx
 	mov	edx, 8(ebp)		! port to write to
@@ -306,6 +265,7 @@ _phys_outsb:
 	cld
 	push	esi
 	push	ds
+
 	mov	ecx, FLAT_DS_SELECTOR
 	mov	ds, cx
 	mov	edx, 8(ebp)		! port to write to
@@ -398,7 +358,7 @@ dis_already:
 !*===========================================================================*
 !*				phys_copy				     *
 !*===========================================================================*
-! PUBLIC void phys_copy(phys_bytes source, phys_bytes destination,
+! PUBLIC phys_bytes phys_copy(phys_bytes source, phys_bytes destination,
 !			phys_bytes bytecount);
 ! Copy a block of physical memory.
 
@@ -437,6 +397,8 @@ pc_small:
 	rep
    eseg	movsb
 
+	mov	eax, 0			! 0 means: no fault
+_phys_copy_fault:			! kernel can send us here
 	pop	es
 	pop	edi
 	pop	esi
@@ -456,6 +418,7 @@ _phys_memset:
 	push	esi
 	push	ebx
 	push	ds
+
 	mov	esi, 8(ebp)
 	mov	eax, 16(ebp)
 	mov	ebx, FLAT_DS_SELECTOR
@@ -485,6 +448,7 @@ fill_done:
 	pop	esi
 	pop	ebp
 	ret
+	
 
 !*===========================================================================*
 !*				mem_rdw					     *
@@ -585,14 +549,37 @@ _write_cr0:
 	ret
 
 !*===========================================================================*
-!*			      write_cr3					     *
+!*			      read_cr4					     *
 !*===========================================================================*
-! PUBLIC void write_cr3(unsigned long value);
-_write_cr3:
+! PUBLIC unsigned long read_cr4(void);
+_read_cr4:
+	push	ebp
+	mov	ebp, esp
+.data1	0x0f, 0x20, 0xe0 ! mov eax, cr4
+	pop	ebp
+	ret
+
+!*===========================================================================*
+!*			      write_cr4					     *
+!*===========================================================================*
+! PUBLIC void write_cr4(unsigned long value);
+_write_cr4:
 	push	ebp
 	mov	ebp, esp
 	mov	eax, 8(ebp)
-	mov	cr3, eax
+.data1	0x0f, 0x22, 0xe0 ! mov cr4, eax
+	jmp	0f
+0:
 	pop	ebp
+	ret
+
+
+!*===========================================================================*
+!*				getcr3val				*
+!*===========================================================================*
+! PUBLIC unsigned long getcr3val(void);
+_getcr3val:
+	mov	eax, cr3
+	mov	(_thecr3), eax
 	ret
 

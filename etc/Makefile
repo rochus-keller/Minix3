@@ -1,7 +1,10 @@
 
 ETC=/etc/
 USRETC=/usr/etc/
-FILES1=fstab group hostname.file inet.conf motd.install mtab passwd profile protocols rc services termcap ttytab utmp rc.cd binary_sizes binary_sizes.big binary_sizes.xxl rc.rescue syslog.conf rc.daemons.dist rs.single make.conf drivers.conf
+FILES1=fstab group hostname.file inet.conf motd.install mtab passwd profile \
+	protocols rc services termcap ttytab utmp rc.cd binary_sizes \
+	binary_sizes.big binary_sizes.xxl rc.rescue syslog.conf \
+	rc.daemons.dist rs.inet rs.single make.conf drivers.conf
 FILES2=shadow
 FILES3=daily dhcptags.conf rc
 
@@ -23,6 +26,8 @@ install::
 	install -o bin -g operator -m 755 crontab /usr/lib
 	@echo "Making user homedirs.."
 	for u in /usr/ast ~root; do cp ast/.[aepv]* $$u ; done
+	@echo "Installing fonts.."
+	install -m 644 -o bin -g operator fonts/*.fnt /usr/lib/fonts/
 
 postinstall:
 	binsizes normal

@@ -4,6 +4,7 @@
 #include <string.h>
 #include <minix/com.h>
 #include <minix/callnr.h>
+#include <stdlib.h>
 
 #include "buf.h"
 #include "inode.h"
@@ -11,36 +12,14 @@
 
 #include <minix/vfsif.h>
 
-static int panicking;
-
 /*===========================================================================*
  *				no_sys					     *
  *===========================================================================*/
 PUBLIC int no_sys()
 {
 /* Somebody has used an illegal system call number */
+  printf("no_sys: invalid call %d\n", req_nr);
   return(EINVAL);
-}
-
-/*===========================================================================*
- *				panic					     *
- *===========================================================================*/
-PUBLIC void panic(who, mess, num)
-char *who;			/* who caused the panic */
-char *mess;			/* panic message string */
-int num;			/* number to go with it */
-{
-/* Something awful has happened.  Panics are caused when an internal
- * inconsistency is detected, e.g., a programming error or illegal value of a
- * defined constant.
- */
-  if (panicking) return;	/* do not panic during a sync */
-  panicking = TRUE;		/* prevent another panic during the sync */
-
-  printf("FS panic (%s): %s ", who, mess);
-  if (num != NO_NUM) printf("%d",num); 
-  (void) fs_sync();		/* flush everything to the disk */
-  sys_exit(SELF);
 }
 
 /*===========================================================================*
@@ -86,8 +65,17 @@ PUBLIC time_t clock_time()
   register int k;
   clock_t uptime;
 
-  if ( (k=getuptime(&uptime)) != OK) panic(__FILE__,"clock_time err", k);
-  return( (time_t) (boottime + (uptime/HZ)));
+  if (use_getuptime2)
+  {
+	if ( (k=getuptime2(&uptime,&boottime)) != OK)
+		panic(__FILE__,"clock_time: getuptme2 failed", k);
+  }
+  else
+  {
+	if ( (k=getuptime(&uptime)) != OK)
+		panic(__FILE__,"clock_time err", k);
+  }
+  return( (time_t) (boottime + (uptime/sys_hz())));
 }
 
 int mfs_min_f(char *file, int line, int v1, int v2)
@@ -117,3 +105,18 @@ void mfs_nul_f(char *file, int line, char *str, int len, int maxlen)
 			file, line, len, maxlen);
 	}
 }
+
+#define MYASSERT(c) if(!(c)) { printf("MFS:%s:%d: sanity check: %s failed\n", \
+  file, line, #c); panic("MFS", "sanity check " #c " failed", __LINE__); }
+
+void sanitycheck(char *file, int line)
+{
+	MYASSERT(SELF_E > 0);
+	if(superblock.s_dev != NO_DEV) {
+		MYASSERT(superblock.s_dev == fs_dev);
+		MYASSERT(superblock.s_block_size == fs_block_size);
+	} else {
+		MYASSERT(_MIN_BLOCK_SIZE == fs_block_size);
+	}
+}
+

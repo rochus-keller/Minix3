@@ -22,7 +22,7 @@ all: $(TARGETS)
 
 syslogd:	syslogd.o
 	$(CC) $? $(LDFLAGS)
-	@install -S 8kw $@
+	@install $@
 
 syslog_test: syslog_test.o syslog.o
 	$(CC) syslog_test.o syslog.o $(LDFLAGS)
@@ -30,7 +30,6 @@ syslog_test: syslog_test.o syslog.o
 
 logger: logger.o syslog.o
 	$(CC) logger.o syslog.o $(LDFLAGS)
-	@install -S 2kw $@
 
 clean:
 	$(RM) $(OBJS) $(TARGETS) syslog_test *.BAK core

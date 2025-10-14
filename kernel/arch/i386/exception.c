@@ -4,15 +4,140 @@
  */
 
 #include "../../kernel.h"
+#include "proto.h"
 #include <signal.h>
+#include <stdio.h>
+#include <string.h>
+#include <minix/sysutil.h>
 #include "../../proc.h"
+#include "../../proto.h"
+#include "../../vm.h"
+
+extern int vm_copy_in_progress, catch_pagefaults;
+extern struct proc *vm_copy_from, *vm_copy_to;
+
+void pagefault(vir_bytes old_eip, struct proc *pr, int trap_errno,
+	u32_t *old_eipptr, u32_t *old_eaxptr, u32_t pagefaultcr2)
+{
+	int s;
+	vir_bytes ph;
+	u32_t pte;
+	int procok = 0, pcok = 0, rangeok = 0;
+	int in_physcopy = 0;
+	vir_bytes test_eip;
+
+	vmassert(old_eipptr);
+	vmassert(old_eaxptr);
+
+	vmassert(*old_eipptr == old_eip);
+	vmassert(old_eipptr != &old_eip);
+
+#if 0
+	printf("kernel: pagefault in pr %d, addr 0x%lx, his cr3 0x%lx, actual cr3 0x%lx\n",
+		pr->p_endpoint, pagefaultcr2, pr->p_seg.p_cr3, read_cr3());
+#endif
+
+	if(pr->p_seg.p_cr3) {
+#if 0
+		vm_print(pr->p_seg.p_cr3);
+#endif
+		vmassert(pr->p_seg.p_cr3 == read_cr3());
+	} else {
+		u32_t cr3;
+		int u = 0;
+		if(!intr_disabled()) {
+			lock;
+			u = 1;
+		}
+		cr3 = read_cr3();
+		vmassert(ptproc);
+		if(ptproc->p_seg.p_cr3 != cr3) {
+			util_stacktrace();
+			printf("cr3 wrong in pagefault; value 0x%lx, ptproc %s / %d, his cr3 0x%lx, pr %s / %d\n",
+				cr3,
+				ptproc->p_name, ptproc->p_endpoint,
+				ptproc->p_seg.p_cr3, 
+				pr->p_name, pr->p_endpoint);
+			ser_dump_proc();
+			vm_print(cr3);
+			vm_print(ptproc->p_seg.p_cr3);
+		}
+		if(u) {
+			unlock;
+		}
+	}
+
+	test_eip = k_reenter ? old_eip : pr->p_reg.pc;
+
+	in_physcopy = (test_eip > (vir_bytes) phys_copy) &&
+	   (test_eip < (vir_bytes) phys_copy_fault);
+
+	if((k_reenter || iskernelp(pr)) &&
+		catch_pagefaults && in_physcopy) {
+#if 0
+		printf("pf caught! addr 0x%lx\n", pagefaultcr2);
+#endif
+		*old_eipptr = phys_copy_fault;
+		*old_eaxptr = pagefaultcr2;
+
+		return;
+	}
+
+	/* System processes that don't have their own page table can't
+	 * have page faults. VM does have its own page table but also
+	 * can't have page faults (because VM has to handle them).
+	 */
+	if(k_reenter || (pr->p_endpoint <= INIT_PROC_NR &&
+	 !(pr->p_misc_flags & MF_FULLVM)) || pr->p_endpoint == VM_PROC_NR) {
+		/* Page fault we can't / don't want to
+		 * handle.
+		 */
+		kprintf("pagefault for process %d ('%s'), pc = 0x%x, addr = 0x%x, flags = 0x%x, k_reenter %d\n",
+			pr->p_endpoint, pr->p_name, pr->p_reg.pc,
+			pagefaultcr2, trap_errno, k_reenter);
+		proc_stacktrace(pr);
+  		minix_panic("page fault in system process", pr->p_endpoint);
+
+		return;
+	}
+
+	/* Don't schedule this process until pagefault is handled. */
+	vmassert(pr->p_seg.p_cr3 == read_cr3());
+	vmassert(!RTS_ISSET(pr, PAGEFAULT));
+	RTS_LOCK_SET(pr, PAGEFAULT);
+
+	/* Save pagefault details, suspend process,
+	 * add process to pagefault chain,
+	 * and tell VM there is a pagefault to be
+	 * handled.
+	 */
+	pr->p_pagefault.pf_virtual = pagefaultcr2;
+	pr->p_pagefault.pf_flags = trap_errno;
+	pr->p_nextpagefault = pagefaults;
+	pagefaults = pr;
+		
+	lock_notify(HARDWARE, VM_PROC_NR);
+
+	return;
+}
 
 /*===========================================================================*
  *				exception				     *
  *===========================================================================*/
-PUBLIC void exception(unsigned vec_nr)
+PUBLIC void exception(vec_nr, trap_errno, old_eip, old_cs, old_eflags,
+	old_eipptr, old_eaxptr, pagefaultcr2)
+unsigned vec_nr;
+u32_t trap_errno;
+u32_t old_eip;
+U16_t old_cs;
+u32_t old_eflags;
+u32_t *old_eipptr;
+u32_t *old_eaxptr;
+u32_t pagefaultcr2;
 {
 /* An exception or unexpected interrupt has occurred. */
+
+struct proc *t;
 
   struct ex_s {
 	char *msg;
@@ -43,11 +168,17 @@ PUBLIC void exception(unsigned vec_nr)
 
   /* Save proc_ptr, because it may be changed by debug statements. */
   saved_proc = proc_ptr;	
-
+  
   ep = &ex_data[vec_nr];
 
   if (vec_nr == 2) {		/* spurious NMI on some machines */
 	kprintf("got spurious NMI\n");
+	return;
+  }
+
+  if(vec_nr == PAGE_FAULT_VECTOR) {
+	pagefault(old_eip, saved_proc, trap_errno,
+		old_eipptr, old_eaxptr, pagefaultcr2);
 	return;
   }
 
@@ -56,21 +187,24 @@ PUBLIC void exception(unsigned vec_nr)
    * k_reenter larger than zero.
    */
   if (k_reenter == 0 && ! iskernelp(saved_proc)) {
-#if 0
 	{
+
 		kprintf(
-		"exception for process %d, pc = 0x%x:0x%x, sp = 0x%x:0x%x\n",
-			proc_nr(saved_proc),
+"exception for process %d, endpoint %d ('%s'), pc = 0x%x:0x%x, sp = 0x%x:0x%x\n",
+			proc_nr(saved_proc), saved_proc->p_endpoint,
+			saved_proc->p_name,
 			saved_proc->p_reg.cs, saved_proc->p_reg.pc,
 			saved_proc->p_reg.ss, saved_proc->p_reg.sp);
-		kprintf("edi = 0x%x\n", saved_proc->p_reg.di);
-
-#if DEBUG_STACKTRACE
-		stacktrace(saved_proc);
-#endif
+  		kprintf(
+  "vec_nr= %d, trap_errno= 0x%lx, eip= 0x%lx, cs= 0x%x, eflags= 0x%lx\n",
+			vec_nr, (unsigned long)trap_errno,
+			(unsigned long)old_eip, old_cs,
+			(unsigned long)old_eflags);
+		proc_stacktrace(saved_proc);
 	}
-#endif
 
+	kprintf("kernel: cause_sig %d for %d\n",
+		ep->signum, saved_proc->p_endpoint);
 	cause_sig(proc_nr(saved_proc), ep->signum);
 	return;
   }
@@ -82,39 +216,49 @@ PUBLIC void exception(unsigned vec_nr)
 	kprintf("\n%s\n", ep->msg);
   kprintf("k_reenter = %d ", k_reenter);
   kprintf("process %d (%s), ", proc_nr(saved_proc), saved_proc->p_name);
-  kprintf("pc = %u:0x%x", (unsigned) saved_proc->p_reg.cs,
-  (unsigned) saved_proc->p_reg.pc);
+  kprintf("pc = %u:0x%x\n", (unsigned) saved_proc->p_reg.cs,
+	  (unsigned) saved_proc->p_reg.pc);
+  kprintf(
+  "vec_nr= %d, trap_errno= 0x%lx, eip= 0x%lx, cs= 0x%x, eflags= 0x%lx\n",
+	vec_nr, (unsigned long)trap_errno,
+	(unsigned long)old_eip, old_cs, (unsigned long)old_eflags);
+  proc_stacktrace(saved_proc);
 
-  panic("exception in a kernel task", NO_NUM);
+  minix_panic("exception in a kernel task", saved_proc->p_endpoint);
 }
 
-#if DEBUG_STACKTRACE
 /*===========================================================================*
  *				stacktrace				     *
  *===========================================================================*/
-PUBLIC void stacktrace(struct proc *proc)
+PUBLIC void proc_stacktrace(struct proc *proc)
 {
 	reg_t bp, v_bp, v_pc, v_hbp;
 
 	v_bp = proc->p_reg.fp;
 
-	kprintf("stacktrace: ");
+	kprintf("%-8.8s %6d 0x%lx ",
+		proc->p_name, proc->p_endpoint, proc->p_reg.pc);
+
 	while(v_bp) {
-		phys_bytes p;
-		if(!(p = umap_local(proc, D, v_bp, sizeof(v_bp)))) {
-			kprintf("(bad bp %lx)", v_bp);
+
+#define PRCOPY(pr, pv, v, n) \
+  (iskernelp(pr) ? (memcpy((char *) v, (char *) pv, n), OK) : \
+     data_copy(pr->p_endpoint, pv, SYSTEM, (vir_bytes) (v), n))
+
+	        if(PRCOPY(proc, v_bp, &v_hbp, sizeof(v_hbp)) != OK) {
+			kprintf("(v_bp 0x%lx ?)", v_bp);
 			break;
 		}
-		phys_copy(p+sizeof(v_pc), vir2phys(&v_pc), sizeof(v_pc));
-		phys_copy(p, vir2phys(&v_hbp), sizeof(v_hbp));
+		if(PRCOPY(proc, v_bp + sizeof(v_pc), &v_pc, sizeof(v_pc)) != OK) {
+			kprintf("(v_pc 0x%lx ?)", v_bp + sizeof(v_pc));
+			break;
+		}
 		kprintf("0x%lx ", (unsigned long) v_pc);
 		if(v_hbp != 0 && v_hbp <= v_bp) {
-			kprintf("(bad hbp %lx)", v_hbp);
+			kprintf("(hbp %lx ?)", v_hbp);
 			break;
 		}
 		v_bp = v_hbp;
 	}
 	kprintf("\n");
 }
-#endif
-

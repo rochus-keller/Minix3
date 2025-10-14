@@ -7,7 +7,7 @@ LIBRARIES=libc
 libc_FILES=" \
 	__sigreturn.s \
 	_ipc.s \
-	_ipcnew.s \
+	_senda.s \
 	brksize.s"
 	
 STARTFILES="\

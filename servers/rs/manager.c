@@ -4,12 +4,14 @@
  */
 
 #include "inc.h"
+#include <ctype.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <minix/dmap.h>
+#include <minix/ds.h>
 #include <minix/endpoint.h>
 #include <minix/rs.h>
 #include <lib.h>
@@ -32,8 +34,6 @@ FORWARD _PROTOTYPE( void init_privs, (struct rproc *rp, struct priv *privp) );
 FORWARD _PROTOTYPE( void init_pci, (struct rproc *rp, int endpoint) );
 
 PRIVATE int shutting_down = FALSE;
-
-#define EXEC_FAILED	49			/* recognizable status */
 
 extern int rs_verbose;
 
@@ -59,6 +59,8 @@ int flags;					/* extra flags, if any */
   int len;					/* length of string */
   int r;
   endpoint_t ep;				/* new endpoint no. */
+
+printf("RS: in do_up\n");
 
   /* See if there is a free entry in the table with system processes. */
   for (slot_nr = 0; slot_nr < NR_SYS_PROCS; slot_nr++) {
@@ -166,8 +168,13 @@ message *m_ptr;					/* request message pointer */
   /* See if there is a free entry in the table with system processes. */
   for (slot_nr = 0; slot_nr < NR_SYS_PROCS; slot_nr++) {
       rp = &rproc[slot_nr];			/* get pointer to slot */
-      if (! rp->r_flags & RS_IN_USE) 		/* check if available */
+      if (!(rp->r_flags & RS_IN_USE)) 		/* check if available */
 	  break;
+  }
+  if (slot_nr >= NR_SYS_PROCS)
+  {
+	printf("rs`do_start: driver table full\n");
+	return ENOMEM;
   }
 
   /* Obtain command name and parameters. This is a space-separated string
@@ -254,6 +261,21 @@ message *m_ptr;					/* request message pointer */
   rp->r_uid= rs_start.rss_uid;
   rp->r_nice= rs_start.rss_nice;
 
+  if (rs_start.rss_flags & RF_IPC_VALID)
+  {
+	if (rs_start.rss_ipclen+1 > sizeof(rp->r_ipc_list))
+	{
+		printf("rs: ipc list too long for '%s'\n", rp->r_label);
+		return EINVAL;
+	}
+	s=sys_datacopy(m_ptr->m_source, (vir_bytes) rs_start.rss_ipc, 
+		SELF, (vir_bytes) rp->r_ipc_list, rs_start.rss_ipclen);
+	if (s != OK) return(s);
+	rp->r_ipc_list[rs_start.rss_ipclen]= '\0';
+  }
+  else
+	rp->r_ipc_list[0]= '\0';
+
   rp->r_exec= NULL;
   if (rs_start.rss_flags & RF_COPY)
   {
@@ -287,10 +309,12 @@ message *m_ptr;					/* request message pointer */
 	rp->r_priv.s_io_tab[i].ior_base= rs_start.rss_io[i].base;
 	rp->r_priv.s_io_tab[i].ior_limit=
 		rs_start.rss_io[i].base+rs_start.rss_io[i].len-1;
+#if 0
 	if(rs_verbose)
 	   printf("RS: do_start: I/O [%x..%x]\n",
 		rp->r_priv.s_io_tab[i].ior_base,
 		rp->r_priv.s_io_tab[i].ior_limit);
+#endif
   }
 
   if (rs_start.rss_nr_pci_id > MAX_NR_PCI_ID)
@@ -422,7 +446,7 @@ PUBLIC int do_restart(message *m_ptr)
   label[len]= '\0';
 
   for (rp=BEG_RPROC_ADDR; rp<END_RPROC_ADDR; rp++) {
-      if (rp->r_flags & RS_IN_USE && strcmp(rp->r_label, label) == 0) {
+      if ((rp->r_flags & RS_IN_USE) && strcmp(rp->r_label, label) == 0) {
 	  if(rs_verbose) printf("RS: restarting '%s' (%d)\n", label, rp->r_pid);
 	  if (rp->r_pid >= 0)
 	  {
@@ -433,6 +457,7 @@ PUBLIC int do_restart(message *m_ptr)
 	  }
 	  rp->r_flags &= ~(RS_EXITING|RS_REFRESHING|RS_NOPINGREPLY);
 	  r = start_service(rp, 0, &ep);	
+	  if (r != OK) printf("do_restart: start_service failed: %d\n", r);
 	  m_ptr->RS_ENDPOINT = ep;
 	  return(r);
       }
@@ -495,7 +520,7 @@ PUBLIC void do_exit(message *m_ptr)
 {
   register struct rproc *rp;
   pid_t exit_pid;
-  int exit_status, r;
+  int exit_status, r, slot_nr;
   endpoint_t ep;
 
   if(rs_verbose)
@@ -509,14 +534,43 @@ PUBLIC void do_exit(message *m_ptr)
   while ( (exit_pid = waitpid(-1, &exit_status, WNOHANG)) != 0 ) {
 
     if(rs_verbose) {
+#if 0
       printf("RS: pid %d, ", exit_pid); 
+#endif
       if (WIFSIGNALED(exit_status)) {
+#if 0
           printf("killed, signal number %d\n", WTERMSIG(exit_status));
+#endif
       } 
       else if (WIFEXITED(exit_status)) {
+#if 0
           printf("normal exit, status %d\n", WEXITSTATUS(exit_status));
+#endif
       }
     }
+
+	/* Read from the exec pipe */
+	for (;;)
+	{
+		r= read(exec_pipe[0], &slot_nr, sizeof(slot_nr));
+		if (r == -1)
+		{
+			break;	/* No data */
+		}
+		if (r != sizeof(slot_nr))
+		{
+			panic("RS", "do_exit: unaligned read from exec pipe",
+				r);
+		}
+		printf("do_exit: got slot %d\n", slot_nr);
+		if (slot_nr < 0 || slot_nr >= NR_SYS_PROCS)
+		{
+			panic("RS", "do_exit: bad slot number from exec pipe",
+				slot_nr);
+		}
+		rp= &rproc[slot_nr];
+		rp->r_flags |= RS_EXECFAILED;
+	}
 
       /* Search the system process table to see who exited. 
        * This should always succeed. 
@@ -528,6 +582,8 @@ PUBLIC void do_exit(message *m_ptr)
 
               rproc_ptr[proc] = NULL;		/* invalidate */
 	      rp->r_pid= -1;
+
+	      pci_del_acl(rp->r_proc_nr_e);	/* Ignore errors */
 
               if ((rp->r_flags & RS_EXITING) || shutting_down) {
 		  /* No reply sent to RS_DOWN yet. */
@@ -556,13 +612,10 @@ PUBLIC void do_exit(message *m_ptr)
 	  		m_ptr->RS_ENDPOINT = ep;
 		      }
 	      }
-              else if (WIFEXITED(exit_status) &&
-		      WEXITSTATUS(exit_status) == EXEC_FAILED) {
+              else if (rp->r_flags & RS_EXECFAILED) {
 		  rp->r_flags = 0;			/* release slot */
               }
 	      else {
-		if(rs_verbose)
-		  printf("RS: unexpected exit. Restarting %s\n", rp->r_cmd);
                   /* Determine what to do. If this is the first unexpected 
 		   * exit, immediately restart this service. Otherwise use
 		   * a binary exponetial backoff.
@@ -574,21 +627,27 @@ rp->r_restarts= 0;
 			switch(WTERMSIG(exit_status))
 			{
 			case SIGKILL:	rp->r_flags |= RS_KILLED; break;
-			default: 	rp->r_flags |= RS_CRASHED; break;
+			default: 	rp->r_flags |= RS_SIGNALED; break;
 			}
 		  } 
 		  else
 			rp->r_flags |= RS_CRASHED;
 
-		  if (rp->r_script[0] != '\0')
+		  if (rp->r_script[0] != '\0') {
+			if(rs_verbose)
+				printf("RS: running restart script for %s\n",
+					rp->r_cmd);
 		      run_script(rp);
-		  else if (rp->r_restarts > 0) {
+		  } else if (rp->r_restarts > 0) {
+		      printf("RS: restarting %s, restarts %d\n",
+				rp->r_cmd, rp->r_backoff);
 		      rp->r_backoff = 1 << MIN(rp->r_restarts,(BACKOFF_BITS-2));
 		      rp->r_backoff = MIN(rp->r_backoff,MAX_BACKOFF); 
 		      if (rp->r_exec != NULL && rp->r_backoff > 1)
 			rp->r_backoff= 1;
 		  }
 		  else {
+		      printf("RS: restarting %s\n", rp->r_cmd);
 		      start_service(rp, 0, &ep);	/* direct restart */
 	  	      m_ptr->RS_ENDPOINT = ep;
 			/* Do this even if no I/O happens with the ioctl, in
@@ -599,7 +658,7 @@ rp->r_restarts= 0;
 	      break;
 	  }
       }
-  }
+  } 
 }
 
 /*===========================================================================*
@@ -692,17 +751,21 @@ endpoint_t *endpoint;
   int child_proc_nr_e, child_proc_nr_n;		/* child process slot */
   pid_t child_pid;				/* child's process id */
   char *file_only;
-  int s, use_copy;
+  int s, use_copy, slot_nr;
   struct priv *privp;
   message m;
 
   use_copy= (rp->r_exec != NULL);
 
+
   /* Now fork and branch for parent and child process (and check for error). */
-  if (use_copy)
+  if (use_copy) {
+  if(rs_verbose) printf("RS: fork_nb..\n");
 	child_pid= fork_nb();
-  else
+  } else {
+  if(rs_verbose) printf("RS: fork regular..\n");
 	child_pid = fork();
+  }
 
   switch(child_pid) {					/* see fork(2) */
   case -1:						/* fork failed */
@@ -718,6 +781,7 @@ endpoint_t *endpoint;
 				 * nice values.
 				 */
       setuid(rp->r_uid);
+      cpf_reload();			/* Tell kernel about grant table  */
       if (!use_copy)
       {
 	execve(rp->r_argv[0], rp->r_argv, NULL);	/* POSIX execute */
@@ -725,10 +789,20 @@ endpoint_t *endpoint;
 	execve(file_only, rp->r_argv, NULL);		/* POSIX execute */
       }
       printf("RS: exec failed for %s: %d\n", rp->r_argv[0], errno);
-      exit(EXEC_FAILED);				/* terminate child */
+      slot_nr= rp-rproc;
+      s= write(exec_pipe[1], &slot_nr, sizeof(slot_nr));
+      if (s != sizeof(slot_nr))
+	printf("RS: write to exec pipe failed: %d/%d\n", s, errno);
+      exit(1);						/* terminate child */
 
   default:						/* parent process */
+#if 0
+  if(rs_verbose) printf("RS: parent forked, pid %d..\n", child_pid);
+#endif
       child_proc_nr_e = getnprocnr(child_pid);		/* get child slot */ 
+#if 0
+  if(rs_verbose) printf("RS: forked into %d..\n", child_proc_nr_e);
+#endif
       break;						/* continue below */
   }
 
@@ -760,14 +834,23 @@ endpoint_t *endpoint;
       return(s);					/* return error */
   }
 
+  s= ds_publish_u32(rp->r_label, child_proc_nr_e);
+  if (s != OK)
+	printf("RS: start_service: ds_publish_u32 failed: %d\n", s);
+ else if(rs_verbose)
+	printf("RS: start_service: ds_publish_u32 done: %s -> %d\n", 
+  		rp->r_label, child_proc_nr_e);
+
   if (rp->r_dev_nr > 0) {				/* set driver map */
-      if ((s=mapdriver(child_proc_nr_e, rp->r_dev_nr, rp->r_dev_style,
-	!!use_copy /* force */)) < 0) {
-          report("RS", "couldn't map driver", errno);
+      if ((s=mapdriver5(rp->r_label, strlen(rp->r_label),
+	      rp->r_dev_nr, rp->r_dev_style, !!use_copy /* force */)) < 0) {
+          report("RS", "couldn't map driver (continuing)", errno);
+#if 0
           rp->r_flags |= RS_EXITING;			/* expect exit */
 	  if(child_pid > 0) kill(child_pid, SIGKILL);	/* kill driver */
 	  else report("RS", "didn't kill pid", child_pid);
 	  return(s);					/* return error */
+#endif
       }
   }
 
@@ -792,6 +875,7 @@ endpoint_t *endpoint;
   rproc_ptr[child_proc_nr_n] = rp;		/* mapping for fast access */
 
   if(endpoint) *endpoint = child_proc_nr_e;	/* send back child endpoint */
+
   return(OK);
 }
 
@@ -914,6 +998,8 @@ struct rproc *rp;
 		reason= "killed";
 	else if (rp->r_flags & RS_CRASHED)
 		reason= "crashed";
+	else if (rp->r_flags & RS_SIGNALED)
+		reason= "signaled";
 	else
 	{
 		printf(
@@ -924,7 +1010,7 @@ struct rproc *rp;
 	sprintf(incarnation_str, "%d", rp->r_restarts);
 
  	if(rs_verbose) {
-	  printf("RS: should call script '%s'\n", rp->r_script);
+	  printf("RS: calling script '%s'\n", rp->r_script);
 	  printf("RS: sevice name: '%s'\n", rp->r_label);
 	  printf("RS: reason: '%s'\n", reason);
 	  printf("RS: incarnation: '%s'\n", incarnation_str);
@@ -939,10 +1025,6 @@ struct rproc *rp;
 	case 0:
 		execle(rp->r_script, rp->r_script, rp->r_label, reason,
 			incarnation_str, NULL, NULL);
-		{
-			extern int kputc_use_private_grants;
-			kputc_use_private_grants= 1;
-		}
 		printf("RS: run_script: execl '%s' failed: %s\n",
 			rp->r_script, strerror(errno));
 		exit(1);
@@ -969,8 +1051,13 @@ struct rproc *rp;
 struct priv *privp;
 {
 	int i, src_bits_per_word, dst_bits_per_word, src_word, dst_word,
-		src_bit, call_nr;
+		src_bit, call_nr, chunk, bit, priv_id, slot_nr;
+	endpoint_t proc_nr_e;
+	size_t len;
 	unsigned long mask;
+	char *p, *q;
+	struct rproc *tmp_rp;
+	char label[MAX_LABEL_LEN+1];
 
 	/* Clear s_k_call_mask */
 	memset(privp->s_k_call_mask, '\0', sizeof(privp->s_k_call_mask));
@@ -985,8 +1072,10 @@ struct priv *privp;
 			if (!(rp->r_call_mask[src_word] & mask))
 				continue;
 			call_nr= src_word*src_bits_per_word+src_bit;
+#if 0
 			if(rs_verbose)
 			  printf("RS: init_privs: system call %d\n", call_nr);
+#endif
 			dst_word= call_nr / dst_bits_per_word;
 			mask= (1UL << (call_nr % dst_bits_per_word));
 			if (dst_word >= CALL_MASK_SIZE)
@@ -996,6 +1085,101 @@ struct priv *privp;
 					call_nr);
 			}
 			privp->s_k_call_mask[dst_word] |= mask;
+		}
+	}
+
+	/* Clear s_ipc_to and s_ipc_sendrec */
+	memset(&privp->s_ipc_to, '\0', sizeof(privp->s_ipc_to));
+	memset(&privp->s_ipc_sendrec, '\0', sizeof(privp->s_ipc_sendrec));
+
+	if (strlen(rp->r_ipc_list) != 0)
+	{
+		for (p= rp->r_ipc_list; p[0] != '\0'; p= q)
+		{
+			/* Skip leading space */
+			while (p[0] != '\0' && isspace((unsigned char)p[0]))
+				p++;
+
+			/* Find start of next word */
+			q= p;
+			while (q[0] != '\0' && !isspace((unsigned char)q[0]))
+				q++;
+			if (q == p)
+				continue;
+			len= q-p;
+			if (len+1 > sizeof(label))
+			{
+				printf(
+		"rs:init_privs: bad ipc list entry '.*s' for %s: too long\n",
+					len, p, rp->r_label);
+				continue;
+			}
+			memcpy(label, p, len);
+			label[len]= '\0';
+
+			if (strcmp(label, "SYSTEM") == 0)
+				proc_nr_e= SYSTEM;
+			else if (strcmp(label, "PM") == 0)
+				proc_nr_e= PM_PROC_NR;
+			else if (strcmp(label, "VFS") == 0)
+				proc_nr_e= FS_PROC_NR;
+			else if (strcmp(label, "RS") == 0)
+				proc_nr_e= RS_PROC_NR;
+			else if (strcmp(label, "LOG") == 0)
+				proc_nr_e= LOG_PROC_NR;
+			else if (strcmp(label, "TTY") == 0)
+				proc_nr_e= TTY_PROC_NR;
+			else if (strcmp(label, "DS") == 0)
+				proc_nr_e= DS_PROC_NR;
+			else
+			{
+				/* Try to find process */
+				for (slot_nr = 0; slot_nr < NR_SYS_PROCS;
+					slot_nr++)
+				{
+					tmp_rp = &rproc[slot_nr];
+					if (!(tmp_rp->r_flags & RS_IN_USE))
+						continue;
+					if (strcmp(tmp_rp->r_label, label) == 0)
+						break;
+				}
+				if (slot_nr >= NR_SYS_PROCS)
+				{
+					printf(
+					"init_privs: unable to find '%s'\n",
+						label);
+					continue;
+				}
+				proc_nr_e= tmp_rp->r_proc_nr_e;
+			}
+
+			priv_id= sys_getprivid(proc_nr_e);
+			if (priv_id < 0)
+			{
+				printf(
+			"init_privs: unable to get priv_id for '%s': %d\n",
+					label, priv_id);
+				continue;
+			}
+			chunk= (priv_id / (sizeof(bitchunk_t)*8));
+			bit= (priv_id % (sizeof(bitchunk_t)*8));
+			privp->s_ipc_to.chunk[chunk] |= (1 << bit);
+			privp->s_ipc_sendrec.chunk[chunk] |= (1 << bit);
+		}
+	}
+	else
+	{
+		for (i= 0; i<sizeof(privp->s_ipc_to)*8; i++)
+		{
+			chunk= (i / (sizeof(bitchunk_t)*8));
+			bit= (i % (sizeof(bitchunk_t)*8));
+			privp->s_ipc_to.chunk[chunk] |= (1 << bit);
+		}
+		for (i= 0; i<sizeof(privp->s_ipc_sendrec)*8; i++)
+		{
+			chunk= (i / (sizeof(bitchunk_t)*8));
+			bit= (i % (sizeof(bitchunk_t)*8));
+			privp->s_ipc_sendrec.chunk[chunk] |= (1 << bit);
 		}
 	}
 }

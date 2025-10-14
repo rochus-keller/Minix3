@@ -189,6 +189,11 @@ PUBLIC void prot_init(void)
 	{ level0_call, LEVEL0_VECTOR, TASK_PRIVILEGE },
   };
 
+  /* Click-round kernel. */
+  if(kinfo.data_base % CLICK_SIZE)
+	minix_panic("kinfo.data_base not aligned", NO_NUM);
+  kinfo.data_size = ((kinfo.data_size+CLICK_SIZE-1)/CLICK_SIZE) * CLICK_SIZE;
+
   /* Build gdt and idt pointers in GDT where the BIOS expects them. */
   dtp= (struct desctableptr_s *) &gdt[GDT_INDEX];
   * (u16_t *) dtp->limit = (sizeof gdt) - 1;
@@ -307,7 +312,10 @@ PUBLIC void alloc_segments(register struct proc *rp)
           code_bytes = data_bytes;	/* common I&D, poor protect */
       else
           code_bytes = (phys_bytes) rp->p_memmap[T].mem_len << CLICK_SHIFT;
-      privilege = (iskernelp(rp)) ? TASK_PRIVILEGE : USER_PRIVILEGE;
+      if( (iskernelp(rp)))
+	privilege = TASK_PRIVILEGE;
+      else
+	privilege = USER_PRIVILEGE;
       init_codeseg(&rp->p_seg.p_ldt[CS_LDT_INDEX],
           (phys_bytes) rp->p_memmap[T].mem_phys << CLICK_SHIFT,
           code_bytes, privilege);
@@ -320,5 +328,38 @@ PUBLIC void alloc_segments(register struct proc *rp)
       rp->p_reg.ss =
       rp->p_reg.es =
       rp->p_reg.ds = (DS_LDT_INDEX*DESC_SIZE) | TI | privilege;
+}
+
+/*===========================================================================*
+ *				prot_set_kern_seg_limit			     *
+ *===========================================================================*/
+PUBLIC int prot_set_kern_seg_limit(vir_bytes limit)
+{
+	struct proc *rp;
+	vir_bytes prev;
+	int orig_click;
+	int incr_clicks;
+
+	if(limit <= kinfo.data_base) {
+		kprintf("prot_set_kern_seg_limit: limit bogus\n");
+		return EINVAL;
+	}
+
+	/* Do actual increase. */
+	orig_click = kinfo.data_size / CLICK_SIZE;
+	kinfo.data_size = limit - kinfo.data_base;
+	incr_clicks = kinfo.data_size / CLICK_SIZE - orig_click;
+
+	prot_init();
+
+	/* Increase kernel processes too. */
+	for (rp = BEG_PROC_ADDR; rp < END_PROC_ADDR; ++rp) {
+		if (RTS_ISSET(rp, SLOT_FREE) || !iskernelp(rp))
+			continue;
+		rp->p_memmap[S].mem_len += incr_clicks;
+		alloc_segments(rp);
+	}
+
+	return OK;
 }
 

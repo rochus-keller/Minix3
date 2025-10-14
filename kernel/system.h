@@ -71,14 +71,12 @@ _PROTOTYPE( int do_nice, (message *m_ptr) );
 
 _PROTOTYPE( int do_copy, (message *m_ptr) );	
 #define do_vircopy 	do_copy
-#define do_physcopy 	do_copy
 #if ! (USE_VIRCOPY || USE_PHYSCOPY)
 #define do_copy do_unused
 #endif
 
 _PROTOTYPE( int do_vcopy, (message *m_ptr) );		
 #define do_virvcopy 	do_vcopy
-#define do_physvcopy 	do_vcopy
 #if ! (USE_VIRVCOPY || USE_PHYSVCOPY)
 #define do_vcopy do_unused
 #endif
@@ -92,9 +90,6 @@ _PROTOTYPE( int do_memset, (message *m_ptr) );
 #if ! USE_MEMSET
 #define do_memset do_unused
 #endif
-
-_PROTOTYPE( int do_vm_setbuf, (message *m_ptr) );
-_PROTOTYPE( int do_vm_map, (message *m_ptr) );
 
 _PROTOTYPE( int do_abort, (message *m_ptr) );
 #if ! USE_ABORT
@@ -173,11 +168,15 @@ _PROTOTYPE( int do_setalarm, (message *m_ptr) );
 #define do_setalarm do_unused
 #endif
 
+_PROTOTYPE( int do_stime, (message *m_ptr) );	
+
 _PROTOTYPE( int do_safecopy, (message *m_ptr) );	
 _PROTOTYPE( int do_vsafecopy, (message *m_ptr) );	
 _PROTOTYPE( int do_iopenable, (message *m_ptr) );	
+_PROTOTYPE( int do_vmctl, (message *m_ptr) );	
 _PROTOTYPE( int do_setgrant, (message *m_ptr) );	
 _PROTOTYPE( int do_readbios, (message *m_ptr) );	
+_PROTOTYPE( int do_mapdma, (message *m_ptr) );	
 
 _PROTOTYPE( int do_sprofile, (message *m_ptr) );
 #if ! SPROFILE
@@ -185,14 +184,9 @@ _PROTOTYPE( int do_sprofile, (message *m_ptr) );
 #endif
 
 _PROTOTYPE( int do_cprofile, (message *m_ptr) );
-#if ! CPROFILE
-#define do_cprofile do_unused
-#endif
-
 _PROTOTYPE( int do_profbuf, (message *m_ptr) );
-#if ! CPROFILE
-#define do_profbuf do_unused
-#endif
+
+_PROTOTYPE( int do_mapdma, (message *m_ptr) );
 
 #endif	/* SYSTEM_H */
 

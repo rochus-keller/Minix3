@@ -35,7 +35,7 @@ from DL_ETH:
 | m_type	|  DL_PORT  | DL_PROC |	DL_COUNT |  DL_STAT   | DL_TIME |
 |_______________|___________|_________|__________|____________|_________|
 |		|           |         |          |            |         |
-| DL_INIT_REPLY	| minor dev | proc nr | rd_count |  0  | stat |  time   |
+| DL_CONF_REPLY	| minor dev | proc nr | rd_count |  0  | stat |  time   |
 |_______________|___________|_________|__________|____________|_________|
 |		|           |         |          |            |         |
 | DL_TASK_REPLY	| minor dev | proc nr | rd_count | err | stat |  time   |
@@ -50,6 +50,7 @@ from DL_ETH:
 #include <time.h>
 #include <unistd.h>
 #include <sys/svrctl.h>
+#include <minix/ds.h>
 
 #include "mq.h"
 #include "qp.h"
@@ -86,6 +87,10 @@ int killer_inet= 0;
 extern int inet_buf_debug;
 #endif
 
+#if HZ_DYNAMIC
+u32_t system_hz;
+#endif
+
 _PROTOTYPE( void main, (void) );
 
 FORWARD _PROTOTYPE( void nw_conf, (void) );
@@ -95,7 +100,8 @@ PUBLIC void main()
 {
 	mq_t *mq;
 	int r;
-	int source, timerand, fd;
+	int source, m_type, timerand, fd;
+	u32_t tasknr;
 	struct fssignon device;
 #ifdef __minix_vmd
 	struct systaskinfo info;
@@ -106,6 +112,10 @@ PUBLIC void main()
 #if DEBUG
 	printf("Starting inet...\n");
 	printf("%s\n", version);
+#endif
+
+#if HZ_DYNAMIC
+	system_hz = sys_hz();
 #endif
 
 	/* Read configuration. */
@@ -121,7 +131,7 @@ PUBLIC void main()
 			timerand= 0;
 		else
 		{
-			printf("unable to read random data from %s: %s\n",
+			printf("inet: unable to read random data from %s: %s\n",
 				RANDOM_DEV_NAME, r == -1 ? strerror(errno) :
 				r == 0 ? "EOF" : "not enough data");
 		}
@@ -129,12 +139,12 @@ PUBLIC void main()
 	}
 	else
 	{
-		printf("unable to open random device %s: %s\n",
+		printf("inet: unable to open random device %s: %s\n",
 			RANDOM_DEV_NAME, strerror(errno));
 	}
 	if (timerand)
 	{
-		printf("using current time for random-number seed\n");
+		printf("inet: using current time for random-number seed\n");
 #ifdef __minix_vmd
 		r= sysutime(UTIME_TIMEOFDAY, &tv);
 #else /* Minix 3 */
@@ -157,8 +167,10 @@ PUBLIC void main()
 #else /* Minix 3 */
 
 	/* Our new identity as a server. */
-	if ((this_proc = getprocnr()) < 0)
-		ip_panic(( "unable to get own process nr\n"));
+	r= ds_retrieve_u32("inet", &tasknr);
+	if (r != OK)
+		ip_panic(("inet: ds_retrieve_u32 failed for 'inet': %d", r));
+	this_proc= tasknr;
 #endif
 
 	/* Register the device group. */
@@ -229,6 +241,7 @@ PUBLIC void main()
 		}
 		reset_time();
 		source= mq->mq_mess.m_source;
+		m_type= mq->mq_mess.m_type;
 		if (source == FS_PROC_NR)
 		{
 			sr_rec(mq);
@@ -240,25 +253,26 @@ PUBLIC void main()
 			mq_free(mq);
 		}
 #else /* Minix 3 */
-		else if (mq->mq_mess.m_type == SYN_ALARM)
+		else if (m_type == SYN_ALARM)
 		{
 			clck_tick(&mq->mq_mess);
 			mq_free(mq);
 		} 
-		else if (mq->mq_mess.m_type == PROC_EVENT)
+		else if (m_type == PROC_EVENT)
 		{
 			/* signaled */ 
 			/* probably SIGTERM */
 			mq_free(mq);
 		} 
-		else if (mq->mq_mess.m_type & NOTIFY_MESSAGE)
+		else if (m_type & NOTIFY_MESSAGE)
 		{
 			/* A driver is (re)started. */
 			eth_check_drivers(&mq->mq_mess);
 			mq_free(mq);
 		}
 #endif
-		else if (mq->mq_mess.m_type == DL_TASK_REPLY)
+		else if (m_type == DL_CONF_REPLY || m_type == DL_TASK_REPLY ||
+			m_type == DL_NAME_REPLY || m_type == DL_STAT_REPLY)
 		{
 			eth_rec(&mq->mq_mess);
 			mq_free(mq);
@@ -309,7 +323,7 @@ int line;
 PUBLIC void inet_panic()
 {
 	printf("\ninet stacktrace: ");
-	stacktrace();
+	util_stacktrace();
 #ifdef __minix_vmd
 	sys_abort(RBT_PANIC);
 #else /* Minix 3 */
