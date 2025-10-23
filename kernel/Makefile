@@ -51,7 +51,7 @@ mpx.o: mpx386.S
 	$(CC) -c $(CFLAGS) mpx386.S -o mpx.o
 
 klib.o: klib386.S
-	$(AS) $(ASFLAGS) klib386.S -o klib.o
+	$(CC) -c $(CFLAGS) klib386.S -o klib.o
 
 # Pattern rule for C files
 %.o: %.c

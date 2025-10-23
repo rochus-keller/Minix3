@@ -34,16 +34,7 @@
 # will be at the start of the data segment of the kernel and will be read
 # and modified by the boot monitor before the kernel starts.
 
-# sections
-.text
-begtext:
-.section .rom
-begrom:
-.data
-begdata:
-.bss
-begbss:
-
+# Headers and constants (use .S preprocessing or define constants manually)
 #include <minix/config.h>
 #include <minix/const.h>
 #include <minix/com.h>
@@ -52,17 +43,29 @@ begbss:
 #include "protect.h"
 #include "sconst.h"
 
-/* Selected 386 tss offsets. */
+.intel_syntax noprefix
+
+# Sections and section-start labels
+.section .text
+.globl MINIX
+.globl begtext
+begtext:
+MINIX:                          # entry point for the MINIX kernel
+    jmp over_flags              # skip over the next few bytes
+    .word CLICK_SHIFT           # for the monitor: memory granularity
+flags:
+    .word 0x01FD                # boot monitor flags (see original comment)
+    nop
+over_flags:
+
+
+# Selected 386 tss offsets
 #define TSS3_S_SP0 4
 
-# Exported functions
-# Note: in assembly language the .globl statement applied to a function name
-# is loosely equivalent to a prototype in C code -- it makes it possible to
-# link to an entity declared in the assembly code but does not create
-# the entity.
-
+# Exported functions/variables (without underscore prefix)
 .globl restart
 .globl save
+
 .globl divide_error
 .globl single_step_exception
 .globl nmi
@@ -79,7 +82,8 @@ begbss:
 .globl general_protection
 .globl page_fault
 .globl copr_error
-.globl hwint00		# handlers for hardware interrupts
+
+.globl hwint00
 .globl hwint01
 .globl hwint02
 .globl hwint03
@@ -95,457 +99,378 @@ begbss:
 .globl hwint13
 .globl hwint14
 .globl hwint15
+
 .globl s_call
 .globl p_s_call
 .globl level0_call
 
-# Exported variables.
 .globl begbss
 .globl begdata
 
-.text
-#*===========================================================================*
-#* MINIX *
-#*===========================================================================*
-MINIX:				# this is the entry point for the MINIX kernel
-	jmp	over_flags		# skip over the next few bytes
-	.word	CLICK_SHIFT		# for the monitor: memory granularity
-flags:
-	.word	0x01FD			# boot monitor flags:
-					# call in 386 mode, make bss, make stack,
-					# load high, don't patch, will return,
-					# uses generic INT, memory vector,
-					# new boot code return
-	nop				# extra byte to sync up disassembler
-over_flags:
+# --------------------------
+# Entry/setup
+# --------------------------
 
-# Set up a C stack frame on the monitor stack. (The monitor sets cs and ds
-# right. The ss descriptor still references the monitor data segment.)
-	movzwl	%sp, %esp		# monitor stack is a 16 bit stack
-	push	%ebp
-	mov	%esp, %ebp
-	push	%esi
-	push	%edi
-	cmpl	$0, 4(%ebp)		# monitor return vector is
-	jz	noret			# nonzero if return possible
-	incl	(mon_return)
-noret:	movl	%esp, (mon_sp)		# save stack pointer for later return
+# Set up a C stack frame on the monitor stack. (Monitor set cs/ds; ss is monitor data.)
+    movzx esp, sp               # monitor stack is 16-bit
+    push ebp
+    mov  ebp, esp
+    push esi
+    push edi
+    cmp  dword ptr [ebp + 4], 0 # monitor return vector nonzero if return possible
+    jz   noret
+    inc  dword ptr [mon_return]
+noret:
+    mov  dword ptr [mon_sp], esp
 
-# Copy the monitor global descriptor table to the address space of kernel and
-# switch over to it. Prot_init() can then update it with immediate effect.
-
-	sgdt	(_gdt+GDT_SELECTOR)	# get the monitor gdtr
-	movl	(_gdt+GDT_SELECTOR+2), %esi	# absolute address of GDT
-	movl	$_gdt, %ebx		# address of kernel GDT
-	movl	$8*8, %ecx		# copying eight descriptors
+# Copy the monitor GDT into kernel space and switch to it so prot_init() updates take effect.
+    sgdt [gdt + GDT_SELECTOR]               # get the monitor GDTR (limit/base written to mem)
+    mov  esi, dword ptr [gdt + GDT_SELECTOR + 2]  # absolute address of monitor GDT base
+    lea  ebx, [gdt]                         # address of kernel GDT buffer
+    mov  ecx, 8*8                           # copy eight descriptors (8 bytes each)
 copygdt:
-	movb	%es:(%esi), %al
-	movb	%al, (%ebx)
-	inc	%esi
-	inc	%ebx
-	loop	copygdt
-	movl	(_gdt+DS_SELECTOR+2), %eax	# base of kernel data
-	andl	$0x00FFFFFF, %eax	# only 24 bits
-	addl	$_gdt, %eax		# eax = vir2phys(gdt)
-	movl	%eax, (_gdt+GDT_SELECTOR+2)	# set base of GDT
-	lgdt	(_gdt+GDT_SELECTOR)	# switch over to kernel GDT
+    mov  al, byte ptr es:[esi]
+    mov  byte ptr [ebx], al
+    inc  esi
+    inc  ebx
+    loop copygdt
+
+    mov  eax, dword ptr [gdt + DS_SELECTOR + 2]   # base of kernel data (24-bit in descriptor)
+    and  eax, 0x00FFFFFF
+    add  eax, OFFSET gdt                          # eax = vir2phys(gdt)
+    mov  dword ptr [gdt + GDT_SELECTOR + 2], eax  # set base of GDT
+    lgdt [gdt + GDT_SELECTOR]                     # switch to kernel GDT
 
 # Locate boot parameters, set up kernel segment registers and stack.
-	movl	8(%ebp), %ebx		# boot parameters offset
-	movl	12(%ebp), %edx		# boot parameters length
-	movl	16(%ebp), %eax		# address of a.out headers
-	movl	%eax, (aout)
-	mov	%ds, %ax		# kernel data
-	mov	%ax, %es
-	mov	%ax, %fs
-	mov	%ax, %gs
-	mov	%ax, %ss
-	movl	$k_stktop, %esp		# set sp to point to the top of kernel stack
+    mov  ebx, dword ptr [ebp + 8]    # boot parameters offset
+    mov  edx, dword ptr [ebp + 12]   # boot parameters length
+    mov  eax, dword ptr [ebp + 16]   # address of a.out headers
+    mov  dword ptr [aout], eax
 
-# Call C startup code to set up a proper environment to run main().
-	push	%edx
-	push	%ebx
-	push	$SS_SELECTOR
-	push	$DS_SELECTOR
-	push	$CS_SELECTOR
-	call	cstart			# cstart(cs, ds, mds, parmoff, parmlen)
-	add	$5*4, %esp
+    mov  ax, ds       # kernel data selector already in ds
+    mov  es, ax
+    mov  fs, ax
+    mov  gs, ax
+    mov  ss, ax
+    mov  esp, k_stktop
 
-# Reload gdtr, idtr and the segment registers to global descriptor table set
-# up by prot_init().
+# Call C startup to set up environment for main()
+    push edx
+    push ebx
+    push SS_SELECTOR
+    push DS_SELECTOR
+    push CS_SELECTOR
+    call cstart                     # cstart(cs, ds, mds, parmoff, parmlen)
+    add  esp, 5*4
 
-	lgdt	(_gdt+GDT_SELECTOR)
-	lidt	(_gdt+IDT_SELECTOR)
-	ljmp	$CS_SELECTOR, $csinit
+# Reload GDTR/IDTR and segment registers as set by prot_init()
+    lgdt [gdt + GDT_SELECTOR]
+    lidt [gdt + IDT_SELECTOR]
+
+    ljmp CS_SELECTOR, csinit
 csinit:
-	mov	$DS_SELECTOR, %ax
-	mov	%ax, %ds
-	mov	%ax, %es
-	mov	%ax, %fs
-	mov	%ax, %gs
-	mov	%ax, %ss
-	mov	$TSS_SELECTOR, %ax	# no other TSS is used
-	ltr	%ax
-	push	$0			# set flags to known good state
-	popf				# esp, clear nested task and int enable
+    mov  ax, DS_SELECTOR
+    mov  ds, ax
+    mov  es, ax
+    mov  fs, ax
+    mov  gs, ax
+    mov  ss, ax
+    mov  ax, TSS_SELECTOR          # no other TSS is used
+    ltr  ax
 
-	jmp	_main			# main()
+    push 0                         # set EFLAGS to a known state (clear NT/IF as required)
+    popf
 
+    jmp main
 
-#*===========================================================================*
-#* interrupt handlers *
-#* interrupt handlers for 386 32-bit protected mode *
-#*===========================================================================*
+# --------------------------
+# Interrupt handlers
+# --------------------------
 
-#*===========================================================================*
-#* hwint00 - 07 *
-#*===========================================================================*
-# Note this is a macro, it just looks like a subroutine.
+# Master PIC IRQ handlers (0..7)
 .macro hwint_master irq
-	call	save		/* save interrupted process state */
-	push	(irq_handlers+4*\irq)	/* irq_handlers[irq] */
-	call	intr_handle	/* intr_handle(irq_handlers[irq]) */
-	pop	%ecx
-	cmpl	$0, (irq_actids+4*\irq)	/* interrupt still active? */
-	jz	0f
-	inb	$INT_CTLMASK	/* get current mask */
-	orb	$(1<<\irq), %al	/* mask irq */
-	outb	%al, $INT_CTLMASK	/* disable the irq */
-0:	movb	$END_OF_INT, %al
-	outb	%al, $INT_CTL	/* reenable master 8259 */
-	ret			/* restart (another) process */
+    call save
+    push dword ptr [irq_handlers + 4*\irq]   # irq_handlers[irq]
+    call intr_handle
+    pop  ecx
+
+    cmp  dword ptr [irq_actids + 4*\irq], 0  # still active?
+    jz   0f
+    in   al, INT_CTLMASK                     # get current mask
+    or   al, (1 << \irq)                     # mask irq
+    out  INT_CTLMASK, al                     # disable the irq
+0:
+    mov  al, END_OF_INT
+    out  INT_CTL, al                         # EOI to master 8259
+    ret
 .endm
 
-# Each of these entry points is an expansion of the hwint_master macro
-	.align	16
-hwint00:		# Interrupt routine for irq 0 (the clock).
-	hwint_master 0
-
-	.align	16
-hwint01:		# Interrupt routine for irq 1 (keyboard)
-	hwint_master 1
-
-	.align	16
-hwint02:		# Interrupt routine for irq 2 (cascade!)
-	hwint_master 2
-
-	.align	16
-hwint03:		# Interrupt routine for irq 3 (second serial)
-	hwint_master 3
-
-	.align	16
-hwint04:		# Interrupt routine for irq 4 (first serial)
-	hwint_master 4
-
-	.align	16
-hwint05:		# Interrupt routine for irq 5 (XT winchester)
-	hwint_master 5
-
-	.align	16
-hwint06:		# Interrupt routine for irq 6 (floppy)
-	hwint_master 6
-
-	.align	16
-hwint07:		# Interrupt routine for irq 7 (printer)
-	hwint_master 7
-
-#*===========================================================================*
-#* hwint08 - 15 *
-#*===========================================================================*
-# Note this is a macro, it just looks like a subroutine.
+# Slave PIC IRQ handlers (8..15)
 .macro hwint_slave irq
-	call	save		/* save interrupted process state */
-	push	(irq_handlers+4*\irq)	/* irq_handlers[irq] */
-	call	intr_handle	/* intr_handle(irq_handlers[irq]) */
-	pop	%ecx
-	cmpl	$0, (irq_actids+4*\irq)	/* interrupt still active? */
-	jz	0f
-	inb	$INT2_CTLMASK
-	orb	$(1<<(\irq-8)), %al
-	outb	%al, $INT2_CTLMASK	/* disable the irq */
-0:	movb	$END_OF_INT, %al
-	outb	%al, $INT_CTL	/* reenable master 8259 */
-	outb	%al, $INT2_CTL	/* reenable slave 8259 */
-	ret			/* restart (another) process */
+    call save
+    push dword ptr [irq_handlers + 4*\irq]   # irq_handlers[irq]
+    call intr_handle
+    pop  ecx
+
+    cmp  dword ptr [irq_actids + 4*\irq], 0  # still active?
+    jz   0f
+    in   al, INT2_CTLMASK
+    or   al, (1 << (\irq - 8))
+    out  INT2_CTLMASK, al                    # disable the irq on slave
+0:
+    mov  al, END_OF_INT
+    out  INT_CTL,  al                        # EOI to master 8259
+    out  INT2_CTL, al                        # EOI to slave 8259
+    ret
 .endm
 
-# Each of these entry points is an expansion of the hwint_slave macro
-	.align	16
-hwint08:		# Interrupt routine for irq 8 (realtime clock)
-	hwint_slave 8
+.p2align 4
+hwint00:    hwint_master 0       # clock
+.p2align 4
+hwint01:    hwint_master 1       # keyboard
+.p2align 4
+hwint02:    hwint_master 2       # cascade
+.p2align 4
+hwint03:    hwint_master 3       # second serial
+.p2align 4
+hwint04:    hwint_master 4       # first serial
+.p2align 4
+hwint05:    hwint_master 5       # XT winchester
+.p2align 4
+hwint06:    hwint_master 6       # floppy
+.p2align 4
+hwint07:    hwint_master 7       # printer
 
-	.align	16
-hwint09:		# Interrupt routine for irq 9 (irq 2 redirected)
-	hwint_slave 9
+.p2align 4
+hwint08:    hwint_slave 8        # realtime clock
+.p2align 4
+hwint09:    hwint_slave 9        # irq 2 redirected
+.p2align 4
+hwint10:    hwint_slave 10
+.p2align 4
+hwint11:    hwint_slave 11
+.p2align 4
+hwint12:    hwint_slave 12
+.p2align 4
+hwint13:    hwint_slave 13       # FPU exception
+.p2align 4
+hwint14:    hwint_slave 14       # AT winchester
+.p2align 4
+hwint15:    hwint_slave 15
 
-	.align	16
-hwint10:		# Interrupt routine for irq 10
-	hwint_slave 10
-
-	.align	16
-hwint11:		# Interrupt routine for irq 11
-	hwint_slave 11
-
-	.align	16
-hwint12:		# Interrupt routine for irq 12
-	hwint_slave 12
-
-	.align	16
-hwint13:		# Interrupt routine for irq 13 (FPU exception)
-	hwint_slave 13
-
-	.align	16
-hwint14:		# Interrupt routine for irq 14 (AT winchester)
-	hwint_slave 14
-
-	.align	16
-hwint15:		# Interrupt routine for irq 15
-	hwint_slave 15
-
-#*===========================================================================*
-#* save *
-#*===========================================================================*
-# Save for protected mode.
-# This is much simpler than for 8086 mode, because the stack already points
-# into the process table, or has already been switched to the kernel stack.
-
-	.align	16
+# --------------------------
+# save: save interrupted context (protected mode)
+# --------------------------
+.p2align 4
 save:
-	cld				# set direction flag to a known value
-	pushal				# save "general" registers
-	push	%ds			# save ds
-	push	%es			# save es
-	push	%fs			# save fs
-	push	%gs			# save gs
-	mov	%ss, %dx		# ss is kernel data segment
-	mov	%dx, %ds		# load rest of kernel segments
-	mov	%dx, %es		# kernel does not use fs, gs
-	movl	%esp, %eax		# prepare to return
-	incl	(k_reenter)		# from -1 if not reentering
-	jnz	set_restart1		# stack is already kernel stack
-	movl	$k_stktop, %esp
-	push	$restart		# build return address for int handler
-	xorl	%ebp, %ebp		# for stacktrace
-	jmp	*RETADR-P_STACKBASE(%eax)
-set_restart1:
-	push	$restart
-	jmp	*RETADR-P_STACKBASE(%eax)
+    cld
+    pushad
+    push ds
+    push es
+    push fs
+    push gs
 
-#*===========================================================================*
-#* s_call *
-#*===========================================================================*
-	.align	16
+    mov  dx, ss                 # ss is kernel data segment
+    mov  ds, dx
+    mov  es, dx                 # fs/gs unused by kernel
+
+    mov  eax, esp
+    inc  byte ptr [k_reenter]   # from -1 if not reentering
+    jnz  set_restart1
+
+    mov  esp, k_stktop
+    push OFFSET restart         # build return address for int handler
+    xor  ebp, ebp               # for stacktrace
+    jmp  dword ptr [eax + (RETADR - P_STACKBASE)]
+
+.p2align 2
+set_restart1:
+    push OFFSET restart1
+    jmp  dword ptr [eax + (RETADR - P_STACKBASE)]
+
+# --------------------------
+# s_call / p_s_call: system calls from tasks/processes
+# --------------------------
+.p2align 4
 s_call:
 p_s_call:
-	cld				# set direction flag to a known value
-	sub	$6*4, %esp		# skip RETADR, eax, ecx, edx, ebx, est
-	push	%ebp			# stack already points into proc table
-	push	%esi
-	push	%edi
-	push	%ds
-	push	%es
-	push	%fs
-	push	%gs
-	mov	%ss, %dx
-	mov	%dx, %ds
-	mov	%dx, %es
-	incl	(k_reenter)
-	movl	%esp, %esi		# assumes P_STACKBASE == 0
-	movl	$k_stktop, %esp
-	xorl	%ebp, %ebp		# for stacktrace
-					# end of inline save
-					# now set up parameters for sys_call()
-	push	%ebx			# pointer to user message
-	push	%eax			# src/dest
-	push	%ecx			# SEND/RECEIVE/BOTH
-	call	sys_call		# sys_call(function, src_dest, m_ptr)
-					# caller is now explicitly in proc_ptr
-	movl	(proc_ptr), %ebx	# return directly to caller
-	addl	$3*4, %esp		# clean up parameters
-	movl	%eax, AXREG(%ebx)	# sys_call MUST PRESERVE si, di, bp
+    cld
+    sub  esp, 6*4               # skip RETADR, eax, ecx, edx, ebx, est
+    push ebp
+    push esi
+    push edi
+    push ds
+    push es
+    push fs
+    push gs
+    mov  dx, ss
+    mov  ds, dx
+    mov  es, dx
+    inc  byte ptr [k_reenter]
+    mov  esi, esp               # assumes P_STACKBASE == 0
+    mov  esp, k_stktop
+    xor  ebp, ebp               # for stacktrace
 
-#*===========================================================================*
-#* restart *
-#*===========================================================================*
+    # Parameters for sys_call(function, src_dest, m_ptr)
+    push ebx                    # m_ptr
+    push eax                    # src/dest
+    push ecx                    # SEND/RECEIVE/BOTH
+    call sys_call
+    # caller is now explicitly in proc_ptr
+    mov  dword ptr [esi + AXREG], eax   # sys_call must preserve si
+
+    # fallthrough to restart
+
+# --------------------------
+# restart current/next process
+# --------------------------
 restart:
-
-# Restart the current process or the next process if it is set.
-
-	cmpl	$0, (next_ptr)		# see if another process is scheduled
-	jz	0f
-	movl	(next_ptr), %eax
-	movl	%eax, (proc_ptr)
-	movl	$0, (next_ptr)
+    cmp  dword ptr [next_ptr], 0
+    jz   0f
+    mov  eax, dword ptr [next_ptr]
+    mov  dword ptr [proc_ptr], eax
+    mov  dword ptr [next_ptr], 0
 0:
-	cmpl	$0, (sched_ticks)	# check if quantum is up
-	jle	switch_ticks		# or interrupts were masked
-check_sigs:
-	movl	(proc_ptr), %esp	# will assume P_STACKBASE == 0
-	lldt	P_LDT_SEL(%esp)		# enable process' segment descriptors
-	movl	$TSS3_S_SP0+tss, %eax	# set kernel stack pointer in tss
-	movl	%esp, (%eax)
-	decl	(k_reenter)
-	pop	%gs
-	pop	%fs
-	pop	%es
-	pop	%ds
-	popal
-	addl	$4, %esp		# skip return address
-	iret				# continue process
+    mov  esp, dword ptr [proc_ptr]      # assume P_STACKBASE == 0
+    lldt word ptr [esp + P_LDT_SEL]     # enable process' segment descriptors
+    lea  eax, [esp + P_STACKTOP]        # arrange TSS.esp0
+    mov  dword ptr [tss + TSS3_S_SP0], eax
+restart1:
+    dec  byte ptr [k_reenter]
+    pop  gs
+    pop  fs
+    pop  es
+    pop  ds
+    popad
+    add  esp, 4                 # skip return address
+    iretd
 
-switch_ticks:
-	movl	(bill_ptr), %eax	# pay the current process
-	incl	COUNTER(%eax)		# for the tick it last ran
-	movl	$1, (sched_ticks)	# reset quantum
-	cmpl	(proc_ptr), %eax	# is it the current process?
-	jne	check_sigs		# if not, don't reschedule
-	call	sched			# if it is, reschedule
-	jmp	check_sigs
+# --------------------------
+# exception stubs
+# --------------------------
+divide_error:            push DIVIDE_VECTOR      ; jmp exception
+                         jmp  exception
+single_step_exception:   push DEBUG_VECTOR
+                         jmp  exception
+nmi:                     push NMI_VECTOR
+                         jmp  exception
+breakpoint_exception:    push BREAKPOINT_VECTOR
+                         jmp  exception
+overflow:                push OVERFLOW_VECTOR
+                         jmp  exception
+bounds_check:            push BOUNDS_VECTOR
+                         jmp  exception
+inval_opcode:            push INVAL_OP_VECTOR
+                         jmp  exception
+copr_not_available:      push COPROC_NOT_VECTOR
+                         jmp  exception
+double_fault:            push DOUBLE_FAULT_VECTOR
+                         jmp  errexception
+copr_seg_overrun:        push COPROC_SEG_VECTOR
+                         jmp  exception
+inval_tss:               push INVAL_TSS_VECTOR
+                         jmp  errexception
+segment_not_present:     push SEG_NOT_VECTOR
+                         jmp  errexception
+stack_exception:         push STACK_FAULT_VECTOR
+                         jmp  errexception
+general_protection:      push PROTECTION_VECTOR
+                         jmp  errexception
+page_fault:              push PAGE_FAULT_VECTOR
+                         jmp  errexception
+copr_error:              push COPROC_ERR_VECTOR
+                         jmp  exception
 
-#*===========================================================================*
-#* exception handlers *
-#*===========================================================================*
-divide_error:
-	push	$DIVIDE_VECTOR
-	jmp	exception
-
-single_step_exception:
-	push	$DEBUG_VECTOR
-	jmp	exception
-
-nmi:
-	push	$NMI_VECTOR
-	jmp	exception
-
-breakpoint_exception:
-	push	$BREAKPOINT_VECTOR
-	jmp	exception
-
-overflow:
-	push	$OVERFLOW_VECTOR
-	jmp	exception
-
-bounds_check:
-	push	$BOUNDS_VECTOR
-	jmp	exception
-
-inval_opcode:
-	push	$INVAL_OP_VECTOR
-	jmp	exception
-
-copr_not_available:
-	push	$COPROC_NOT_VECTOR
-	jmp	exception
-
-double_fault:
-	push	$DOUBLE_FAULT_VECTOR
-	jmp	errexception
-
-copr_seg_overrun:
-	push	$COPROC_SEG_VECTOR
-	jmp	exception
-
-inval_tss:
-	push	$INVAL_TSS_VECTOR
-	jmp	errexception
-
-segment_not_present:
-	push	$SEG_NOT_VECTOR
-	jmp	errexception
-
-stack_exception:
-	push	$STACK_FAULT_VECTOR
-	jmp	errexception
-
-general_protection:
-	push	$PROTECTION_VECTOR
-	jmp	errexception
-
-page_fault:
-	push	$PAGE_FAULT_VECTOR
-	jmp	errexception
-
-copr_error:
-	push	$COPROC_ERR_VECTOR
-	jmp	exception
-
-#*===========================================================================*
-#* exception *
-#*===========================================================================*
-# This is called for all exceptions which do not push an error code.
-
-	.align	16
+# --------------------------
+# exception common (no error code)
+# --------------------------
+.p2align 4
 exception:
-	#TODO sseg
-	push	$0			# push fake error code
-	#TODO sseg
-	push	%eax			# eax is scratch register
-	movl	4(%esp), %eax		# old eip
-	#TODO sseg
-	movl	%eax, 8(%esp)
-	movl	(%esp), %eax
-	#TODO sseg
-	movl	%eax, 4(%esp)
-	popl	%eax
-	call	save
-	push	%eax			# push exception vector
-	call	exception		# exception(vec_nr)
-	addl	$4, %esp
-	cli
-	ret
+    mov  dword ptr [trap_errno], 0
+    pop  dword ptr [ex_number]
+    jmp  exception1
 
-#*===========================================================================*
-#* errexception *
-#*===========================================================================*
-# This is called for all exceptions which do push an error code.
-
-	.align	16
+# --------------------------
+# exception with error code
+# --------------------------
+.p2align 4
 errexception:
-	#TODO sseg
-	push	%eax			# eax is scratch register
-	movl	4(%esp), %eax		# old eip
-	#TODO sseg
-	movl	%eax, 12(%esp)
-	movl	8(%esp), %eax		# old cs
-	#TODO sseg
-	movl	%eax, 8(%esp)
-	movl	4(%esp), %eax		# old error code
-	#TODO sseg
-	movl	%eax, 4(%esp)
-	popl	%eax
-	call	save
-	push	%eax			# push exception vector
-	call	exception		# exception(vec_nr)
-	addl	$4, %esp
-	cli
-	ret
+    pop  dword ptr [ex_number]
+    pop  dword ptr [trap_errno]
 
-#*===========================================================================*
-#* level0_call *
-#*===========================================================================*
+exception1:
+    push eax
+    mov  eax, dword ptr [esp + 0 + 4]        # old eip (top after push eax)
+    mov  dword ptr [old_eip], eax
+    movzx eax, word ptr [esp + 4 + 4]        # old cs
+    mov  dword ptr [old_cs], eax
+    mov  eax, dword ptr [esp + 8 + 4]        # old eflags
+    mov  dword ptr [old_eflags], eax
+    pop  eax
+
+    call save
+    push dword ptr [old_eflags]
+    push dword ptr [old_cs]
+    push dword ptr [old_eip]
+    push dword ptr [trap_errno]
+    push dword ptr [ex_number]
+    call exception                 # exception(ex_number, trap_errno, old_eip, old_cs, old_eflags)
+    add  esp, 5*4
+    ret
+
+# --------------------------
+# level0_call
+# --------------------------
 level0_call:
-	call	save
-	jmp	*(_level0_func)
+    call save
+    jmp  dword ptr [level0_func]
 
-#*===========================================================================*
-#* data *
-#*===========================================================================*
+# --------------------------
+# Data-like sections
+# --------------------------
 
-.data
-	.align	4
-.globl _idt
-.globl _gdt
-.globl _level0_func
+.section .rodata
+.globl begrom
+begrom:
+    .word 0x526F                # must be first data entry (magic #)
 
-_idt:	.space	(8+8*IDT_SIZE)	# space for IDT (8 spare bytes at start)
-_gdt:	.space	(8+8*GDT_SIZE)	# space for GDT (8 spare bytes at start)
+.section .data
+.globl begdata
+begdata:
 
-_level0_func:
-	.long	0
-
-.bss
-	.align	4
-.globl k_stack
+.section .bss
+.globl begbss
+begbss:
 k_stack:
-	.space	K_STACK_BYTES	# kernel stack
-k_stktop:			# top of kernel stack
+    .space K_STACK_BYTES
+k_stktop:
+
+# commons
+.comm ex_number, 4
+.comm trap_errno, 4
+.comm old_eip, 4
+.comm old_cs, 4
+.comm old_eflags, 4
+
+/*
+Notes on key translations:
+
+    ACK .sect mapped to GAS .section, and .data2 mapped to .word; .space and .comm are unchanged.
+
+    The ACK “o16” operand-size prefixes were unnecessary in GAS because explicit 16-bit operands (e.g., mov ax, ...)
+    automatically encode the correct prefix in 32-bit mode.
+
+    Segment override helpers eseg/sseg were expressed directly using es: on the memory operand or dropped where DS
+    already selects kernel data; e.g., es:[esi] for source in the GDT copy and plain [symbol] for kernel globals.
+
+    The ACK jmpf selector:label was translated to an immediate far jump jmp far CS_SELECTOR:csinit.
+
+    inb/outb pseudo-ops were translated to in/out with AL and immediate/DX ports (e.g., in al, INT_CTLMASK; out INT_CTL, al).
+
+    Memory operands of the form NAME(ebp)/RETADR-P_STACKBASE(eax) were converted to Intel addressing [reg + displacement],
+    using dword/word ptr where needed; the jump through a saved return slot is jmp dword ptr [eax + (RETADR - P_STACKBASE)].
+
+    All exported/global symbol names and their references were de-underscored (e.g., _restart→restart,
+    _sys_call→sys_call, _exception→exception, etc.).
+
+*/
