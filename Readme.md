@@ -4,6 +4,18 @@ A complete port of the Minix 3 operating system (book version from [minix3.org/d
 
 [![License: BSD](https://img.shields.io/badge/License-BSD-blue.svg)](LICENSE)
 
+**Status on 2025-10-24**
+
+After spending a considerable amount of time with the source code, I came to the conclusion that the Minix 3 design suffers from too many disadvantages to continue this route.
+
+The main finding so far is that the book only covers a fraction of the relevant parts necessary to build a working system. Minix 3 contains hundereds of assembly files written in ACK (Amsterdam Compiler Kit) syntax, not compatible with e.g. GCC or TCC. Not even the kernel is complete; the central IPC is actually implemented in assembler and linked with the kernel via some library not described in the book. The book's 3rd edition focuses more on the conceptual design and higher-level implementation, and only covers a fraction of the required parts. The impression conveyed (implicitly or explicitly) by the book that it describes a complete operating system down to the code level is therefore incorrect. The kernel does not consist of just a few kSLOC, as one might think, but requires a significant portion of the library, which is not even mentioned in the book source code, and a large part of this library code is assembler.
+
+Research confirms that Minix 3 is significantly slower than e.g. L4-based microkernels. Studies found Minix 3 to be approximately 182 times slower than Linux in process creation benchmarks, and 7-8 times slower than Linux in basic operations. Profiling studies of Minix 3 revealed that IPC functions scored disproportionately high in performance measurements due to interrupt delay effects - the CMOS timer interrupts were frequently delayed by IPC traps, making the assembly routines appear slower than they actually were. The real bottleneck was the message-passing architecture itself, not the assembly implementation. While post-2010 Minix versions moved away from ACK assembly syntax to more standard GNU assembler, the underlying reliance on low-level assembly for critical paths remained. Later versions of Minix 3 continued to suffer from the same core issues because the assembly optimizations couldn't overcome the fundamental microkernel overhead.
+
+It is therefore not worthwhile in any way to migrate the hundreds of assembler files. It is also not worthwhile to build a system based on this original code, as a large part of the code is unfortunately platform-dependent (and even compiler-dependent) due to the assembler, without this resulting in any significant advantage.
+
+Future readers of the book and the source code in the appendix should therefore be warned: you are only seeing "the tip of the iceberg"; the impression of completeness is an illusion.
+
 ## About
 
 **Minix 3** is a microkernel-based operating system designed for high reliability and fault tolerance. Originally written by Andrew S. Tanenbaum for educational purposes, it has influenced modern operating systems including Linux.

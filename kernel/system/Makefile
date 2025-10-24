@@ -46,6 +46,7 @@ SOURCES = \
 	do_sigreturn.c \
 	do_abort.c \
 	do_getinfo.c \
+	io_intr.c \
 
 OBJECTS = $(SOURCES:.c=.o)
 
